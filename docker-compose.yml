@@ -1,0 +1,21 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - nfs_storage:/app/videos
+      - /home/efroot/StreamingCommunity_api:/app
+    environment:
+      - VIDEOS_DIR=/app/videos
+      - HOST=0.0.0.0
+      - PORT=8000
+    restart: unless-stopped
+
+volumes:
+  nfs_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/nfs/storage

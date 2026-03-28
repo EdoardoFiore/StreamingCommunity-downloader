@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>StreamingCommunity Panel</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css"/>
+  <style>
+    .progress-bar-animated { transition: width 0.3s ease; }
+    .nav-link.active { font-weight: 600; }
+    #player-modal video { width: 100%; max-height: 70vh; background: #000; }
+    .result-card { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+    .result-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+  </style>
+</head>
+<body class="antialiased">
+<div class="wrapper">
+
+  <!-- Sidebar -->
+  <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
+    <div class="container-fluid">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <h1 class="navbar-brand navbar-brand-autodark">
+        <span class="text-white fw-bold">SC Panel</span>
+      </h1>
+      <div class="collapse navbar-collapse" id="sidebar-menu">
+        <ul class="navbar-nav pt-lg-3">
+          <li class="nav-item">
+            <a class="nav-link active" href="#" data-page="search" onclick="showPage('search')">
+              <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti ti-search"></i></span>
+              <span class="nav-link-title">Cerca</span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-page="downloads" onclick="showPage('downloads')">
+              <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti ti-download"></i></span>
+              <span class="nav-link-title">Download</span>
+              <span class="badge bg-red ms-auto" id="active-jobs-badge" style="display:none"></span>
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-page="files" onclick="showPage('files')">
+              <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti ti-folder-filled"></i></span>
+              <span class="nav-link-title">File</span>
+            </a>
+          </li>
+        </ul>
+        <div class="mt-auto pb-3">
+          <button class="btn btn-ghost-light w-100" onclick="openSettings()">
+            <i class="ti ti-settings me-2"></i>Impostazioni
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <div class="page-wrapper">
+    <div class="page-header d-print-none">
+      <div class="container-xl">
+        <div class="row g-2 align-items-center">
+          <div class="col">
+            <h2 class="page-title" id="page-title">Cerca</h2>
+          </div>
+          <div class="col-auto" id="domain-indicator">
+            <span class="badge bg-secondary" id="domain-badge">Domain: caricamento...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-body">
+      <div class="container-xl">
+
+        <!-- Search page -->
+        <div id="page-search">
+          <div class="row mb-3">
+            <div class="col-md-8 col-lg-6">
+              <div class="input-group">
+                <input type="text" id="search-input" class="form-control" placeholder="Cerca film o serie TV..." onkeydown="if(event.key==='Enter') doSearch()">
+                <button class="btn btn-primary" onclick="doSearch()" id="search-btn">
+                  <i class="ti ti-search me-1"></i>Cerca
+                </button>
+              </div>
+            </div>
+          </div>
+          <div id="search-results" class="row g-2"></div>
+        </div>
+
+        <!-- Downloads page -->
+        <div id="page-downloads" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Coda download</h3>
+              <div class="card-options">
+                <button class="btn btn-sm btn-outline-secondary" onclick="refreshJobs()">
+                  <i class="ti ti-refresh"></i>
+                </button>
+              </div>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                  <thead>
+                    <tr>
+                      <th>Titolo</th>
+                      <th>Tipo</th>
+                      <th>Stato</th>
+                      <th>Progresso</th>
+                      <th>Avviato</th>
+                    </tr>
+                  </thead>
+                  <tbody id="jobs-table-body">
+                    <tr><td colspan="5" class="text-muted text-center py-4">Nessun download</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Files page -->
+        <div id="page-files" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">File scaricati</h3>
+              <div class="card-options">
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadFiles()">
+                  <i class="ti ti-refresh"></i>
+                </button>
+              </div>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                  <thead>
+                    <tr>
+                      <th>Nome</th>
+                      <th>Dimensione</th>
+                      <th>Data</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="files-table-body">
+                    <tr><td colspan="4" class="text-muted text-center py-4">Caricamento...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal modal-blur fade" id="settings-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Impostazioni</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Domain <small class="text-muted">(es: <code>streamingcommunityz.parts</code>)</small></label>
+          <input type="text" id="domain-input" class="form-control" placeholder="streamingcommunityz.parts">
+          <div id="domain-feedback" class="form-text"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
+        <button type="button" class="btn btn-primary" onclick="saveDomain()" id="save-domain-btn">Salva</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal modal-blur fade" id="detail-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:520px">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-0">
+        <div class="row g-3">
+          <div class="col-auto">
+            <img id="detail-poster" src="" alt="" style="width:120px;height:180px;object-fit:cover;border-radius:6px;background:#eee" onerror="this.style.display='none'">
+          </div>
+          <div class="col">
+            <div class="mb-1">
+              <span id="detail-type-badge" class="badge me-1"></span>
+              <span id="detail-age-badge" class="badge bg-secondary-lt"></span>
+            </div>
+            <h3 class="mb-1" id="detail-title"></h3>
+            <div class="text-muted mb-2" id="detail-meta"></div>
+            <div id="detail-score" class="mb-3"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
+        <button type="button" class="btn btn-primary" id="detail-action-btn"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Episode Browser Modal -->
+<div class="modal modal-blur fade" id="episode-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="episode-modal-title">Episodi</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="episode-modal-body">
+          <div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Video Player Modal -->
+<div class="modal modal-blur fade" id="player-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content bg-dark">
+      <div class="modal-header border-0">
+        <h5 class="modal-title text-white" id="player-modal-title"></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <video id="video-player" controls preload="metadata"></video>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

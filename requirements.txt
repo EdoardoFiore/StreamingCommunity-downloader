@@ -1,0 +1,12 @@
+requests
+bs4
+lxml
+tqdm
+rich
+random-user-agent
+ffmpeg-python
+cryptography==3.4.8
+m3u8
+fastapi
+uvicorn[standard]
+jinja2
