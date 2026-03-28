@@ -275,32 +275,30 @@ class M3U8_Segments:
         progress_counter.refresh()
 
     def join(self, output_filename):
-        current_dir = os.path.dirname(os.path.realpath(__file__))
-        file_list_path = os.path.join(current_dir, f"file_list_{os.path.basename(self.temp_folder)}.txt")
-
         ts_files = sorted(
             [f for f in os.listdir(self.temp_folder) if f.endswith(".ts")],
             key=lambda f: int("".join(filter(str.isdigit, f))),
         )
 
-        with open(file_list_path, "w") as f:
+        # Byte-level concatenation: TS is a continuous stream format,
+        # joining at byte level lets FFmpeg's TS demuxer handle PCR/PTS
+        # continuity natively — avoids the timestamp drift of the concat demuxer.
+        combined_ts = os.path.join(self.temp_folder, "_combined.ts")
+        with open(combined_ts, "wb") as out:
             for ts_file in ts_files:
-                relative_path = os.path.relpath(os.path.join(self.temp_folder, ts_file), current_dir)
-                f.write(f"file '{relative_path}'\n")
+                with open(os.path.join(self.temp_folder, ts_file), "rb") as seg:
+                    out.write(seg.read())
 
         logger.info("Joining %d / %d segments...", len(ts_files), len(self.segments))
         os.makedirs(os.path.dirname(os.path.abspath(output_filename)), exist_ok=True)
         try:
-            ffmpeg.input(file_list_path, format="concat", safe=0).output(
-                output_filename, c="copy"
+            ffmpeg.input(combined_ts).output(
+                output_filename, **{"c:v": "copy", "c:a": "aac", "b:a": "192k"}
             ).run(capture_stdout=True, capture_stderr=True)
         except ffmpeg.Error as e:
             stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
             logger.error("FFmpeg join stderr: %s", stderr)
             raise RuntimeError(f"FFmpeg join error: {stderr[:400]}")
-        finally:
-            if os.path.exists(file_list_path):
-                os.remove(file_list_path)
 
         logger.info("Cleaning temp segments...")
         shutil.rmtree(self.temp_folder, ignore_errors=True)

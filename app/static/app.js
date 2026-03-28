@@ -4,6 +4,7 @@ let currentDomain = '';
 let currentVersion = '';
 let activeEventSources = {}; // job_id -> EventSource
 let _searchResults = [];
+let _libraries = [];  // [{name, path}, ...]
 
 async function safeJson(res) {
   const text = await res.text();
@@ -59,6 +60,7 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadDomainStatus();
+  await loadLibraries();
   pollJobs();
 });
 
@@ -104,6 +106,7 @@ function showPage(page) {
 function openSettings() {
   document.getElementById('domain-input').value = currentDomain;
   document.getElementById('domain-feedback').textContent = '';
+  renderLibrariesList();
   showModal('settings-modal');
 }
 
@@ -141,6 +144,156 @@ async function saveDomain() {
     feedback.className = 'form-text text-danger';
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ─── Libraries ───────────────────────────────────────────────────────────────
+
+async function loadLibraries() {
+  try {
+    const res = await fetch('/api/domain/libraries');
+    const data = await safeJson(res);
+    _libraries = data.libraries || [];
+    const excluded = (data.excluded_folders || []).join(', ');
+    const input = document.getElementById('excluded-input');
+    if (input) input.value = excluded;
+  } catch (e) {
+    console.error('loadLibraries:', e);
+  }
+}
+
+function renderLibrariesList() {
+  const container = document.getElementById('libraries-list');
+  if (!container) return;
+  if (_libraries.length === 0) {
+    container.innerHTML = '<p class="text-muted small mb-0">Nessuna libreria configurata.</p>';
+    return;
+  }
+  container.innerHTML = _libraries.map((lib, i) => `
+    <div class="row g-2 mb-2 align-items-center">
+      <div class="col-4">
+        <input type="text" class="form-control form-control-sm" id="lib-name-${i}"
+               value="${escapeHtml(lib.name)}" placeholder="Nome (es: Films)">
+      </div>
+      <div class="col">
+        <input type="text" class="form-control form-control-sm" id="lib-path-${i}"
+               value="${escapeHtml(lib.path)}" placeholder="/srv/nfs/films">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-sm btn-outline-danger" onclick="removeLibrary(${i})">
+          <i class="ti ti-trash"></i>
+        </button>
+      </div>
+    </div>`).join('');
+}
+
+function _syncLibrariesFromInputs() {
+  _libraries = _libraries.map((_, i) => ({
+    name: document.getElementById(`lib-name-${i}`)?.value || '',
+    path: document.getElementById(`lib-path-${i}`)?.value || '',
+  }));
+}
+
+function addLibrary() {
+  _syncLibrariesFromInputs();
+  _libraries.push({ name: '', path: '' });
+  renderLibrariesList();
+  const last = document.getElementById(`lib-name-${_libraries.length - 1}`);
+  if (last) last.focus();
+}
+
+function removeLibrary(idx) {
+  _syncLibrariesFromInputs();
+  _libraries.splice(idx, 1);
+  renderLibrariesList();
+}
+
+async function saveLibraries() {
+  const updated = _libraries.map((_, i) => ({
+    name: (document.getElementById(`lib-name-${i}`)?.value || '').trim(),
+    path: (document.getElementById(`lib-path-${i}`)?.value || '').trim(),
+  })).filter(lib => lib.name && lib.path);
+
+  const excludedRaw = document.getElementById('excluded-input')?.value || '';
+  const excluded = excludedRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+  const btn = document.getElementById('save-libraries-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/domain/libraries', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ libraries: updated, excluded_folders: excluded }),
+    });
+    if (res.ok) {
+      _libraries = updated;
+      showToast('Librerie salvate', 'success');
+      hideModal('settings-modal');
+    } else {
+      const data = await safeJson(res);
+      showToast(data.detail || 'Errore salvataggio', 'danger');
+    }
+  } catch (e) {
+    showToast('Errore di rete', 'danger');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─── Move to Library ──────────────────────────────────────────────────────────
+
+let _moveTarget = null;
+
+function openMoveModal(path, name) {
+  _moveTarget = { path, name };
+  document.getElementById('move-modal-item-name').textContent = name;
+
+  const opts = document.getElementById('move-library-options');
+  if (_libraries.length === 0) {
+    opts.innerHTML = '<div class="alert alert-warning py-2">Nessuna libreria configurata.<br><a href="#" onclick="hideModal(\'move-modal\');openSettings()">Vai alle impostazioni</a></div>';
+    document.getElementById('confirm-move-btn').style.display = 'none';
+  } else {
+    document.getElementById('confirm-move-btn').style.display = '';
+    opts.innerHTML = _libraries.map((lib, i) => `
+      <label class="form-check mb-2">
+        <input class="form-check-input" type="radio" name="move-lib" value="${escapeHtml(lib.name)}" ${i === 0 ? 'checked' : ''}>
+        <span class="form-check-label">
+          <strong>${escapeHtml(lib.name)}</strong>
+          <span class="text-muted d-block small">${escapeHtml(lib.path)}</span>
+        </span>
+      </label>`).join('');
+  }
+  showModal('move-modal');
+}
+
+async function confirmMove() {
+  if (!_moveTarget) return;
+  const selected = document.querySelector('input[name="move-lib"]:checked');
+  if (!selected) return;
+
+  const btn = document.getElementById('confirm-move-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Spostamento...';
+
+  try {
+    const res = await fetch('/api/files/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: _moveTarget.path, library_name: selected.value }),
+    });
+    const data = await safeJson(res);
+    if (res.ok) {
+      showToast(`Spostato in ${selected.value}: ${_moveTarget.name}`, 'success');
+      hideModal('move-modal');
+      loadFiles();
+    } else {
+      showToast(data.detail || 'Errore spostamento', 'danger');
+    }
+  } catch (e) {
+    showToast('Errore di rete', 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Sposta';
   }
 }
 
@@ -556,30 +709,54 @@ function renderFilesTable(tree) {
   tbody.innerHTML = rows.join('');
 }
 
+let _collapsedFolders = new Set();
+
+function toggleFolder(path) {
+  if (_collapsedFolders.has(path)) _collapsedFolders.delete(path);
+  else _collapsedFolders.add(path);
+  loadFiles();
+}
+
 function flattenTree(items, rows, depth) {
   items.forEach(item => {
     const indent = '&nbsp;'.repeat(depth * 4);
     if (item.type === 'directory') {
+      const collapsed = _collapsedFolders.has(item.path);
+      const chevron = collapsed ? 'ti-chevron-right' : 'ti-chevron-down';
+      const moveBtn = _libraries.length > 0
+        ? `<button class="btn btn-sm btn-outline-cyan me-1" title="Sposta in libreria"
+               onclick="openMoveModal('${escapeStr(item.path)}', '${escapeStr(item.name)}')">
+             <i class="ti ti-send"></i>
+           </button>`
+        : '';
       rows.push(`<tr class="table-active">
-        <td colspan="3"><strong>${indent}<i class="ti ti-folder-filled text-yellow me-1"></i>${escapeHtml(item.name)}</strong></td>
+        <td colspan="3">
+          <strong style="cursor:pointer" onclick="toggleFolder('${escapeStr(item.path)}')">
+            ${indent}<i class="ti ${chevron} text-muted me-1" style="font-size:.8em"></i><i class="ti ti-folder-filled text-yellow me-1"></i>${escapeHtml(item.name)}
+          </strong>
+        </td>
         <td class="text-end">
+          ${moveBtn}
           <button class="btn btn-sm btn-outline-danger" onclick="deletePath('${escapeStr(item.path)}', '${escapeStr(item.name)}', true)">
             <i class="ti ti-trash"></i>
           </button>
         </td>
       </tr>`);
-      if (item.children) flattenTree(item.children, rows, depth + 1);
+      if (!collapsed && item.children) flattenTree(item.children, rows, depth + 1);
     } else {
       const size = formatSize(item.size);
       const date = new Date(item.mtime * 1000).toLocaleDateString('it-IT');
+      const isMp4 = item.name.toLowerCase().endsWith('.mp4');
+      const fileIcon = isMp4 ? 'ti-file-type-mp4 text-red' : 'ti-file text-muted';
+      const playBtn = isMp4
+        ? `<button class="btn btn-sm btn-outline-primary me-1" onclick="playFile('${escapeStr(item.path)}', '${escapeStr(item.name)}')"><i class="ti ti-player-play"></i></button>`
+        : '';
       rows.push(`<tr>
-        <td>${indent}<i class="ti ti-file-type-mp4 text-red me-1"></i>${escapeHtml(item.name)}</td>
+        <td>${indent}<i class="ti ${fileIcon} me-1"></i>${escapeHtml(item.name)}</td>
         <td class="text-muted">${size}</td>
         <td class="text-muted">${date}</td>
         <td class="text-end">
-          <button class="btn btn-sm btn-outline-primary me-1" onclick="playFile('${escapeStr(item.path)}', '${escapeStr(item.name)}')">
-            <i class="ti ti-player-play"></i>
-          </button>
+          ${playBtn}
           <a class="btn btn-sm btn-outline-secondary me-1" href="/api/files/download/${encodeURI(item.path)}">
             <i class="ti ti-download"></i>
           </a>

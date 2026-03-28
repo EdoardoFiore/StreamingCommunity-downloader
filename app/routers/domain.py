@@ -43,6 +43,34 @@ class DomainUpdate(BaseModel):
     domain: str
 
 
+class LibraryItem(BaseModel):
+    name: str
+    path: str
+
+
+class LibrariesUpdate(BaseModel):
+    libraries: list[LibraryItem]
+    excluded_folders: list[str]
+
+
+@router.get("/libraries")
+def get_libraries():
+    data = _read_data()
+    return {
+        "libraries": data.get("libraries", []),
+        "excluded_folders": data.get("excluded_folders", []),
+    }
+
+
+@router.put("/libraries")
+def set_libraries(body: LibrariesUpdate):
+    data = _read_data()
+    data["libraries"] = [{"name": lib.name, "path": lib.path} for lib in body.libraries]
+    data["excluded_folders"] = body.excluded_folders
+    _write_data(data)
+    return {"ok": True}
+
+
 @router.put("")
 def set_domain(body: DomainUpdate):
     domain = body.domain.strip()
