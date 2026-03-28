@@ -31,13 +31,19 @@ def _get_iframe(id_title, domain):
     return script.text, url_embed
 
 
-def _parse_content(embed_content):
+def _parse_content(embed_content, url_embed):
+    from urllib.parse import urlparse, parse_qs
     s = str(embed_content)
 
     video_id_m = re.search(r"window\.video\s*=\s*\{[^}]*?\bid\s*:\s*['\"]?(\d+)['\"]?", s, re.DOTALL)
     if not video_id_m:
         raise RuntimeError(f"Cannot find video ID in embed. Snippet: {s[:400]!r}")
     parsed_video = {"id": video_id_m.group(1)}
+
+    qs = parse_qs(urlparse(url_embed).query)
+    parsed_video["can_play_fhd"] = bool(qs.get("canPlayFHD"))
+    parsed_video["scz"] = bool(qs.get("scz"))
+    parsed_video["lang"] = qs.get("lang", ["it"])[0]
 
     win_param_m = re.search(r"params\s*:\s*\{([^}]*)\}", s, re.DOTALL)
     if not win_param_m:
@@ -47,32 +53,17 @@ def _parse_content(embed_content):
     json_win_param = json_win_param.replace(",}", "}").replace("'", '"')
     parsed_param = json.loads(json_win_param)
 
-    # Extract the active stream base URL (e.g. ?ub=1) from window.streams
-    streams_m = re.search(r"window\.streams\s*=\s*(\[.*?\]);", s, re.DOTALL)
-    if streams_m:
-        try:
-            streams = json.loads(streams_m.group(1).replace("\\/", "/"))
-            for stream in streams:
-                if stream.get("active"):
-                    parsed_video["active_stream_url"] = stream["url"]
-                    break
-        except Exception:
-            pass
-
-    if re.search(r"window\.canPlayFHD\s*=\s*true", s):
-        parsed_video["can_play_fhd"] = True
-
     return parsed_video, parsed_param
 
 
 def _get_m3u8_url(json_win_video, json_win_param):
-    base = json_win_video.get("active_stream_url") or f"https://vixcloud.co/playlist/{json_win_video['id']}"
-    sep = "&" if "?" in base else "?"
-    url = f"{base}{sep}token={json_win_param['token']}&expires={json_win_param['expires']}"
-    if json_win_param.get("asn"):
-        url += f"&asn={json_win_param['asn']}"
+    base = f"https://vixcloud.co/playlist/{json_win_video['id']}"
+    url = f"{base}?token={json_win_param['token']}&expires={json_win_param['expires']}"
     if json_win_video.get("can_play_fhd"):
         url += "&h=1"
+    if json_win_video.get("scz"):
+        url += "&scz=1"
+    url += f"&lang={json_win_video.get('lang', 'it')}"
     return url
 
 
@@ -108,7 +99,7 @@ def download_film(id_film: int, title_name: str, domain: str,
                   year: str = None,
                   cancel_event=None):
     embed_content, embed_referer = _get_iframe(id_film, domain)
-    json_win_video, json_win_param = _parse_content(embed_content)
+    json_win_video, json_win_param = _parse_content(embed_content, embed_referer)
     logger.info("Video ID: %s token: %.8s... embed_url: %s", json_win_video['id'], json_win_param.get('token', ''), embed_referer[:80])
 
     m3u8_url = _get_m3u8_url(json_win_video, json_win_param)

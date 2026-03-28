@@ -79,16 +79,22 @@ def _get_iframe(tv_id, ep_id, domain, token):
 
     url_embed = BeautifulSoup(req.text, "lxml").find("iframe").get("src")
     req_embed = requests.get(url_embed, headers={"User-agent": get_headers()}).text
-    return BeautifulSoup(req_embed, "lxml").find("body").find("script").text
+    return BeautifulSoup(req_embed, "lxml").find("body").find("script").text, url_embed
 
 
-def _parse_content(embed_content):
+def _parse_content(embed_content, url_embed):
+    from urllib.parse import urlparse, parse_qs
     s = str(embed_content)
 
     video_id_m = re.search(r"window\.video\s*=\s*\{[^}]*?\bid\s*:\s*['\"]?(\d+)['\"]?", s, re.DOTALL)
     if not video_id_m:
         raise RuntimeError(f"Cannot find video ID in embed. Snippet: {s[:400]!r}")
     parsed_video = {"id": video_id_m.group(1)}
+
+    qs = parse_qs(urlparse(url_embed).query)
+    parsed_video["can_play_fhd"] = bool(qs.get("canPlayFHD"))
+    parsed_video["scz"] = bool(qs.get("scz"))
+    parsed_video["lang"] = qs.get("lang", ["it"])[0]
 
     win_param_m = re.search(r"params\s*:\s*\{([^}]*)\}", s, re.DOTALL)
     if not win_param_m:
@@ -102,45 +108,29 @@ def _parse_content(embed_content):
 
 
 def _get_m3u8_url(json_win_video, json_win_param):
-    url = (
-        f"https://vixcloud.co/playlist/{json_win_video['id']}"
-        f"?token={json_win_param['token']}&expires={json_win_param['expires']}"
-    )
-    if json_win_param.get("asn"):
-        url += f"&asn={json_win_param['asn']}"
+    base = f"https://vixcloud.co/playlist/{json_win_video['id']}"
+    url = f"{base}?token={json_win_param['token']}&expires={json_win_param['expires']}"
+    if json_win_video.get("can_play_fhd"):
+        url += "&h=1"
+    if json_win_video.get("scz"):
+        url += "&scz=1"
+    url += f"&lang={json_win_video.get('lang', 'it')}"
     return url
 
 
-def _get_m3u8_key(json_win_video, json_win_param, tv_name, n_stagione, n_ep, ep_title):
+def _get_m3u8_key(json_win_video, json_win_param, referer):
     req = requests.get(
         "https://vixcloud.co/storage/enc.key",
-        headers={
-            "referer": (
-                f"https://vixcloud.co/embed/{json_win_video['id']}"
-                f"?token={json_win_param['token']}&title={tv_name}"
-                f"&referer=1&expires={json_win_param['expires']}"
-                f"&description=S{n_stagione}%3AE{n_ep}+{ep_title}&nextEpisode=1"
-            )
-        },
+        headers={"referer": referer},
     )
     if req.ok:
         return "".join([f"{c:02x}" for c in req.content])
     raise RuntimeError(f"Cannot fetch encryption key: HTTP {req.status_code}")
 
 
-def _get_m3u8_audio(json_win_video, json_win_param, tv_name, n_stagione, n_ep, ep_title):
-    req = requests.get(
-        f"https://vixcloud.co/playlist/{json_win_video['id']}",
-        params={"token": json_win_param["token"], "expires": json_win_param["expires"]},
-        headers={
-            "referer": (
-                f"https://vixcloud.co/embed/{json_win_video['id']}"
-                f"?token={json_win_param['token']}&title={tv_name}"
-                f"&referer=1&expires={json_win_param['expires']}"
-                f"&description=S{n_stagione}%3AE{n_ep}+{ep_title}&nextEpisode=1"
-            )
-        },
-    )
+def _get_m3u8_audio(json_win_video, json_win_param, referer):
+    master_url = _get_m3u8_url(json_win_video, json_win_param)
+    req = requests.get(master_url, headers={"referer": referer})
     if req.ok:
         for row in req.text.split():
             if "audio" in str(row) and "ita" in str(row):
@@ -166,19 +156,19 @@ def download_episode(
     ep = eps[ep_index]
     logger.info(f"Downloading S{season:02d}E{ep['n']:02d} — {ep['name']}")
 
-    embed_content = _get_iframe(tv_id, ep["id"], domain, token)
-    json_win_video, json_win_param = _parse_content(embed_content)
+    embed_content, url_embed = _get_iframe(tv_id, ep["id"], domain, token)
+    json_win_video, json_win_param = _parse_content(embed_content, url_embed)
     logger.info("Video ID: %s token: %.8s...", json_win_video['id'], json_win_param.get('token', ''))
 
-    m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
     embed_referer = (
         f"https://vixcloud.co/embed/{json_win_video['id']}"
         f"?token={json_win_param['token']}&title={tv_name}"
         f"&referer=1&expires={json_win_param['expires']}"
         f"&description=S{season}%3AE{ep['n']}+{ep['name']}&nextEpisode=1"
     )
-    m3u8_key = _get_m3u8_key(json_win_video, json_win_param, tv_name, season, ep["n"], ep["name"])
-    m3u8_audio = _get_m3u8_audio(json_win_video, json_win_param, tv_name, season, ep["n"], ep["name"])
+    m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
+    m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_referer)
+    m3u8_audio = _get_m3u8_audio(json_win_video, json_win_param, embed_referer)
 
     if m3u8_audio:
         logger.info("Audio track found, will merge")
