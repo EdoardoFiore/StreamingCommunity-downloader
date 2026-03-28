@@ -42,3 +42,11 @@ def download_episode(body: EpisodeDownloadRequest):
         body.domain, body.token, body.tv_name, body.season,
     )
     return {"job_id": job_id, "status": "queued"}
+
+
+@router.delete("/{job_id}", status_code=200)
+def cancel_download(job_id: str):
+    cancelled = job_manager.cancel(job_id)
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="Job non trovato o già completato")
+    return {"job_id": job_id, "status": "cancelled"}

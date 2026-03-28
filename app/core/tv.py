@@ -161,6 +161,7 @@ def download_episode(
     output_dir: str = "videos",
     temp_dir: str = None,
     progress_factory=None,
+    cancel_event=None,
 ) -> str:
     ep = eps[ep_index]
     logger.info(f"Downloading S{season:02d}E{ep['n']:02d} — {ep['name']}")
@@ -193,6 +194,7 @@ def download_episode(
         temp_dir=temp_dir,
         progress_factory=progress_factory,
         referer=embed_referer,
+        cancel_event=cancel_event,
     )
 
     return mp4_path

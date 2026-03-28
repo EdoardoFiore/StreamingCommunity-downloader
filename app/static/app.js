@@ -579,6 +579,8 @@ function watchJob(jobId) {
     const msg = JSON.parse(e.data);
     if (msg.type === 'progress') {
       updateJobRow(jobId, 'running', msg.pct);
+    } else if (msg.type === 'status') {
+      if (msg.phase === 'joining') updateJobRow(jobId, 'joining', 100);
     } else if (msg.type === 'done') {
       updateJobRow(jobId, 'done', 100);
       es.close();
@@ -608,7 +610,7 @@ async function refreshJobs() {
 function renderJobsTable(jobs) {
   const tbody = document.getElementById('jobs-table-body');
   if (jobs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4">Nessun download</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4">Nessun download</td></tr>';
     return;
   }
   tbody.innerHTML = jobs.map(j => {
@@ -631,6 +633,10 @@ function renderJobsTable(jobs) {
     const typeBadge = j.type === 'film'
       ? '<span class="badge bg-blue-lt">Film</span>'
       : '<span class="badge bg-green-lt">Serie</span>';
+    const canStop = j.status === 'running' || j.status === 'queued';
+    const stopBtn = canStop
+      ? `<button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${j.job_id}')" title="Interrompi"><i class="ti ti-player-stop"></i></button>`
+      : '';
 
     return `<tr id="job-row-${j.job_id}">
       <td>${escapeHtml(j.title)}</td>
@@ -638,6 +644,7 @@ function renderJobsTable(jobs) {
       <td>${statusBadge}</td>
       <td style="min-width:160px">${progress}</td>
       <td class="text-muted">${date}</td>
+      <td id="job-actions-${j.job_id}">${stopBtn}</td>
     </tr>`;
   }).join('');
 }
@@ -652,13 +659,19 @@ function updateJobRow(jobId, status, pct, errorMsg = '') {
   }
 
   const cells = row.querySelectorAll('td');
+  const actionsEl = document.getElementById(`job-actions-${jobId}`);
   if (status === 'done') {
     cells[2].innerHTML = '<span class="badge bg-success-lt">Completato</span>';
     cells[3].innerHTML = '<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>';
+    if (actionsEl) actionsEl.innerHTML = '';
     if (document.getElementById('page-files').style.display !== 'none') loadFiles();
   } else if (status === 'error') {
     cells[2].innerHTML = '<span class="badge bg-danger-lt">Errore</span>';
     cells[3].innerHTML = `<small class="text-danger">${escapeHtml(errorMsg)}</small>`;
+    if (actionsEl) actionsEl.innerHTML = '';
+  } else if (status === 'joining') {
+    cells[2].innerHTML = '<span class="badge bg-yellow-lt">Ricostruzione</span>';
+    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-yellow" style="width:100%"></div></div><small class="text-muted">Ricostruzione...</small>`;
   } else if (status === 'running') {
     cells[2].innerHTML = '<span class="badge bg-blue-lt">In corso</span>';
     cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-blue" id="prog-${jobId}" style="width:${pct}%"></div></div><small class="text-muted">${pct}%</small>`;
@@ -673,6 +686,19 @@ function updateActiveBadge() {
     badge.textContent = count;
   } else {
     badge.style.display = 'none';
+  }
+}
+
+async function cancelJob(jobId) {
+  if (!confirm('Interrompere il download?')) return;
+  try {
+    const res = await fetch(`/api/download/${jobId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await safeJson(res);
+      showToast(data.detail || 'Errore annullamento', 'danger');
+    }
+  } catch (e) {
+    showToast('Errore di rete', 'danger');
   }
 }
 

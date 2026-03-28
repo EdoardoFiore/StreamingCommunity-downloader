@@ -105,7 +105,8 @@ def download_film(id_film: int, title_name: str, domain: str,
                   output_dir: str = "videos",
                   temp_dir: str = None,
                   progress_factory=None,
-                  year: str = None):
+                  year: str = None,
+                  cancel_event=None):
     embed_content, embed_referer = _get_iframe(id_film, domain)
     json_win_video, json_win_param = _parse_content(embed_content)
     logger.info("Video ID: %s token: %.8s... embed_url: %s", json_win_video['id'], json_win_param.get('token', ''), embed_referer[:80])
@@ -128,6 +129,7 @@ def download_film(id_film: int, title_name: str, domain: str,
         temp_dir=temp_dir,
         progress_factory=progress_factory,
         referer=embed_referer,
+        cancel_event=cancel_event,
     )
 
     return mp4_path

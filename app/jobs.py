@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -8,7 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.config import VIDEOS_DIR, TMP_DIR
-from app.progress import WebProgressBar
+from app.progress import DownloadCancelledError, WebProgressBar
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class DownloadJob:
     output_path: Optional[str] = None
     progress: dict = field(default_factory=lambda: {"current": 0, "total": 0, "pct": 0})
     progress_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
 
 
 class JobManager:
@@ -62,7 +64,26 @@ class JobManager:
 
         return factory
 
+    def cancel(self, job_id: str) -> bool:
+        job = self._jobs.get(job_id)
+        if not job or job.status not in ("queued", "running"):
+            return False
+        job.cancel_event.set()
+        if job.status == "queued":
+            job.status = "cancelled"
+            asyncio.run_coroutine_threadsafe(
+                job.progress_queue.put({"type": "error", "message": "Annullato"}),
+                self._loop,
+            )
+        return True
+
     def _run_download(self, job: DownloadJob, fn, *args, **kwargs):
+        if job.cancel_event.is_set():
+            job.status = "cancelled"
+            asyncio.run_coroutine_threadsafe(
+                job.progress_queue.put({"type": "error", "message": "Annullato"}), self._loop
+            )
+            return
         job.status = "running"
         try:
             result = fn(*args, **kwargs)
@@ -70,6 +91,12 @@ class JobManager:
             job.output_path = result
             asyncio.run_coroutine_threadsafe(
                 job.progress_queue.put({"type": "done", "output_path": result}),
+                self._loop,
+            )
+        except DownloadCancelledError:
+            job.status = "cancelled"
+            asyncio.run_coroutine_threadsafe(
+                job.progress_queue.put({"type": "error", "message": "Annullato"}),
                 self._loop,
             )
         except Exception as e:
@@ -107,6 +134,7 @@ class JobManager:
             temp_dir=temp_dir,
             progress_factory=progress_factory,
             year=year,
+            cancel_event=job.cancel_event,
         )
         return job_id
 
@@ -147,6 +175,7 @@ class JobManager:
             output_dir=output_dir,
             temp_dir=temp_dir,
             progress_factory=progress_factory,
+            cancel_event=job.cancel_event,
         )
         return job_id
 

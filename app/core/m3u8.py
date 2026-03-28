@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
 from app.core.headers import get_headers
+from app.progress import DownloadCancelledError
 
 warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
 warnings.filterwarnings("ignore", category=UserWarning, module="cryptography")
@@ -132,10 +133,11 @@ class M3U8_Parser:
 
 
 class M3U8_Segments:
-    def __init__(self, url, key=None, temp_dir=None, progress_factory=None, referer=None):
+    def __init__(self, url, key=None, temp_dir=None, progress_factory=None, referer=None, cancel_event=None):
         self.url = url
         self.key = key
         self.referer = referer
+        self._cancel = cancel_event
 
         if key is not None:
             self.decryption = Decryption(key)
@@ -227,9 +229,11 @@ class M3U8_Segments:
     def download_ts(self):
         bar_factory = self.progress_factory or (lambda **kw: tqdm(**kw))
         progress_counter = bar_factory(total=len(self.segments), unit="seg", desc="Downloading")
+        self._bar = progress_counter
 
         quit_event = threading.Event()
         timeout_occurred = False
+        cancelled = False
 
         timer_thread = threading.Thread(
             target=self.timer, args=(progress_counter, quit_event, lambda: timeout_occurred)
@@ -242,9 +246,17 @@ class M3U8_Segments:
                 for index in range(len(self.segments)):
                     if timeout_occurred:
                         break
+                    if self._cancel and self._cancel.is_set():
+                        cancelled = True
+                        break
                     futures.append(executor.submit(self.save_ts, index, progress_counter, quit_event))
 
                 for future in as_completed(futures):
+                    if self._cancel and self._cancel.is_set():
+                        cancelled = True
+                        for f in futures:
+                            f.cancel()
+                        break
                     try:
                         future.result()
                     except Exception as e:
@@ -253,6 +265,9 @@ class M3U8_Segments:
             progress_counter.close()
             quit_event.set()
             timer_thread.join()
+
+        if cancelled:
+            raise DownloadCancelledError("Download annullato dall'utente")
 
     def timer(self, progress_counter, quit_event, timeout_checker):
         start_time = time.time()
@@ -290,6 +305,8 @@ class M3U8_Segments:
                     out.write(seg.read())
 
         logger.info("Joining %d / %d segments...", len(ts_files), len(self.segments))
+        if hasattr(self, '_bar') and hasattr(self._bar, 'emit_status'):
+            self._bar.emit_status("joining")
         os.makedirs(os.path.dirname(os.path.abspath(output_filename)), exist_ok=True)
         try:
             ffmpeg.input(combined_ts).output(
@@ -306,7 +323,7 @@ class M3U8_Segments:
 
 class M3U8_Downloader:
     def __init__(self, m3u8_url, m3u8_audio=None, key=None, output_filename="output.mp4",
-                 temp_dir=None, progress_factory=None, referer=None):
+                 temp_dir=None, progress_factory=None, referer=None, cancel_event=None):
         self.m3u8_url = m3u8_url
         self.m3u8_audio = m3u8_audio
         self.key = key
@@ -314,6 +331,7 @@ class M3U8_Downloader:
         self.temp_dir = temp_dir or os.path.join("tmp", "segments")
         self.progress_factory = progress_factory
         self.referer = referer
+        self.cancel_event = cancel_event
 
         output_dir = os.path.dirname(output_filename)
         self.audio_path = os.path.join(output_dir or ".", "_audio_tmp.mp4")
@@ -323,7 +341,8 @@ class M3U8_Downloader:
         video_m3u8 = M3U8_Segments(self.m3u8_url, self.key,
                                     temp_dir=video_temp,
                                     progress_factory=self.progress_factory,
-                                    referer=self.referer)
+                                    referer=self.referer,
+                                    cancel_event=self.cancel_event)
         logger.info("Downloading video segments...")
         video_m3u8.get_info()
         video_m3u8.download_ts()
@@ -383,6 +402,7 @@ def download_m3u8(
     temp_dir=None,
     progress_factory=None,
     referer=None,
+    cancel_event=None,
 ):
     key = bytes.fromhex(key) if key is not None else None
 
@@ -421,4 +441,5 @@ def download_m3u8(
         temp_dir=temp_dir,
         progress_factory=progress_factory,
         referer=referer,
+        cancel_event=cancel_event,
     ).start()
