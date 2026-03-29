@@ -25,6 +25,7 @@ class EpisodeDownloadRequest(BaseModel):
     token: str
     tv_name: str
     season: int
+    year: str | None = None
 
 
 @router.post("/film", status_code=202)
@@ -40,6 +41,7 @@ def download_episode(body: EpisodeDownloadRequest):
     job_id = job_manager.submit_episode(
         body.tv_id, body.eps, body.ep_index,
         body.domain, body.token, body.tv_name, body.season,
+        year=body.year,
     )
     return {"job_id": job_id, "status": "queued"}
 

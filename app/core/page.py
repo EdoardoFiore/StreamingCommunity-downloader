@@ -53,6 +53,7 @@ def search(title_search: str, domain: str) -> list[dict]:
             "id": t["id"],
             "slug": t["slug"],
             "score": t.get("score"),
+            "release_date": t.get("release_date"),
             "last_air_date": t.get("last_air_date"),
             "age": t.get("age"),
             "seasons_count": t.get("seasons_count", 0),

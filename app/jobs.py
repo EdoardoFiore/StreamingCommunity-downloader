@@ -147,6 +147,7 @@ class JobManager:
         token: str,
         tv_name: str,
         season: int,
+        year: str = None,
     ) -> str:
         from app.core.tv import download_episode
 
@@ -176,6 +177,7 @@ class JobManager:
             temp_dir=temp_dir,
             progress_factory=progress_factory,
             cancel_event=job.cancel_event,
+            year=year,
         )
         return job_id
 

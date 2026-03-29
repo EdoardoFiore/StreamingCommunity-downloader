@@ -1,5 +1,10 @@
 /* StreamingCommunity Web Panel — app.js */
 
+function itemYear(item) {
+  const d = item.release_date || item.last_air_date || '';
+  return d ? d.slice(0, 4) : null;
+}
+
 let currentDomain = '';
 let currentVersion = '';
 let activeEventSources = {}; // job_id -> EventSource
@@ -62,6 +67,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadDomainStatus();
   await loadLibraries();
   pollJobs();
+  setupFileManager();
 });
 
 async function loadDomainStatus() {
@@ -240,62 +246,6 @@ async function saveLibraries() {
   }
 }
 
-// ─── Move to Library ──────────────────────────────────────────────────────────
-
-let _moveTarget = null;
-
-function openMoveModal(path, name) {
-  _moveTarget = { path, name };
-  document.getElementById('move-modal-item-name').textContent = name;
-
-  const opts = document.getElementById('move-library-options');
-  if (_libraries.length === 0) {
-    opts.innerHTML = '<div class="alert alert-warning py-2">Nessuna libreria configurata.<br><a href="#" onclick="hideModal(\'move-modal\');openSettings()">Vai alle impostazioni</a></div>';
-    document.getElementById('confirm-move-btn').style.display = 'none';
-  } else {
-    document.getElementById('confirm-move-btn').style.display = '';
-    opts.innerHTML = _libraries.map((lib, i) => `
-      <label class="form-check mb-2">
-        <input class="form-check-input" type="radio" name="move-lib" value="${escapeHtml(lib.name)}" ${i === 0 ? 'checked' : ''}>
-        <span class="form-check-label">
-          <strong>${escapeHtml(lib.name)}</strong>
-          <span class="text-muted d-block small">${escapeHtml(lib.path)}</span>
-        </span>
-      </label>`).join('');
-  }
-  showModal('move-modal');
-}
-
-async function confirmMove() {
-  if (!_moveTarget) return;
-  const selected = document.querySelector('input[name="move-lib"]:checked');
-  if (!selected) return;
-
-  const btn = document.getElementById('confirm-move-btn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Spostamento...';
-
-  try {
-    const res = await fetch('/api/files/move', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: _moveTarget.path, library_name: selected.value }),
-    });
-    const data = await safeJson(res);
-    if (res.ok) {
-      showToast(`Spostato in ${selected.value}: ${_moveTarget.name}`, 'success');
-      hideModal('move-modal');
-      loadFiles();
-    } else {
-      showToast(data.detail || 'Errore spostamento', 'danger');
-    }
-  } catch (e) {
-    showToast('Errore di rete', 'danger');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Sposta';
-  }
-}
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
@@ -326,7 +276,7 @@ async function doSearch() {
 
     results.forEach((item, idx) => {
       const isMovie = item.type === 'movie';
-      const year = item.last_air_date ? item.last_air_date.slice(0, 4) : '';
+      const year = itemYear(item);
       const score = item.score ? parseFloat(item.score).toFixed(1) : null;
       const posterUrl = item.poster ? `/api/image/${currentDomain}/${item.poster}` : '';
 
@@ -367,7 +317,7 @@ function openDetailModal(idx) {
   if (!item) return;
 
   const isMovie = item.type === 'movie';
-  const year = item.last_air_date ? item.last_air_date.slice(0, 4) : '';
+  const year = itemYear(item);
   const score = item.score ? parseFloat(item.score).toFixed(1) : null;
   const posterUrl = item.poster ? `/api/image/${currentDomain}/${item.poster}` : '';
 
@@ -410,12 +360,11 @@ function openDetailModal(idx) {
   if (isMovie) {
     btn.className = 'btn btn-primary';
     btn.innerHTML = '<i class="ti ti-download me-1"></i>Scarica';
-    const year = item.last_air_date ? item.last_air_date.slice(0, 4) : null;
     btn.onclick = () => { hideModal('detail-modal'); startFilmDownload(item.id, item.name, year); };
   } else {
     btn.className = 'btn btn-success';
     btn.innerHTML = '<i class="ti ti-list me-1"></i>Episodi';
-    btn.onclick = () => { hideModal('detail-modal'); openEpisodeBrowser(item.id, item.name, item.slug); };
+    btn.onclick = () => { hideModal('detail-modal'); openEpisodeBrowser(item.id, item.name, item.slug, year); };
   }
 
   showModal('detail-modal');
@@ -447,8 +396,8 @@ async function startFilmDownload(id, title, year = null) {
 
 let _episodeContext = {};
 
-async function openEpisodeBrowser(tvId, tvName, slug) {
-  _episodeContext = { tvId, tvName, slug, token: null, version: currentVersion, episodes: [] };
+async function openEpisodeBrowser(tvId, tvName, slug, year = null) {
+  _episodeContext = { tvId, tvName, slug, year, token: null, version: currentVersion, episodes: [] };
 
   document.getElementById('episode-modal-title').textContent = tvName;
   document.getElementById('episode-modal-body').innerHTML =
@@ -532,7 +481,7 @@ async function loadSeason(season) {
 }
 
 async function startEpisodeDownload(epIndex) {
-  const { tvId, tvName, token, episodes, currentSeason } = _episodeContext;
+  const { tvId, tvName, year, token, episodes, currentSeason } = _episodeContext;
   const ep = episodes[epIndex];
 
   try {
@@ -541,7 +490,7 @@ async function startEpisodeDownload(epIndex) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tv_id: tvId, eps: episodes, ep_index: epIndex,
-        domain: currentDomain, token, tv_name: tvName, season: currentSeason,
+        domain: currentDomain, token, tv_name: tvName, season: currentSeason, year,
       }),
     });
     const data = await safeJson(res);
@@ -710,99 +659,193 @@ function pollJobs() {
   }, 5000);
 }
 
-// ─── File Browser ─────────────────────────────────────────────────────────────
+// ─── File Manager ─────────────────────────────────────────────────────────────
+
+let _collapsedFolders = new Set();
+let _draggedPath = null;
+
+function setupFileManager() {
+  // ── Drag source ───────────────────────────────────────────────────────────────
+  document.addEventListener('dragstart', (e) => {
+    const row = e.target.closest('[data-drag-path]');
+    if (!row) return;
+    _draggedPath = row.dataset.dragPath;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', _draggedPath);
+    row.classList.add('dragging');
+  });
+  document.addEventListener('dragend', () => {
+    document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    _draggedPath = null;
+  });
+
+  // ── Drop targets (folders in the tree) ───────────────────────────────────────
+  document.addEventListener('dragover', (e) => {
+    if (!e.target.closest('.fm-drop-zone')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  });
+  document.addEventListener('dragenter', (e) => {
+    const zone = e.target.closest('.fm-drop-zone');
+    if (!zone || !_draggedPath) return;
+    // Skip if hovering over source or a descendant of source
+    const dest = zone.dataset.dropPath;
+    if (dest === _draggedPath || dest.startsWith(_draggedPath + '/')) return;
+    e.preventDefault();
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    zone.classList.add('drag-over');
+  });
+  document.addEventListener('dragleave', (e) => {
+    const zone = e.target.closest('.fm-drop-zone');
+    if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove('drag-over');
+  });
+  document.addEventListener('drop', (e) => {
+    const zone = e.target.closest('.fm-drop-zone');
+    if (!zone) return;
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const destDirPath = zone.dataset.dropPath;
+    if (!_draggedPath || destDirPath === undefined) return;
+    if (destDirPath === _draggedPath || destDirPath.startsWith(_draggedPath + '/')) return;
+    const name = _draggedPath.split(/[/\\]/).pop();
+    moveToPath(_draggedPath, name, destDirPath);
+    _draggedPath = null;
+  });
+
+  // ── Click delegation ──────────────────────────────────────────────────────────
+  document.addEventListener('click', (e) => {
+    const toggle = e.target.closest('.fm-toggle');
+    if (toggle) {
+      const path = toggle.dataset.folderPath;
+      if (_collapsedFolders.has(path)) _collapsedFolders.delete(path);
+      else _collapsedFolders.add(path);
+      loadFiles();
+      return;
+    }
+    const delBtn = e.target.closest('[data-delete-path]');
+    if (delBtn && delBtn.closest('#files-left-pane')) {
+      deletePath(delBtn.dataset.deletePath, delBtn.dataset.deleteName, !!delBtn.dataset.deleteDir);
+      return;
+    }
+    const playBtn = e.target.closest('[data-play-path]');
+    if (playBtn) playFile(playBtn.dataset.playPath, playBtn.dataset.playName);
+  });
+}
+
+// ─── File tree ────────────────────────────────────────────────────────────────
 
 async function loadFiles() {
+  const pane = document.getElementById('files-left-pane');
+  if (!pane) return;
   try {
     const res = await fetch('/api/files');
     const tree = await safeJson(res);
-    renderFilesTable(tree);
+    if (!tree || tree.length === 0) {
+      pane.innerHTML = '<div class="text-muted text-center py-4">Nessun file trovato</div>';
+      return;
+    }
+    pane.innerHTML = '';
+    // Root drop zone: drop here to move back to root of videos/
+    const rootZone = document.createElement('div');
+    rootZone.className = 'fm-row fm-drop-zone fm-root-zone';
+    rootZone.dataset.dropPath = '';
+    rootZone.innerHTML = `<span style="min-width:14px;flex-shrink:0"></span>
+      <i class="ti ti-home text-muted" style="flex-shrink:0"></i>
+      <span class="fm-meta ms-1">radice</span>`;
+    pane.appendChild(rootZone);
+    renderTreeItems(tree, pane, 0);
   } catch (e) {
-    document.getElementById('files-table-body').innerHTML =
-      `<tr><td colspan="4" class="text-danger text-center">Errore: ${e.message}</td></tr>`;
+    pane.innerHTML = `<div class="text-danger text-center py-4">Errore: ${escapeHtml(e.message)}</div>`;
   }
 }
 
-function renderFilesTable(tree) {
-  const tbody = document.getElementById('files-table-body');
-  const rows = [];
-  flattenTree(tree, rows, 0);
-
-  if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-4">Nessun file trovato</td></tr>';
-    return;
-  }
-  tbody.innerHTML = rows.join('');
-}
-
-let _collapsedFolders = new Set();
-
-function toggleFolder(path) {
-  if (_collapsedFolders.has(path)) _collapsedFolders.delete(path);
-  else _collapsedFolders.add(path);
-  loadFiles();
-}
-
-function flattenTree(items, rows, depth) {
+function renderTreeItems(items, container, depth) {
   items.forEach(item => {
-    const indent = '&nbsp;'.repeat(depth * 4);
+    const row = document.createElement('div');
+    row.className = 'fm-row';
+    row.style.paddingLeft = `${8 + depth * 16}px`;
+    row.setAttribute('draggable', 'true');
+    row.dataset.dragPath = item.path;
+
     if (item.type === 'directory') {
       const collapsed = _collapsedFolders.has(item.path);
-      const chevron = collapsed ? 'ti-chevron-right' : 'ti-chevron-down';
-      const moveBtn = _libraries.length > 0
-        ? `<button class="btn btn-sm btn-outline-cyan me-1" title="Sposta in libreria"
-               onclick="openMoveModal('${escapeStr(item.path)}', '${escapeStr(item.name)}')">
-             <i class="ti ti-send"></i>
-           </button>`
-        : '';
-      rows.push(`<tr class="table-active">
-        <td colspan="3">
-          <strong style="cursor:pointer" onclick="toggleFolder('${escapeStr(item.path)}')">
-            ${indent}<i class="ti ${chevron} text-muted me-1" style="font-size:.8em"></i><i class="ti ti-folder-filled text-yellow me-1"></i>${escapeHtml(item.name)}
-          </strong>
-        </td>
-        <td class="text-end">
-          ${moveBtn}
-          <button class="btn btn-sm btn-outline-danger" onclick="deletePath('${escapeStr(item.path)}', '${escapeStr(item.name)}', true)">
+      // Folders are also drop targets
+      row.classList.add('fm-drop-zone');
+      row.dataset.dropPath = item.path;
+      row.innerHTML = `
+        <i class="ti ${collapsed ? 'ti-chevron-right' : 'ti-chevron-down'} text-muted fm-toggle"
+           data-folder-path="${escapeHtml(item.path)}"
+           style="font-size:.75em;cursor:pointer;min-width:14px;flex-shrink:0"></i>
+        <i class="ti ti-folder-filled text-yellow" style="flex-shrink:0"></i>
+        <span class="fm-name">${escapeHtml(item.name)}</span>
+        <div class="fm-actions">
+          <button class="btn btn-sm btn-outline-danger"
+                  data-delete-path="${escapeHtml(item.path)}"
+                  data-delete-name="${escapeHtml(item.name)}"
+                  data-delete-dir="1">
             <i class="ti ti-trash"></i>
           </button>
-        </td>
-      </tr>`);
-      if (!collapsed && item.children) flattenTree(item.children, rows, depth + 1);
+        </div>`;
+      container.appendChild(row);
+      if (!collapsed && item.children) renderTreeItems(item.children, container, depth + 1);
     } else {
       const size = formatSize(item.size);
-      const date = new Date(item.mtime * 1000).toLocaleDateString('it-IT');
       const isMp4 = item.name.toLowerCase().endsWith('.mp4');
       const fileIcon = isMp4 ? 'ti-file-type-mp4 text-red' : 'ti-file text-muted';
-      const playBtn = isMp4
-        ? `<button class="btn btn-sm btn-outline-primary me-1" onclick="playFile('${escapeStr(item.path)}', '${escapeStr(item.name)}')"><i class="ti ti-player-play"></i></button>`
-        : '';
-      rows.push(`<tr>
-        <td>${indent}<i class="ti ${fileIcon} me-1"></i>${escapeHtml(item.name)}</td>
-        <td class="text-muted">${size}</td>
-        <td class="text-muted">${date}</td>
-        <td class="text-end">
-          ${playBtn}
-          <a class="btn btn-sm btn-outline-secondary me-1" href="/api/files/download/${encodeURI(item.path)}">
+      row.innerHTML = `
+        <span style="min-width:14px;flex-shrink:0"></span>
+        <i class="ti ${fileIcon}" style="flex-shrink:0"></i>
+        <span class="fm-name">${escapeHtml(item.name)}</span>
+        <span class="fm-meta">${size}</span>
+        <div class="fm-actions">
+          ${isMp4 ? `<button class="btn btn-sm btn-outline-primary"
+              data-play-path="${escapeHtml(item.path)}"
+              data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>` : ''}
+          <a class="btn btn-sm btn-outline-secondary"
+             href="/api/files/download/${encodeURI(item.path)}">
             <i class="ti ti-download"></i>
           </a>
-          <button class="btn btn-sm btn-outline-danger" onclick="deletePath('${escapeStr(item.path)}', '${escapeStr(item.name)}', false)">
+          <button class="btn btn-sm btn-outline-danger"
+                  data-delete-path="${escapeHtml(item.path)}"
+                  data-delete-name="${escapeHtml(item.name)}">
             <i class="ti ti-trash"></i>
           </button>
-        </td>
-      </tr>`);
+        </div>`;
+      container.appendChild(row);
     }
   });
 }
+
+// ─── Move (within videos/) ────────────────────────────────────────────────────
+
+async function moveToPath(sourcePath, name, destDirPath) {
+  try {
+    const res = await fetch('/api/files/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: sourcePath, dest_dir_path: destDirPath }),
+    });
+    const data = await safeJson(res);
+    if (res.ok) {
+      showToast(`Spostato: ${name}`, 'success');
+      loadFiles();
+    } else {
+      showToast(data.detail || 'Errore spostamento', 'danger');
+    }
+  } catch (e) {
+    showToast('Errore di rete', 'danger');
+  }
+}
+
+// ─── Player / Delete ──────────────────────────────────────────────────────────
 
 function playFile(path, name) {
   document.getElementById('player-modal-title').textContent = name;
   const video = document.getElementById('video-player');
   video.src = `/api/files/stream/${encodeURI(path)}`;
   video.load();
-
   showModal('player-modal');
-
   document.getElementById('player-modal').addEventListener('click', (e) => {
     if (e.target.closest('[data-bs-dismiss="modal"]')) {
       video.pause();
@@ -816,7 +859,6 @@ async function deletePath(path, name, isDir) {
     ? `Eliminare la cartella "${name}" e tutto il suo contenuto?`
     : `Eliminare il file "${name}"?`;
   if (!confirm(msg)) return;
-
   try {
     const res = await fetch(`/api/files/delete/${encodeURI(path)}`, { method: 'DELETE' });
     if (res.ok || res.status === 204) {

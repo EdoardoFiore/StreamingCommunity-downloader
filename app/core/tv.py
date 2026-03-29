@@ -152,6 +152,7 @@ def download_episode(
     temp_dir: str = None,
     progress_factory=None,
     cancel_event=None,
+    year: str = None,
 ) -> str:
     ep = eps[ep_index]
     logger.info(f"Downloading S{season:02d}E{ep['n']:02d} — {ep['name']}")
@@ -173,8 +174,9 @@ def download_episode(
     if m3u8_audio:
         logger.info("Audio track found, will merge")
 
-    mp4_name = f"{tv_name.replace('+', '_')}_S{season:02d}E{ep['n']:02d}"
-    mp4_path = os.path.join(output_dir, tv_name, f"Stagione {season:02d}", mp4_name + ".mp4")
+    series_folder = f"{tv_name} ({year})" if year else tv_name
+    mp4_name = f"{tv_name} S{season:02d}E{ep['n']:02d}"
+    mp4_path = os.path.join(output_dir, series_folder, f"Season {season:02d}", mp4_name + ".mp4")
 
     download_m3u8(
         m3u8_index=m3u8_url,
