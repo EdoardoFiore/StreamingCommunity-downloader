@@ -28,6 +28,7 @@ def get_domain_version(domain: str) -> str:
     return ""
 
 
+
 def search(title_search: str, domain: str) -> list[dict]:
     req = requests.get(
         f"https://{domain}/api/search",

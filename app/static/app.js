@@ -367,7 +367,40 @@ function openDetailModal(idx) {
     btn.onclick = () => { hideModal('detail-modal'); openEpisodeBrowser(item.id, item.name, item.slug, year); };
   }
 
+  const langsEl = document.getElementById('detail-langs');
+  langsEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Caricamento lingue...';
+
   showModal('detail-modal');
+
+  const langParams = new URLSearchParams({
+    type: isMovie ? 'movie' : 'tv',
+    domain: currentDomain,
+    slug: item.slug || '',
+    version: currentVersion || '',
+  });
+  const LANG_NAMES = {
+    ita: 'Italiano', eng: 'English', fra: 'Français', spa: 'Español',
+    deu: 'Deutsch', por: 'Português', jpn: '日本語', zho: '中文',
+    ara: 'العربية', rus: 'Русский', kor: '한국어',
+  };
+  const langName = code => LANG_NAMES[code] || code;
+
+  fetch(`/api/search/languages/${item.id}?${langParams}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(info => {
+      if (!info) { langsEl.innerHTML = ''; return; }
+      let html = '';
+      const audioHtml = (info.audio && info.audio.length)
+        ? info.audio.map(c => `<span class="badge bg-blue-lt me-1">${langName(c)}</span>`).join('')
+        : `<span class="text-muted fst-italic">originale</span>`;
+      html += `<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span>${audioHtml}</div>`;
+      if (info.subtitles && info.subtitles.length) {
+        const badges = info.subtitles.map(c => `<span class="badge bg-teal-lt me-1">${langName(c)}</span>`).join('');
+        html += `<div><span class="text-muted me-1"><i class="ti ti-subtitles ti-sm"></i> Sub:</span>${badges}</div>`;
+      }
+      langsEl.innerHTML = html;
+    })
+    .catch(() => { langsEl.innerHTML = ''; });
 }
 
 // ─── Film download ────────────────────────────────────────────────────────────
@@ -578,7 +611,10 @@ function renderJobsTable(jobs) {
       ? `<small class="text-danger">${escapeHtml(j.error || 'Errore')}</small>`
       : '—';
 
-    const date = new Date(j.created_at + 'Z').toLocaleString('it-IT');
+    const rawTs = j.created_at;
+    const date = rawTs
+      ? new Date(/[Z+]/.test(rawTs) ? rawTs : rawTs + 'Z').toLocaleString('it-IT')
+      : '—';
     const typeBadge = j.type === 'film'
       ? '<span class="badge bg-blue-lt">Film</span>'
       : '<span class="badge bg-green-lt">Serie</span>';

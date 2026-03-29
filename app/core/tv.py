@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.core.headers import get_headers
-from app.core.m3u8 import download_m3u8
+from app.core.m3u8 import download_m3u8, fetch_master_languages
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,26 @@ def _get_m3u8_audio(json_win_video, json_win_param, referer):
     return None
 
 
+def get_tv_languages(tv_id: int, slug: str, domain: str, version: str) -> dict:
+    """Detect available audio/subtitle languages using episode 1x01 as sample."""
+    from urllib.parse import urlparse, parse_qs
+    token = get_token(tv_id, domain)
+    eps = get_info_season(tv_id, slug, domain, version, token, 1)
+    if not eps:
+        raise RuntimeError("No episodes found in season 1")
+    embed_content, url_embed = _get_iframe(tv_id, eps[0]["id"], domain, token)
+    json_win_video, json_win_param = _parse_content(embed_content, url_embed)
+    m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
+    referer = (
+        f"https://vixcloud.co/embed/{json_win_video['id']}"
+        f"?token={json_win_param['token']}&expires={json_win_param['expires']}"
+    )
+    langs = fetch_master_languages(m3u8_url, referer)
+    explicit_lang = parse_qs(urlparse(url_embed).query).get("lang", [None])[0]
+    langs["lang"] = explicit_lang
+    return langs
+
+
 def download_episode(
     tv_id: int,
     eps: list[dict],
@@ -159,7 +179,7 @@ def download_episode(
 
     embed_content, url_embed = _get_iframe(tv_id, ep["id"], domain, token)
     json_win_video, json_win_param = _parse_content(embed_content, url_embed)
-    logger.info("Video ID: %s token: %.8s...", json_win_video['id'], json_win_param.get('token', ''))
+    logger.info("Video ID: %s token: %.8s... audio lang: %s", json_win_video['id'], json_win_param.get('token', ''), json_win_video.get('lang', 'it'))
 
     embed_referer = (
         f"https://vixcloud.co/embed/{json_win_video['id']}"

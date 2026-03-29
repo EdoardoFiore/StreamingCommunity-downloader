@@ -79,7 +79,7 @@ def _build_library_tree(directory: Path, depth: int = 0, max_depth: int = 3) -> 
     return entries
 
 
-_DEFAULT_EXCLUDED = {"images", "snippets", "subtitle", "lost+found"}
+_DEFAULT_EXCLUDED = {"images", "snippets", "lost+found"}
 
 
 @router.get("")

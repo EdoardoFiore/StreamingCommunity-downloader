@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.core.headers import get_headers
-from app.core.m3u8 import download_m3u8
+from app.core.m3u8 import download_m3u8, fetch_master_languages
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,23 @@ def _get_m3u8_audio(json_win_video, json_win_param, embed_referer):
     return None
 
 
+def get_film_languages(id_film: int, domain: str) -> dict:
+    from urllib.parse import urlparse, parse_qs
+    embed_content, url_embed = _get_iframe(id_film, domain)
+    json_win_video, json_win_param = _parse_content(embed_content, url_embed)
+    m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
+    referer = (
+        f"https://vixcloud.co/embed/{json_win_video['id']}"
+        f"?token={json_win_param['token']}&expires={json_win_param['expires']}"
+    )
+    langs = fetch_master_languages(m3u8_url, referer)
+    # Only expose lang if explicitly present in the embed URL — the default "it" is
+    # a CDN fallback and does not reliably indicate the actual embedded audio language.
+    explicit_lang = parse_qs(urlparse(url_embed).query).get("lang", [None])[0]
+    langs["lang"] = explicit_lang
+    return langs
+
+
 def download_film(id_film: int, title_name: str, domain: str,
                   output_dir: str = "videos",
                   temp_dir: str = None,
@@ -102,6 +119,7 @@ def download_film(id_film: int, title_name: str, domain: str,
     json_win_video, json_win_param = _parse_content(embed_content, embed_referer)
     logger.info("Video ID: %s token: %.8s... embed_url: %s", json_win_video['id'], json_win_param.get('token', ''), embed_referer[:80])
 
+    logger.info("Audio language: %s", json_win_video.get("lang", "it"))
     m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
     m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_referer)
     m3u8_audio = _get_m3u8_audio(json_win_video, json_win_param, embed_referer)

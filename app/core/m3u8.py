@@ -104,24 +104,39 @@ class M3U8_Parser:
         logger.warning("No video playlist found")
         return None
 
-    def download_subtitle(self, subtitle_dir: str):
+    def available_languages(self) -> dict:
+        """Return available audio and subtitle language codes from the master playlist."""
+        audio = [t.get("language") for t in self.audio_ts if t.get("language")]
+        subtitles = [s.get("language") for s in self.subtitle_playlist if s.get("language") and s.get("language") != "auto"]
+        return {"audio": audio, "subtitles": subtitles}
+
+    # ISO 639-2 (3-letter) → ISO 639-1 (2-letter) for Jellyfin-compatible filenames
+    _LANG_MAP = {
+        "ita": "it", "eng": "en", "fra": "fr", "spa": "es", "deu": "de",
+        "por": "pt", "jpn": "ja", "zho": "zh", "ara": "ar", "rus": "ru",
+        "kor": "ko", "nld": "nl", "pol": "pl", "swe": "sv", "nor": "no",
+        "dan": "da", "fin": "fi", "tur": "tr", "ell": "el", "ces": "cs",
+    }
+
+    def download_subtitle(self, video_dir: str, video_stem: str):
+        """Save subtitles alongside the video as {video_stem}.{lang}.vtt (Jellyfin convention)."""
         if not self.subtitle_playlist:
             logger.info("No subtitles found")
             return
 
-        os.makedirs(subtitle_dir, exist_ok=True)
+        os.makedirs(video_dir, exist_ok=True)
         for sub_info in self.subtitle_playlist:
-            name_language = sub_info.get("language")
-            if name_language in ["auto", "ita"]:
+            lang_code = sub_info.get("language", "")
+            if lang_code == "auto":
                 continue
-            logger.info(f"Downloading subtitle: {name_language}")
+            lang_short = self._LANG_MAP.get(lang_code, lang_code)
+            out_path = os.path.join(video_dir, f"{video_stem}.{lang_short}.vtt")
+            logger.info("Downloading subtitle: %s → %s", lang_code, out_path)
             req_sub_content = requests.get(sub_info.get("uri"))
             sub_parse = M3U8_Parser()
             sub_parse.parse_data(req_sub_content.text)
             if sub_parse.subtitle:
-                open(os.path.join(subtitle_dir, name_language + ".vtt"), "wb").write(
-                    requests.get(sub_parse.subtitle[0]).content
-                )
+                open(out_path, "wb").write(requests.get(sub_parse.subtitle[0]).content)
 
     def get_track_audio(self, language_name):
         if self.audio_ts:
@@ -395,6 +410,16 @@ def _fetch_text(url):
     raise RuntimeError(f"Failed to fetch {url}: HTTP {response.status_code}")
 
 
+def fetch_master_languages(m3u8_url: str, referer: str) -> dict:
+    """Fetch a master M3U8 playlist and return available audio/subtitle language codes."""
+    req = requests.get(m3u8_url, headers={"user-agent": get_headers(), "referer": referer}, timeout=10)
+    if not req.ok:
+        raise RuntimeError(f"Master M3U8 returned HTTP {req.status_code}")
+    parser = M3U8_Parser()
+    parser.parse_data(req.text)
+    return parser.available_languages()
+
+
 def download_m3u8(
     m3u8_playlist=None,
     m3u8_index=None,
@@ -409,7 +434,9 @@ def download_m3u8(
 ):
     key = bytes.fromhex(key) if key is not None else None
 
-    subtitle_dir = os.path.join(os.path.dirname(output_filename), "subtitle")
+    # Jellyfin convention: subtitles live next to the video as {stem}.{lang}.vtt
+    video_dir = os.path.dirname(output_filename) or "."
+    video_stem = os.path.splitext(os.path.basename(output_filename))[0]
 
     if m3u8_playlist is not None:
         parse_class_m3u8 = M3U8_Parser()
@@ -424,15 +451,30 @@ def download_m3u8(
             if not m3u8_index or "https" not in m3u8_index:
                 raise RuntimeError("Cannot find a valid M3U8 index URL")
 
+        langs = parse_class_m3u8.available_languages()
+        logger.info("Available languages — audio: %s | subtitles: %s", langs["audio"], langs["subtitles"])
+
         if DOWNLOAD_SUB:
-            parse_class_m3u8.download_subtitle(subtitle_dir)
+            parse_class_m3u8.download_subtitle(video_dir, video_stem)
+
+    elif m3u8_index is not None and DOWNLOAD_SUB:
+        # m3u8_index is a master playlist URL — parse it to extract subtitles
+        try:
+            master_content = _fetch_text(m3u8_index)
+            parse_master = M3U8_Parser()
+            parse_master.parse_data(master_content)
+            langs = parse_master.available_languages()
+            logger.info("Available languages — audio: %s | subtitles: %s", langs["audio"], langs["subtitles"])
+            parse_master.download_subtitle(video_dir, video_stem)
+        except Exception as e:
+            logger.warning("Could not parse subtitles from master playlist: %s", e)
 
     if m3u8_subtitle is not None:
         parse_sub = M3U8_Parser()
         content_sub = m3u8_subtitle if "#EXTM3U" in m3u8_subtitle else _fetch_text(m3u8_subtitle)
         parse_sub.parse_data(content_sub)
         if DOWNLOAD_SUB:
-            parse_sub.download_subtitle(subtitle_dir)
+            parse_sub.download_subtitle(video_dir, video_stem)
 
     os.makedirs(os.path.dirname(output_filename) or ".", exist_ok=True)
 
