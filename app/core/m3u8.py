@@ -212,6 +212,8 @@ class M3U8_Segments:
         return None
 
     def save_ts(self, index, progress_counter, quit_event):
+        if self._cancel and self._cancel.is_set():
+            return
         ts_url = self.segments[index]
         ts_filename = os.path.join(self.temp_folder, f"{index}.ts")
 
@@ -290,6 +292,8 @@ class M3U8_Segments:
         progress_counter.refresh()
 
     def join(self, output_filename):
+        if self._cancel and self._cancel.is_set():
+            raise DownloadCancelledError("Download annullato dall'utente")
         ts_files = sorted(
             [f for f in os.listdir(self.temp_folder) if f.endswith(".ts")],
             key=lambda f: int("".join(filter(str.isdigit, f))),
@@ -333,8 +337,7 @@ class M3U8_Downloader:
         self.referer = referer
         self.cancel_event = cancel_event
 
-        output_dir = os.path.dirname(output_filename)
-        self.audio_path = os.path.join(output_dir or ".", "_audio_tmp.mp4")
+        self.audio_path = os.path.join(self.temp_dir, "_audio_tmp.mp4")
 
     def start(self):
         video_temp = os.path.join(self.temp_dir, "video")

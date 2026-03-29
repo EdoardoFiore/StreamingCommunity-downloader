@@ -69,7 +69,7 @@ class JobManager:
         if not job or job.status not in ("queued", "running"):
             return False
         job.cancel_event.set()
-        if job.status == "queued":
+        if job.status in ("queued", "running"):
             job.status = "cancelled"
             asyncio.run_coroutine_threadsafe(
                 job.progress_queue.put({"type": "error", "message": "Annullato"}),
