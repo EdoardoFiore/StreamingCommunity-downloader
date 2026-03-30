@@ -584,66 +584,118 @@ async function refreshJobs() {
   try {
     const res = await fetch('/api/jobs');
     const jobs = await safeJson(res);
-    renderJobsTable(jobs);
-    jobs.filter(j => j.status === 'running' || j.status === 'queued').forEach(j => watchJob(j.job_id));
+    syncJobsTable(jobs);
+    // Only open SSE for running jobs — queued jobs emit no events
+    jobs.filter(j => j.status === 'running').forEach(j => watchJob(j.job_id));
     updateActiveBadge();
   } catch (e) { console.error('refreshJobs:', e); }
 }
 
-function renderJobsTable(jobs) {
+function _buildJobRow(j) {
+  const phase = j.status === 'running' ? (jobPhases[j.job_id] || 'running') : j.status;
+  const statusBadge = {
+    queued:   '<span class="badge bg-secondary-lt">In coda</span>',
+    running:  '<span class="badge bg-blue-lt">In corso</span>',
+    joining:  '<span class="badge bg-yellow-lt">Finalizzazione</span>',
+    audio:    '<span class="badge bg-teal-lt">Audio</span>',
+    merging:  '<span class="badge bg-purple-lt">Unione</span>',
+    done:     '<span class="badge bg-success-lt">Completato</span>',
+    error:    '<span class="badge bg-danger-lt">Errore</span>',
+    cancelled:'<span class="badge bg-secondary-lt">Annullato</span>',
+  }[phase] || phase;
+
+  const progress = phase === 'running'
+    ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-blue" id="prog-${j.job_id}" style="width:${j.progress.pct}%"></div></div><small class="text-muted">${j.progress.pct}%</small>`
+    : phase === 'joining'
+    ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-yellow" style="width:100%"></div></div><small class="text-muted">Finalizzazione video...</small>`
+    : phase === 'audio'
+    ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-teal" id="prog-${j.job_id}" style="width:${j.progress.pct}%"></div></div><small class="text-muted">Audio ${j.progress.pct}%</small>`
+    : phase === 'merging'
+    ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-purple" style="width:100%"></div></div><small class="text-muted">Unione tracce...</small>`
+    : j.status === 'done'
+    ? `<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>`
+    : j.status === 'error'
+    ? `<small class="text-danger">${escapeHtml(j.error || 'Errore')}</small>`
+    : '—';
+
+  const rawTs = j.created_at;
+  const date = rawTs
+    ? new Date(/[Z+]/.test(rawTs) ? rawTs : rawTs + 'Z').toLocaleString('it-IT')
+    : '—';
+  const typeBadge = j.type === 'film'
+    ? '<span class="badge bg-blue-lt">Film</span>'
+    : '<span class="badge bg-green-lt">Serie</span>';
+  const canStop = j.status === 'running' || j.status === 'queued';
+  const stopBtn = canStop
+    ? `<button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${j.job_id}')" title="Interrompi"><i class="ti ti-player-stop"></i></button>`
+    : '';
+
+  return `<tr id="job-row-${j.job_id}">
+    <td>${escapeHtml(j.title)}</td>
+    <td>${typeBadge}</td>
+    <td>${statusBadge}</td>
+    <td style="min-width:160px">${progress}</td>
+    <td class="text-muted">${date}</td>
+    <td id="job-actions-${j.job_id}">${stopBtn}</td>
+  </tr>`;
+}
+
+function syncJobsTable(jobs) {
   const tbody = document.getElementById('jobs-table-body');
+
   if (jobs.length === 0) {
     tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4">Nessun download</td></tr>';
     return;
   }
-  tbody.innerHTML = jobs.map(j => {
-    const phase = j.status === 'running' ? (jobPhases[j.job_id] || 'running') : j.status;
-    const statusBadge = {
-      queued:   '<span class="badge bg-secondary-lt">In coda</span>',
-      running:  '<span class="badge bg-blue-lt">In corso</span>',
-      joining:  '<span class="badge bg-yellow-lt">Finalizzazione</span>',
-      audio:    '<span class="badge bg-teal-lt">Audio</span>',
-      merging:  '<span class="badge bg-purple-lt">Unione</span>',
-      done:     '<span class="badge bg-success-lt">Completato</span>',
-      error:    '<span class="badge bg-danger-lt">Errore</span>',
-    }[phase] || phase;
 
-    const progress = phase === 'running'
-      ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-blue" id="prog-${j.job_id}" style="width:${j.progress.pct}%"></div></div><small class="text-muted">${j.progress.pct}%</small>`
-      : phase === 'joining'
-      ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-yellow" style="width:100%"></div></div><small class="text-muted">Finalizzazione video...</small>`
-      : phase === 'audio'
-      ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-teal" id="prog-${j.job_id}" style="width:${j.progress.pct}%"></div></div><small class="text-muted">Audio ${j.progress.pct}%</small>`
-      : phase === 'merging'
-      ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-purple" style="width:100%"></div></div><small class="text-muted">Unione tracce...</small>`
-      : j.status === 'done'
-      ? `<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>`
-      : j.status === 'error'
-      ? `<small class="text-danger">${escapeHtml(j.error || 'Errore')}</small>`
-      : '—';
+  // Remove placeholder row if present
+  const placeholder = tbody.querySelector('td[colspan]');
+  if (placeholder) tbody.innerHTML = '';
 
-    const rawTs = j.created_at;
-    const date = rawTs
-      ? new Date(/[Z+]/.test(rawTs) ? rawTs : rawTs + 'Z').toLocaleString('it-IT')
-      : '—';
-    const typeBadge = j.type === 'film'
-      ? '<span class="badge bg-blue-lt">Film</span>'
-      : '<span class="badge bg-green-lt">Serie</span>';
-    const canStop = j.status === 'running' || j.status === 'queued';
-    const stopBtn = canStop
-      ? `<button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${j.job_id}')" title="Interrompi"><i class="ti ti-player-stop"></i></button>`
-      : '';
+  const renderedIds = new Set([...tbody.querySelectorAll('tr[id]')].map(r => r.id.replace('job-row-', '')));
+  const serverIds = new Set(jobs.map(j => j.job_id));
 
-    return `<tr id="job-row-${j.job_id}">
-      <td>${escapeHtml(j.title)}</td>
-      <td>${typeBadge}</td>
-      <td>${statusBadge}</td>
-      <td style="min-width:160px">${progress}</td>
-      <td class="text-muted">${date}</td>
-      <td id="job-actions-${j.job_id}">${stopBtn}</td>
-    </tr>`;
-  }).join('');
+  // Remove rows no longer in server list
+  for (const id of renderedIds) {
+    if (!serverIds.has(id)) document.getElementById(`job-row-${id}`)?.remove();
+  }
+
+  for (const j of jobs) {
+    const existing = document.getElementById(`job-row-${j.job_id}`);
+    if (!existing) {
+      // New row — insert in correct position
+      const allRows = [...tbody.querySelectorAll('tr[id]')];
+      const serverIdx = jobs.indexOf(j);
+      const refRow = allRows[serverIdx] || null;
+      const tmp = document.createElement('tbody');
+      tmp.innerHTML = _buildJobRow(j);
+      tbody.insertBefore(tmp.firstElementChild, refRow);
+    } else if (j.status === 'running') {
+      // SSE manages running rows — skip polling update
+    } else {
+      // Queued / done / error: update status and actions cells only
+      const cells = existing.querySelectorAll('td');
+      const phase = j.status;
+      const statusBadge = {
+        queued:    '<span class="badge bg-secondary-lt">In coda</span>',
+        done:      '<span class="badge bg-success-lt">Completato</span>',
+        error:     '<span class="badge bg-danger-lt">Errore</span>',
+        cancelled: '<span class="badge bg-secondary-lt">Annullato</span>',
+      }[phase] || phase;
+      cells[2].innerHTML = statusBadge;
+      if (j.status === 'done') {
+        cells[3].innerHTML = '<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>';
+      } else if (j.status === 'error') {
+        cells[3].innerHTML = `<small class="text-danger">${escapeHtml(j.error || 'Errore')}</small>`;
+      }
+      const actionsEl = document.getElementById(`job-actions-${j.job_id}`);
+      if (actionsEl && j.status !== 'queued') actionsEl.innerHTML = '';
+    }
+  }
 }
+
+// Keep renderJobsTable as alias for backward compat (called nowhere externally now)
+function renderJobsTable(jobs) { syncJobsTable(jobs); }
 
 function updateJobRow(jobId, status, pct, errorMsg = '') {
   const row = document.getElementById(`job-row-${jobId}`);
