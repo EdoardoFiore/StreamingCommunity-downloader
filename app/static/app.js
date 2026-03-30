@@ -8,6 +8,7 @@ function itemYear(item) {
 let currentDomain = '';
 let currentVersion = '';
 let activeEventSources = {}; // job_id -> EventSource
+let jobPhases = {}; // job_id -> current phase (joining | audio | merging | running)
 let _searchResults = [];
 let _libraries = [];  // [{name, path}, ...]
 
@@ -560,9 +561,9 @@ function watchJob(jobId) {
   es.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'progress') {
-      updateJobRow(jobId, 'running', msg.pct);
+      updateJobRow(jobId, msg.phase || 'running', msg.pct);
     } else if (msg.type === 'status') {
-      if (msg.phase === 'joining') updateJobRow(jobId, 'joining', 100);
+      updateJobRow(jobId, msg.phase, 100);
     } else if (msg.type === 'done') {
       updateJobRow(jobId, 'done', 100);
       es.close();
@@ -596,15 +597,25 @@ function renderJobsTable(jobs) {
     return;
   }
   tbody.innerHTML = jobs.map(j => {
+    const phase = j.status === 'running' ? (jobPhases[j.job_id] || 'running') : j.status;
     const statusBadge = {
-      queued: '<span class="badge bg-secondary-lt">In coda</span>',
-      running: '<span class="badge bg-blue-lt">In corso</span>',
-      done: '<span class="badge bg-success-lt">Completato</span>',
-      error: '<span class="badge bg-danger-lt">Errore</span>',
-    }[j.status] || j.status;
+      queued:   '<span class="badge bg-secondary-lt">In coda</span>',
+      running:  '<span class="badge bg-blue-lt">In corso</span>',
+      joining:  '<span class="badge bg-yellow-lt">Finalizzazione</span>',
+      audio:    '<span class="badge bg-teal-lt">Audio</span>',
+      merging:  '<span class="badge bg-purple-lt">Unione</span>',
+      done:     '<span class="badge bg-success-lt">Completato</span>',
+      error:    '<span class="badge bg-danger-lt">Errore</span>',
+    }[phase] || phase;
 
-    const progress = j.status === 'running'
+    const progress = phase === 'running'
       ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-blue" id="prog-${j.job_id}" style="width:${j.progress.pct}%"></div></div><small class="text-muted">${j.progress.pct}%</small>`
+      : phase === 'joining'
+      ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-yellow" style="width:100%"></div></div><small class="text-muted">Finalizzazione video...</small>`
+      : phase === 'audio'
+      ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-teal" id="prog-${j.job_id}" style="width:${j.progress.pct}%"></div></div><small class="text-muted">Audio ${j.progress.pct}%</small>`
+      : phase === 'merging'
+      ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-purple" style="width:100%"></div></div><small class="text-muted">Unione tracce...</small>`
       : j.status === 'done'
       ? `<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>`
       : j.status === 'error'
@@ -646,18 +657,30 @@ function updateJobRow(jobId, status, pct, errorMsg = '') {
   const cells = row.querySelectorAll('td');
   const actionsEl = document.getElementById(`job-actions-${jobId}`);
   if (status === 'done') {
+    delete jobPhases[jobId];
     cells[2].innerHTML = '<span class="badge bg-success-lt">Completato</span>';
     cells[3].innerHTML = '<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>';
     if (actionsEl) actionsEl.innerHTML = '';
     if (document.getElementById('page-files').style.display !== 'none') loadFiles();
   } else if (status === 'error') {
+    delete jobPhases[jobId];
     cells[2].innerHTML = '<span class="badge bg-danger-lt">Errore</span>';
     cells[3].innerHTML = `<small class="text-danger">${escapeHtml(errorMsg)}</small>`;
     if (actionsEl) actionsEl.innerHTML = '';
   } else if (status === 'joining') {
-    cells[2].innerHTML = '<span class="badge bg-yellow-lt">Ricostruzione</span>';
-    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-yellow" style="width:100%"></div></div><small class="text-muted">Ricostruzione...</small>`;
+    jobPhases[jobId] = 'joining';
+    cells[2].innerHTML = '<span class="badge bg-yellow-lt">Finalizzazione</span>';
+    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-yellow" style="width:100%"></div></div><small class="text-muted">Finalizzazione video...</small>`;
+  } else if (status === 'audio') {
+    jobPhases[jobId] = 'audio';
+    cells[2].innerHTML = '<span class="badge bg-teal-lt">Audio</span>';
+    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-teal" id="prog-${jobId}" style="width:${pct}%"></div></div><small class="text-muted">Audio ${pct}%</small>`;
+  } else if (status === 'merging') {
+    jobPhases[jobId] = 'merging';
+    cells[2].innerHTML = '<span class="badge bg-purple-lt">Unione</span>';
+    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-purple" style="width:100%"></div></div><small class="text-muted">Unione tracce...</small>`;
   } else if (status === 'running') {
+    jobPhases[jobId] = 'running';
     cells[2].innerHTML = '<span class="badge bg-blue-lt">In corso</span>';
     cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-blue" id="prog-${jobId}" style="width:${pct}%"></div></div><small class="text-muted">${pct}%</small>`;
   }

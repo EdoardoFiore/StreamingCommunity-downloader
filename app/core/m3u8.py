@@ -56,12 +56,11 @@ class M3U8_Parser:
             m3u8_obj = M3U8_Lib(m3u8_content)
 
             for playlist in m3u8_obj.playlists:
-                self.video_playlist.append({"uri": playlist.uri})
-                self.stream_infos = {
-                    "bandwidth": playlist.stream_info.bandwidth,
-                    "codecs": playlist.stream_info.codecs,
+                self.video_playlist.append({
+                    "uri": playlist.uri,
+                    "bandwidth": playlist.stream_info.bandwidth or 0,
                     "resolution": playlist.stream_info.resolution,
-                }
+                })
 
             for key in m3u8_obj.keys:
                 if key is not None:
@@ -100,7 +99,9 @@ class M3U8_Parser:
 
     def get_best_quality(self):
         if self.video_playlist:
-            return self.video_playlist[0].get("uri")
+            best = max(self.video_playlist, key=lambda p: p.get("bandwidth") or 0)
+            logger.info("Selected quality: %s bandwidth=%s", best.get("resolution"), best.get("bandwidth"))
+            return best.get("uri")
         logger.warning("No video playlist found")
         return None
 
@@ -148,11 +149,12 @@ class M3U8_Parser:
 
 
 class M3U8_Segments:
-    def __init__(self, url, key=None, temp_dir=None, progress_factory=None, referer=None, cancel_event=None):
+    def __init__(self, url, key=None, temp_dir=None, progress_factory=None, referer=None, cancel_event=None, phase=None):
         self.url = url
         self.key = key
         self.referer = referer
         self._cancel = cancel_event
+        self.phase = phase
 
         if key is not None:
             self.decryption = Decryption(key)
@@ -196,7 +198,7 @@ class M3U8_Segments:
             logger.info("Direct segment playlist: %d segments, first=%s", len(self.segments), self.segments[0] if self.segments else "none")
         elif parser.video_playlist:
             # Master playlist — resolve the best quality rendition
-            best_url = parser.video_playlist[0].get("uri")
+            best_url = parser.get_best_quality()
             logger.info("Master playlist detected (%d variants), fetching best rendition: %s", len(parser.video_playlist), best_url)
             rendition_resp = requests.get(best_url, headers=self._headers())
             if not rendition_resp.ok:
@@ -253,7 +255,7 @@ class M3U8_Segments:
     def download_ts(self):
         self._failed_segments = set()
         bar_factory = self.progress_factory or (lambda **kw: tqdm(**kw))
-        progress_counter = bar_factory(total=len(self.segments), unit="seg", desc="Downloading")
+        progress_counter = bar_factory(total=len(self.segments), unit="seg", desc="Downloading", phase=self.phase)
         self._bar = progress_counter
 
         quit_event = threading.Event()
@@ -396,14 +398,24 @@ class M3U8_Downloader:
         video_m3u8.join(self.video_path)
 
         if self.m3u8_audio is not None:
+            bar = getattr(video_m3u8, "_bar", None)
+            if bar and hasattr(bar, "emit_status"):
+                bar.emit_status("audio")
+
             audio_temp = os.path.join(self.temp_dir, "audio")
             audio_m3u8 = M3U8_Segments(self.m3u8_audio, self.key,
                                         temp_dir=audio_temp,
-                                        referer=self.referer)
+                                        progress_factory=self.progress_factory,
+                                        referer=self.referer,
+                                        cancel_event=self.cancel_event,
+                                        phase="audio")
             logger.info("Downloading audio segments...")
             audio_m3u8.get_info()
             audio_m3u8.download_ts()
             audio_m3u8.join(self.audio_path)
+
+            if bar and hasattr(bar, "emit_status"):
+                bar.emit_status("merging")
             self.join_audio()
 
     def join_audio(self):

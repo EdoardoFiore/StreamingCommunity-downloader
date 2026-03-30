@@ -31,7 +31,7 @@ class DownloadJob:
 class JobManager:
     def __init__(self):
         self._jobs: dict[str, DownloadJob] = {}
-        self._executor = ThreadPoolExecutor(max_workers=3)
+        self._executor = ThreadPoolExecutor(max_workers=1)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
@@ -60,7 +60,8 @@ class JobManager:
 
         def factory(**kwargs):
             total = kwargs.get("total", 0)
-            return WebProgressBar(total, job.progress_queue, loop)
+            phase = kwargs.get("phase")
+            return WebProgressBar(total, job.progress_queue, loop, phase=phase)
 
         return factory
 
