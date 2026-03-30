@@ -127,7 +127,7 @@ class M3U8_Parser:
         os.makedirs(video_dir, exist_ok=True)
         for sub_info in self.subtitle_playlist:
             lang_code = sub_info.get("language", "")
-            if lang_code == "auto":
+            if lang_code not in ["ita", "eng"]:
                 continue
             lang_short = self._LANG_MAP.get(lang_code, lang_code)
             out_path = os.path.join(video_dir, f"{video_stem}.{lang_short}.vtt")
@@ -226,6 +226,14 @@ class M3U8_Segments:
                 time.sleep(1)
         return None
 
+    def _write_ts(self, index, content):
+        ts_filename = os.path.join(self.temp_folder, f"{index}.ts")
+        with open(ts_filename, "wb") as ts_file:
+            if self.key and self.decryption.iv:
+                ts_file.write(self.decryption.decrypt_ts(content))
+            else:
+                ts_file.write(content)
+
     def save_ts(self, index, progress_counter, quit_event):
         if self._cancel and self._cancel.is_set():
             return
@@ -235,15 +243,15 @@ class M3U8_Segments:
         if not os.path.exists(ts_filename):
             ts_content = self.get_req_ts(ts_url)
             if ts_content is not None:
-                with open(ts_filename, "wb") as ts_file:
-                    if self.key and self.decryption.iv:
-                        ts_file.write(self.decryption.decrypt_ts(ts_content))
-                    else:
-                        ts_file.write(ts_content)
+                self._write_ts(index, ts_content)
+            else:
+                self._failed_segments.add(index)
+                logger.warning("Segment %d failed after all retries: ...%s", index, ts_url[-60:])
 
         progress_counter.update(1)
 
     def download_ts(self):
+        self._failed_segments = set()
         bar_factory = self.progress_factory or (lambda **kw: tqdm(**kw))
         progress_counter = bar_factory(total=len(self.segments), unit="seg", desc="Downloading")
         self._bar = progress_counter
@@ -286,6 +294,23 @@ class M3U8_Segments:
         if cancelled:
             raise DownloadCancelledError("Download annullato dall'utente")
 
+        # Second pass: retry failed segments sequentially to avoid gaps in the TS stream
+        if self._failed_segments:
+            logger.warning("Retrying %d failed segments sequentially...", len(self._failed_segments))
+            still_failed = set()
+            for index in sorted(self._failed_segments):
+                if self._cancel and self._cancel.is_set():
+                    raise DownloadCancelledError("Download annullato dall'utente")
+                time.sleep(0.5)
+                ts_content = self.get_req_ts(self.segments[index])
+                if ts_content is not None:
+                    self._write_ts(index, ts_content)
+                    logger.info("Segment %d recovered on retry", index)
+                else:
+                    still_failed.add(index)
+                    logger.error("Segment %d permanently failed", index)
+            self._failed_segments = still_failed
+
     def timer(self, progress_counter, quit_event, timeout_checker):
         start_time = time.time()
         last_count = 0
@@ -322,6 +347,10 @@ class M3U8_Segments:
             for ts_file in ts_files:
                 with open(os.path.join(self.temp_folder, ts_file), "rb") as seg:
                     out.write(seg.read())
+
+        still_failed = getattr(self, "_failed_segments", set())
+        if still_failed:
+            logger.warning("%d segments permanently missing from output: %s", len(still_failed), sorted(still_failed))
 
         logger.info("Joining %d / %d segments...", len(ts_files), len(self.segments))
         if hasattr(self, '_bar') and hasattr(self._bar, 'emit_status'):
