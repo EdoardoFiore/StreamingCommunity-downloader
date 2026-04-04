@@ -82,3 +82,10 @@ The CLI supports range/list selection for seasons and episodes:
 ### Quality Selection
 
 Auto-selects highest available resolution: 1080p → 720p → 480p → 360p. Subtitles for all non-Italian non-auto languages are downloaded as `.vtt` files alongside the video.
+
+### Web Panel Layer
+
+`app/core/` mirrors `Src/Api/` for the FastAPI web panel: `film.py`, `tv.py`, `m3u8.py`, `page.py`, `headers.py`.
+Edits to download logic often need to be applied in **both** `Src/` and `app/core/`.
+
+**vixcloud.co 403 quirk:** TV episode M3U8 URLs sometimes return 403 — appending `?b=1` (or `&b=1`) to the playlist URL resolves it.

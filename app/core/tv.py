@@ -107,9 +107,12 @@ def _parse_content(embed_content, url_embed):
     return parsed_video, parsed_param
 
 
-def _get_m3u8_url(json_win_video, json_win_param):
+def _get_m3u8_url(json_win_video, json_win_param, add_b1=False):
     base = f"https://vixcloud.co/playlist/{json_win_video['id']}"
-    url = f"{base}?token={json_win_param['token']}&expires={json_win_param['expires']}"
+    url = f"{base}?"
+    if add_b1:
+        url += "b=1&"
+    url += f"token={json_win_param['token']}&expires={json_win_param['expires']}"
     if json_win_video.get("can_play_fhd"):
         url += "&h=1"
     if json_win_video.get("scz"):

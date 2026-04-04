@@ -182,7 +182,32 @@ class M3U8_Segments:
         return h
 
     def get_info(self):
-        response = requests.get(self.url, headers=self._headers())
+        # Retry logic for transient failures like 403
+        max_retries = 3
+        retry_delay = 2  # seconds
+        current_url = self.url
+        tried_with_b1 = False
+        
+        for attempt in range(max_retries):
+            response = requests.get(current_url, headers=self._headers())
+            if response.ok:
+                break
+            # On 403, retry with &b1 parameter (some TV episodes require it)
+            if response.status_code == 403 and attempt < max_retries - 1:
+                if not tried_with_b1:
+                    logger.warning(f"M3U8 fetch returned HTTP 403, retrying with &b=1... (attempt {attempt+1}/{max_retries})")
+                    current_url = self.url + ("&b=1" if "?" in self.url else "?b=1")
+                    tried_with_b1 = True
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    logger.warning(f"M3U8 fetch returned HTTP 403, retrying in {retry_delay}s... (attempt {attempt+1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    continue
+            # Other errors: fail immediately
+            if not response.ok:
+                raise RuntimeError(f"Failed to fetch M3U8: HTTP {response.status_code}")
+        
         if not response.ok:
             raise RuntimeError(f"Failed to fetch M3U8: HTTP {response.status_code}")
 

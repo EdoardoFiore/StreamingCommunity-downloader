@@ -1,28 +1,45 @@
 /* StreamingCommunity Web Panel — app.js */
 
+// ── State ──────────────────────────────────────────────────────────────────────
+let currentDomain = '';
+let currentVersion = '';
+let _searchResults = [];
+let _libraries = [];
+let _jobPhases = {};      // job_id → current phase string
+const _jobs = new Map();  // job_id → job dict (source of truth)
+
+// ── Utilities ──────────────────────────────────────────────────────────────────
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function formatSize(bytes) {
+  if (bytes == null) return '—';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes/1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes/1048576).toFixed(1) + ' MB';
+  return (bytes/1073741824).toFixed(2) + ' GB';
+}
+function fmtEta(sec) {
+  if (sec == null || sec <= 0) return '';
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m < 60) return `${m}m ${s.toString().padStart(2,'0')}s`;
+  const h = Math.floor(m / 60), rm = m % 60;
+  return `${h}h ${rm}m`;
+}
 function itemYear(item) {
   const d = item.release_date || item.last_air_date || '';
   return d ? d.slice(0, 4) : null;
 }
-
-let currentDomain = '';
-let currentVersion = '';
-let activeEventSources = {}; // job_id -> EventSource
-let jobPhases = {}; // job_id -> current phase (joining | audio | merging | running)
-let _searchResults = [];
-let _libraries = [];  // [{name, path}, ...]
-
 async function safeJson(res) {
   const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    console.error('Non-JSON response (HTTP', res.status, '):', text);
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 120)}`);
-  }
+  try { return JSON.parse(text); }
+  catch { throw new Error(`HTTP ${res.status}: ${text.slice(0,120)}`); }
 }
 
-// ─── Modal helpers (no bootstrap global needed) ───────────────────────────────
+// ── Modal helpers ──────────────────────────────────────────────────────────────
 
 function showModal(id) {
   const el = document.getElementById(id);
@@ -38,7 +55,6 @@ function showModal(id) {
   }
   document.body.classList.add('modal-open');
 }
-
 function hideModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -46,30 +62,42 @@ function hideModal(id) {
   el.classList.remove('show');
   el.setAttribute('aria-hidden', 'true');
   el.removeAttribute('aria-modal');
-  const bd = document.querySelector('.modal-backdrop');
-  if (bd) bd.remove();
+  document.querySelector('.modal-backdrop')?.remove();
   document.body.classList.remove('modal-open');
 }
-
-// Close modals on backdrop click
 document.addEventListener('click', (e) => {
-  if (e.target.classList.contains('modal') && e.target.classList.contains('show')) {
+  if (e.target.classList.contains('modal') && e.target.classList.contains('show'))
     hideModal(e.target.id);
-  }
   if (e.target.closest('[data-bs-dismiss="modal"]')) {
     const modal = e.target.closest('.modal');
     if (modal) hideModal(modal.id);
   }
 });
 
-// ─── Init ────────────────────────────────────────────────────────────────────
+// ── Toast ──────────────────────────────────────────────────────────────────────
+
+function showToast(message, type = 'info') {
+  const colors = { success:'bg-success', danger:'bg-danger', info:'bg-info', warning:'bg-warning' };
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;z-index:9999;min-width:220px';
+  toast.innerHTML = `<div class="alert ${colors[type]||'bg-info'} alert-dismissible text-white mb-0 shadow" role="alert">
+    ${escapeHtml(message)}
+    <button type="button" class="btn-close btn-close-white" onclick="this.closest('.alert').parentElement.remove()"></button>
+  </div>`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadDomainStatus();
   await loadLibraries();
-  pollJobs();
+  connectGlobalStream();
   setupFileManager();
 });
+
+// ── Domain ─────────────────────────────────────────────────────────────────────
 
 async function loadDomainStatus() {
   try {
@@ -86,29 +114,23 @@ async function loadDomainStatus() {
       badge.textContent = 'Domain non configurato';
       openSettings();
     }
-  } catch (e) {
-    console.error('loadDomainStatus:', e);
-  }
+  } catch(e) { console.error('loadDomainStatus:', e); }
 }
 
-// ─── Navigation ──────────────────────────────────────────────────────────────
+// ── Navigation ─────────────────────────────────────────────────────────────────
 
 function showPage(page) {
-  ['search', 'downloads', 'files'].forEach(p => {
+  ['search','downloads','files'].forEach(p => {
     document.getElementById(`page-${p}`).style.display = p === page ? '' : 'none';
   });
   document.getElementById('page-title').textContent =
-    { search: 'Cerca', downloads: 'Download', files: 'File' }[page];
-
-  document.querySelectorAll('.nav-link[data-page]').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
-  });
-
-  if (page === 'downloads') refreshJobs();
+    { search:'Cerca', downloads:'Download', files:'File' }[page];
+  document.querySelectorAll('.nav-link[data-page]').forEach(el =>
+    el.classList.toggle('active', el.dataset.page === page));
   if (page === 'files') loadFiles();
 }
 
-// ─── Settings ────────────────────────────────────────────────────────────────
+// ── Settings ───────────────────────────────────────────────────────────────────
 
 function openSettings() {
   document.getElementById('domain-input').value = currentDomain;
@@ -116,695 +138,639 @@ function openSettings() {
   renderLibrariesList();
   showModal('settings-modal');
 }
-
 async function saveDomain() {
   const domain = document.getElementById('domain-input').value.trim();
   const feedback = document.getElementById('domain-feedback');
   const btn = document.getElementById('save-domain-btn');
   if (!domain) return;
-
   btn.disabled = true;
   feedback.textContent = 'Verifica in corso...';
   feedback.className = 'form-text text-muted';
-
   try {
     const res = await fetch('/api/domain', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain }),
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({domain}),
     });
     const data = await safeJson(res);
     if (res.ok) {
-      currentDomain = data.domain;
-      currentVersion = data.version;
+      currentDomain = data.domain; currentVersion = data.version;
       feedback.textContent = `OK — versione ${data.version}`;
       feedback.className = 'form-text text-success';
-      document.getElementById('domain-badge').className = 'badge bg-success';
-      document.getElementById('domain-badge').textContent = `Domain: .${domain}`;
+      const badge = document.getElementById('domain-badge');
+      badge.className = 'badge bg-success';
+      badge.textContent = data.domain;
       setTimeout(() => hideModal('settings-modal'), 800);
     } else {
       feedback.textContent = data.detail || 'Errore';
       feedback.className = 'form-text text-danger';
     }
-  } catch (e) {
-    feedback.textContent = 'Errore di rete';
-    feedback.className = 'form-text text-danger';
-  } finally {
-    btn.disabled = false;
-  }
+  } catch(e) {
+    feedback.textContent = 'Errore di rete'; feedback.className = 'form-text text-danger';
+  } finally { btn.disabled = false; }
 }
 
-// ─── Libraries ───────────────────────────────────────────────────────────────
+// ── Libraries ──────────────────────────────────────────────────────────────────
 
 async function loadLibraries() {
   try {
     const res = await fetch('/api/domain/libraries');
     const data = await safeJson(res);
     _libraries = data.libraries || [];
-    const excluded = (data.excluded_folders || []).join(', ');
-    const input = document.getElementById('excluded-input');
-    if (input) input.value = excluded;
-  } catch (e) {
-    console.error('loadLibraries:', e);
-  }
+    const excl = (data.excluded_folders || []).join(', ');
+    const inp = document.getElementById('excluded-input');
+    if (inp) inp.value = excl;
+  } catch(e) { console.error('loadLibraries:', e); }
 }
-
 function renderLibrariesList() {
-  const container = document.getElementById('libraries-list');
-  if (!container) return;
-  if (_libraries.length === 0) {
-    container.innerHTML = '<p class="text-muted small mb-0">Nessuna libreria configurata.</p>';
-    return;
-  }
-  container.innerHTML = _libraries.map((lib, i) => `
+  const c = document.getElementById('libraries-list');
+  if (!c) return;
+  if (!_libraries.length) { c.innerHTML = '<p class="text-muted small mb-0">Nessuna libreria.</p>'; return; }
+  c.innerHTML = _libraries.map((lib, i) => `
     <div class="row g-2 mb-2 align-items-center">
-      <div class="col-4">
-        <input type="text" class="form-control form-control-sm" id="lib-name-${i}"
-               value="${escapeHtml(lib.name)}" placeholder="Nome (es: Films)">
-      </div>
-      <div class="col">
-        <input type="text" class="form-control form-control-sm" id="lib-path-${i}"
-               value="${escapeHtml(lib.path)}" placeholder="/srv/nfs/films">
-      </div>
-      <div class="col-auto">
-        <button class="btn btn-sm btn-outline-danger" onclick="removeLibrary(${i})">
-          <i class="ti ti-trash"></i>
-        </button>
-      </div>
+      <div class="col-4"><input type="text" class="form-control form-control-sm" id="lib-name-${i}" value="${escapeHtml(lib.name)}" placeholder="Nome"></div>
+      <div class="col"><input type="text" class="form-control form-control-sm" id="lib-path-${i}" value="${escapeHtml(lib.path)}" placeholder="/srv/nfs/films"></div>
+      <div class="col-auto"><button class="btn btn-sm btn-outline-danger" onclick="removeLibrary(${i})"><i class="ti ti-trash"></i></button></div>
     </div>`).join('');
 }
-
-function _syncLibrariesFromInputs() {
-  _libraries = _libraries.map((_, i) => ({
-    name: document.getElementById(`lib-name-${i}`)?.value || '',
-    path: document.getElementById(`lib-path-${i}`)?.value || '',
+function _syncLibs() {
+  _libraries = _libraries.map((_,i) => ({
+    name: document.getElementById(`lib-name-${i}`)?.value||'',
+    path: document.getElementById(`lib-path-${i}`)?.value||'',
   }));
 }
-
 function addLibrary() {
-  _syncLibrariesFromInputs();
-  _libraries.push({ name: '', path: '' });
-  renderLibrariesList();
-  const last = document.getElementById(`lib-name-${_libraries.length - 1}`);
-  if (last) last.focus();
+  _syncLibs(); _libraries.push({name:'',path:''}); renderLibrariesList();
+  document.getElementById(`lib-name-${_libraries.length-1}`)?.focus();
 }
-
-function removeLibrary(idx) {
-  _syncLibrariesFromInputs();
-  _libraries.splice(idx, 1);
-  renderLibrariesList();
-}
-
+function removeLibrary(idx) { _syncLibs(); _libraries.splice(idx,1); renderLibrariesList(); }
 async function saveLibraries() {
-  const updated = _libraries.map((_, i) => ({
-    name: (document.getElementById(`lib-name-${i}`)?.value || '').trim(),
-    path: (document.getElementById(`lib-path-${i}`)?.value || '').trim(),
-  })).filter(lib => lib.name && lib.path);
-
-  const excludedRaw = document.getElementById('excluded-input')?.value || '';
-  const excluded = excludedRaw.split(',').map(s => s.trim()).filter(Boolean);
-
+  const updated = _libraries.map((_,i) => ({
+    name:(document.getElementById(`lib-name-${i}`)?.value||'').trim(),
+    path:(document.getElementById(`lib-path-${i}`)?.value||'').trim(),
+  })).filter(l => l.name && l.path);
+  const excluded = (document.getElementById('excluded-input')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
   const btn = document.getElementById('save-libraries-btn');
   btn.disabled = true;
   try {
     const res = await fetch('/api/domain/libraries', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ libraries: updated, excluded_folders: excluded }),
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({libraries:updated, excluded_folders:excluded}),
     });
-    if (res.ok) {
-      _libraries = updated;
-      showToast('Librerie salvate', 'success');
-      hideModal('settings-modal');
-    } else {
-      const data = await safeJson(res);
-      showToast(data.detail || 'Errore salvataggio', 'danger');
-    }
-  } catch (e) {
-    showToast('Errore di rete', 'danger');
-  } finally {
-    btn.disabled = false;
-  }
+    if (res.ok) { _libraries=updated; showToast('Librerie salvate','success'); hideModal('settings-modal'); }
+    else { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
+  } catch(e) { showToast('Errore di rete','danger'); }
+  finally { btn.disabled = false; }
 }
 
-
-// ─── Search ───────────────────────────────────────────────────────────────────
+// ── Search ─────────────────────────────────────────────────────────────────────
 
 async function doSearch() {
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
   if (!currentDomain) { openSettings(); return; }
-
   const btn = document.getElementById('search-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Cerca';
-
   const container = document.getElementById('search-results');
   container.innerHTML = '';
-
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&domain=${currentDomain}`);
     const results = await safeJson(res);
-
-    if (!res.ok) {
-      container.innerHTML = `<div class="col-12"><div class="alert alert-danger">${results.detail || 'Errore'}</div></div>`;
-      return;
-    }
-    if (results.length === 0) {
-      container.innerHTML = '<div class="col-12"><p class="text-muted">Nessun risultato.</p></div>';
-      return;
-    }
-
+    if (!res.ok) { container.innerHTML=`<div class="col-12"><div class="alert alert-danger">${results.detail||'Errore'}</div></div>`; return; }
+    if (!results.length) { container.innerHTML='<div class="col-12"><p class="text-muted">Nessun risultato.</p></div>'; return; }
     results.forEach((item, idx) => {
-      const isMovie = item.type === 'movie';
+      const isMovie = item.type==='movie';
       const year = itemYear(item);
       const score = item.score ? parseFloat(item.score).toFixed(1) : null;
       const posterUrl = item.poster ? `/api/image/${currentDomain}/${item.poster}` : '';
-
       const card = document.createElement('div');
       card.className = 'col-6 col-sm-4 col-md-3 col-lg-2';
       card.innerHTML = `
         <div class="card result-card h-100" onclick="openDetailModal(${idx})" style="overflow:hidden">
           <div style="aspect-ratio:2/3;overflow:hidden;background:#1a1a2e">
             ${posterUrl
-              ? `<img src="${posterUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" onerror="console.warn('poster failed:',this.src);this.parentElement.innerHTML='<div style=\\'width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#666\\'>\\u{1F3AC}</div>'">`
+              ? `<img src="${posterUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.parentElement.innerHTML='<div style=\\'width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#666;font-size:2rem\\'>&#127916;</div>'">`
               : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#666;font-size:2rem">&#127916;</div>`}
           </div>
           <div class="card-body p-2">
             <div class="fw-bold small lh-sm mb-1">${escapeHtml(item.name)}</div>
             <div class="d-flex align-items-center gap-1 flex-wrap">
-              <span class="badge ${isMovie ? 'bg-blue-lt' : 'bg-green-lt'}" style="font-size:.65em">${isMovie ? 'Film' : 'TV'}</span>
-              ${score ? `<span class="badge bg-yellow-lt" style="font-size:.65em">★ ${score}</span>` : ''}
-              ${year ? `<span class="text-muted" style="font-size:.7em">${year}</span>` : ''}
+              <span class="badge ${isMovie?'bg-blue-lt':'bg-green-lt'}" style="font-size:.65em">${isMovie?'Film':'TV'}</span>
+              ${score?`<span class="badge bg-yellow-lt" style="font-size:.65em">★ ${score}</span>`:''}
+              ${year?`<span class="text-muted" style="font-size:.7em">${year}</span>`:''}
             </div>
           </div>
         </div>`;
-      card._scItem = item;
       container.appendChild(card);
     });
     _searchResults = results;
-  } catch (e) {
-    container.innerHTML = `<div class="col-12"><div class="alert alert-danger">Errore di rete: ${e.message}</div></div>`;
+  } catch(e) {
+    container.innerHTML=`<div class="col-12"><div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div></div>`;
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="ti ti-search me-1"></i>Cerca';
+    btn.disabled=false; btn.innerHTML='<i class="ti ti-search me-1"></i>Cerca';
   }
 }
 
-// ─── Detail Modal ─────────────────────────────────────────────────────────────
+// ── Detail Modal ───────────────────────────────────────────────────────────────
+
+const LANG_NAMES = {
+  ita:'Italiano', eng:'English', fra:'Français', spa:'Español',
+  deu:'Deutsch', por:'Português', jpn:'日本語', zho:'中文',
+  ara:'العربية', rus:'Русский', kor:'한국어',
+};
+const langName = c => LANG_NAMES[c] || c;
 
 function openDetailModal(idx) {
   const item = _searchResults[idx];
   if (!item) return;
-
-  const isMovie = item.type === 'movie';
+  const isMovie = item.type==='movie';
   const year = itemYear(item);
   const score = item.score ? parseFloat(item.score).toFixed(1) : null;
   const posterUrl = item.poster ? `/api/image/${currentDomain}/${item.poster}` : '';
 
   const poster = document.getElementById('detail-poster');
-  if (posterUrl) {
-    poster.onerror = () => { console.warn('detail poster failed:', poster.src); poster.style.display = 'none'; };
-    poster.src = posterUrl;
-    poster.style.display = '';
-  } else {
-    poster.style.display = 'none';
-  }
+  if (posterUrl) { poster.src=posterUrl; poster.style.display=''; poster.onerror=()=>poster.style.display='none'; }
+  else poster.style.display='none';
 
   document.getElementById('detail-title').textContent = item.name;
+  const tb = document.getElementById('detail-type-badge');
+  tb.className = `badge me-1 ${isMovie?'bg-blue-lt':'bg-green-lt'}`;
+  tb.textContent = isMovie ? 'Film' : 'Serie TV';
+  const ab = document.getElementById('detail-age-badge');
+  if (item.age) { ab.textContent=`${item.age}+`; ab.style.display=''; } else ab.style.display='none';
 
-  const typeBadge = document.getElementById('detail-type-badge');
-  typeBadge.className = `badge me-1 ${isMovie ? 'bg-blue-lt' : 'bg-green-lt'}`;
-  typeBadge.textContent = isMovie ? 'Film' : 'Serie TV';
-
-  const ageBadge = document.getElementById('detail-age-badge');
-  if (item.age) {
-    ageBadge.textContent = `${item.age}+`;
-    ageBadge.style.display = '';
-  } else {
-    ageBadge.style.display = 'none';
-  }
-
-  const metaParts = [];
-  if (year) metaParts.push(year);
-  if (!isMovie && item.seasons_count) metaParts.push(`${item.seasons_count} stagion${item.seasons_count === 1 ? 'e' : 'i'}`);
-  document.getElementById('detail-meta').textContent = metaParts.join(' · ');
-
-  const scoreEl = document.getElementById('detail-score');
-  if (score) {
-    scoreEl.innerHTML = `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${score}</span>`;
-  } else {
-    scoreEl.innerHTML = '';
-  }
+  const meta = [];
+  if (year) meta.push(year);
+  if (!isMovie && item.seasons_count) meta.push(`${item.seasons_count} stagion${item.seasons_count===1?'e':'i'}`);
+  document.getElementById('detail-meta').textContent = meta.join(' · ');
+  document.getElementById('detail-score').innerHTML = score
+    ? `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${score}</span>` : '';
 
   const btn = document.getElementById('detail-action-btn');
   if (isMovie) {
-    btn.className = 'btn btn-primary';
-    btn.innerHTML = '<i class="ti ti-download me-1"></i>Scarica';
+    btn.className='btn btn-primary'; btn.innerHTML='<i class="ti ti-download me-1"></i>Scarica';
     btn.onclick = () => { hideModal('detail-modal'); startFilmDownload(item.id, item.name, year); };
   } else {
-    btn.className = 'btn btn-success';
-    btn.innerHTML = '<i class="ti ti-list me-1"></i>Episodi';
+    btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
     btn.onclick = () => { hideModal('detail-modal'); openEpisodeBrowser(item.id, item.name, item.slug, year); };
   }
 
   const langsEl = document.getElementById('detail-langs');
-  langsEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Caricamento lingue...';
-
+  langsEl.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Caricamento lingue...';
   showModal('detail-modal');
 
-  const langParams = new URLSearchParams({
-    type: isMovie ? 'movie' : 'tv',
-    domain: currentDomain,
-    slug: item.slug || '',
-    version: currentVersion || '',
-  });
-  const LANG_NAMES = {
-    ita: 'Italiano', eng: 'English', fra: 'Français', spa: 'Español',
-    deu: 'Deutsch', por: 'Português', jpn: '日本語', zho: '中文',
-    ara: 'العربية', rus: 'Русский', kor: '한국어',
-  };
-  const langName = code => LANG_NAMES[code] || code;
-
-  fetch(`/api/search/languages/${item.id}?${langParams}`)
+  const p = new URLSearchParams({ type:isMovie?'movie':'tv', domain:currentDomain, slug:item.slug||'', version:currentVersion||'' });
+  fetch(`/api/search/languages/${item.id}?${p}`)
     .then(r => r.ok ? r.json() : null)
     .then(info => {
-      if (!info) { langsEl.innerHTML = ''; return; }
-      let html = '';
-      const audioHtml = (info.audio && info.audio.length)
-        ? info.audio.map(c => `<span class="badge bg-blue-lt me-1">${langName(c)}</span>`).join('')
+      if (!info) { langsEl.innerHTML=''; return; }
+      let html='';
+      const audioHtml = (info.audio?.length)
+        ? info.audio.map(c=>`<span class="badge bg-blue-lt me-1">${langName(c)}</span>`).join('')
         : `<span class="text-muted fst-italic">originale</span>`;
-      html += `<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span>${audioHtml}</div>`;
-      if (info.subtitles && info.subtitles.length) {
-        const badges = info.subtitles.map(c => `<span class="badge bg-teal-lt me-1">${langName(c)}</span>`).join('');
-        html += `<div><span class="text-muted me-1"><i class="ti ti-subtitles ti-sm"></i> Sub:</span>${badges}</div>`;
+      html+=`<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span>${audioHtml}</div>`;
+      if (info.subtitles?.length) {
+        html+=`<div><span class="text-muted me-1"><i class="ti ti-subtitles ti-sm"></i> Sub:</span>${info.subtitles.map(c=>`<span class="badge bg-teal-lt me-1">${langName(c)}</span>`).join('')}</div>`;
       }
-      langsEl.innerHTML = html;
+      langsEl.innerHTML=html;
     })
-    .catch(() => { langsEl.innerHTML = ''; });
+    .catch(()=>{ langsEl.innerHTML=''; });
 }
 
-// ─── Film download ────────────────────────────────────────────────────────────
+// ── Film download ──────────────────────────────────────────────────────────────
 
-async function startFilmDownload(id, title, year = null) {
+async function startFilmDownload(id, title, year=null) {
   try {
     const res = await fetch('/api/download/film', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, title, year, domain: currentDomain }),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id, title, year, domain:currentDomain}),
     });
     const data = await safeJson(res);
-    if (res.ok) {
-      showToast(`Download avviato: ${title}`, 'success');
-      showPage('downloads');
-      watchJob(data.job_id);
-    } else {
-      showToast(data.detail || 'Errore', 'danger');
-    }
-  } catch (e) {
-    showToast('Errore di rete', 'danger');
-  }
+    if (res.ok) { showToast(`Download avviato: ${title}`,'success'); showPage('downloads'); }
+    else showToast(data.detail||'Errore','danger');
+  } catch(e) { showToast('Errore di rete','danger'); }
 }
 
-// ─── Episode Browser ─────────────────────────────────────────────────────────
+// ── Episode Browser ────────────────────────────────────────────────────────────
 
-let _episodeContext = {};
+let _epCtx = {};
 
-async function openEpisodeBrowser(tvId, tvName, slug, year = null) {
-  _episodeContext = { tvId, tvName, slug, year, token: null, version: currentVersion, episodes: [] };
-
+async function openEpisodeBrowser(tvId, tvName, slug, year=null) {
+  _epCtx = { tvId, tvName, slug, year, token:null, episodes:[], currentSeason:null };
   document.getElementById('episode-modal-title').textContent = tvName;
+  document.getElementById('season-tabs').style.display='none';
   document.getElementById('episode-modal-body').innerHTML =
     '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
   showModal('episode-modal');
 
   try {
-    // Get token
-    const tokenRes = await fetch(`/api/tv/${tvId}/token?domain=${currentDomain}`);
-    const tokenData = await tokenRes.json();
-    _episodeContext.token = tokenData.token;
-
-    // Get seasons count
-    const seasonsRes = await fetch(
-      `/api/tv/${tvId}/seasons?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}`
-    );
-    const seasonsData = await seasonsRes.json();
-    const count = seasonsData.seasons_count;
-
-    renderSeasonSelector(count);
-  } catch (e) {
-    document.getElementById('episode-modal-body').innerHTML =
-      `<div class="alert alert-danger">Errore: ${e.message}</div>`;
+    const [tokenData, seasonsData] = await Promise.all([
+      fetch(`/api/tv/${tvId}/token?domain=${currentDomain}`).then(r=>r.json()),
+      fetch(`/api/tv/${tvId}/seasons?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}`).then(r=>r.json()),
+    ]);
+    _epCtx.token = tokenData.token;
+    renderSeasonTabs(seasonsData.seasons_count);
+    loadSeason(1);
+  } catch(e) {
+    document.getElementById('episode-modal-body').innerHTML=`<div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div>`;
   }
 }
 
-function renderSeasonSelector(count) {
-  const body = document.getElementById('episode-modal-body');
-  let btns = '';
-  for (let s = 1; s <= count; s++) {
-    btns += `<button class="btn btn-outline-primary m-1" onclick="loadSeason(${s})">Stagione ${s}</button>`;
+function renderSeasonTabs(count) {
+  const tabs = document.getElementById('season-tabs');
+  tabs.innerHTML='';
+  for (let s=1; s<=count; s++) {
+    const li=document.createElement('li');
+    li.className='nav-item';
+    li.innerHTML=`<a class="nav-link${s===1?' active':''}" href="#" data-season="${s}">S${s}</a>`;
+    li.querySelector('a').addEventListener('click', (e)=>{
+      e.preventDefault();
+      tabs.querySelectorAll('.nav-link').forEach(a=>a.classList.remove('active'));
+      e.target.classList.add('active');
+      loadSeason(s);
+    });
+    tabs.appendChild(li);
   }
-  body.innerHTML = `
-    <div class="mb-3">
-      <strong>Seleziona stagione:</strong><br>
-      <div class="mt-2">${btns}</div>
-    </div>
-    <div id="season-episodes"></div>`;
+  tabs.style.display='flex';
 }
 
 async function loadSeason(season) {
-  const { tvId, slug, token } = _episodeContext;
-  const container = document.getElementById('season-episodes');
-  container.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';
-
+  const { tvId, slug, token } = _epCtx;
+  const container = document.getElementById('episode-modal-body');
+  container.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';
   try {
-    const res = await fetch(
-      `/api/tv/${tvId}/seasons/${season}/episodes?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`
-    );
+    const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
     const eps = await safeJson(res);
-    _episodeContext.episodes = eps;
-    _episodeContext.currentSeason = season;
+    _epCtx.episodes=eps; _epCtx.currentSeason=season;
 
-    let rows = eps.map((ep, idx) => `
+    const rows = eps.map((ep, idx) => `
       <tr>
-        <td class="text-muted">${ep.n}</td>
+        <td class="text-muted w-1 text-nowrap">${ep.n}</td>
         <td>${escapeHtml(ep.name)}</td>
-        <td>
-          <button class="btn btn-sm btn-primary" onclick="startEpisodeDownload(${idx})">
+        <td class="w-1">
+          <button class="btn btn-sm btn-primary" onclick="startEpisodeDownload(${idx})" title="Scarica">
             <i class="ti ti-download"></i>
           </button>
         </td>
       </tr>`).join('');
 
-    container.innerHTML = `
+    container.innerHTML=`
       <div class="d-flex align-items-center justify-content-between mb-2">
-        <strong>Stagione ${season} — ${eps.length} episodi</strong>
+        <span class="text-muted small">${eps.length} episodi</span>
         <button class="btn btn-sm btn-outline-success" onclick="downloadWholeSeason(${season})">
           <i class="ti ti-download me-1"></i>Tutta la stagione
         </button>
       </div>
-      <div class="table-responsive">
-        <table class="table table-sm">
-          <thead><tr><th>#</th><th>Titolo</th><th></th></tr></thead>
+      <div class="table-responsive" style="max-height:380px;overflow-y:auto">
+        <table class="table table-sm table-hover">
           <tbody>${rows}</tbody>
         </table>
       </div>`;
-  } catch (e) {
-    container.innerHTML = `<div class="alert alert-danger">Errore: ${e.message}</div>`;
+  } catch(e) {
+    container.innerHTML=`<div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div>`;
   }
 }
 
 async function startEpisodeDownload(epIndex) {
-  const { tvId, tvName, year, token, episodes, currentSeason } = _episodeContext;
+  const { tvId, tvName, year, token, episodes, currentSeason } = _epCtx;
   const ep = episodes[epIndex];
-
   try {
     const res = await fetch('/api/download/episode', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tv_id: tvId, eps: episodes, ep_index: epIndex,
-        domain: currentDomain, token, tv_name: tvName, season: currentSeason, year,
-      }),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tv_id:tvId, eps:episodes, ep_index:epIndex, domain:currentDomain, token, tv_name:tvName, season:currentSeason, year }),
     });
     const data = await safeJson(res);
-    if (res.ok) {
-      showToast(`Download avviato: ${tvName} S${String(currentSeason).padStart(2,'0')}E${String(ep.n).padStart(2,'0')}`, 'success');
-      watchJob(data.job_id);
-    } else {
-      showToast(data.detail || 'Errore', 'danger');
-    }
-  } catch (e) {
-    showToast('Errore di rete', 'danger');
-  }
+    if (res.ok) showToast(`In coda: ${tvName} S${String(currentSeason).padStart(2,'0')}E${String(ep.n).padStart(2,'0')}`,'success');
+    else showToast(data.detail||'Errore','danger');
+  } catch(e) { showToast('Errore di rete','danger'); }
 }
 
 async function downloadWholeSeason(season) {
-  const { episodes } = _episodeContext;
-  if (!confirm(`Scaricare tutti i ${episodes.length} episodi della stagione ${season}?`)) return;
-
-  for (let i = 0; i < episodes.length; i++) {
+  const { episodes } = _epCtx;
+  if (!confirm(`Aggiungere tutti i ${episodes.length} episodi della stagione ${season} alla coda?`)) return;
+  for (let i=0; i<episodes.length; i++) {
     await startEpisodeDownload(i);
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r=>setTimeout(r,150));
   }
-  showPage('downloads');
-  hideModal('episode-modal');
+  showPage('downloads'); hideModal('episode-modal');
 }
 
-// ─── Jobs / Progress ──────────────────────────────────────────────────────────
+// ── Global SSE stream ──────────────────────────────────────────────────────────
 
-function watchJob(jobId) {
-  if (activeEventSources[jobId]) return;
-  const es = new EventSource(`/api/progress/${jobId}`);
-  activeEventSources[jobId] = es;
+function connectGlobalStream() {
+  const es = new EventSource('/api/progress/stream');
+
+  es.onopen = () => {
+    document.getElementById('stream-label').textContent='Live';
+    document.querySelector('.stream-dot').style.background='#2fb344';
+  };
 
   es.onmessage = (e) => {
     const msg = JSON.parse(e.data);
-    if (msg.type === 'progress') {
-      updateJobRow(jobId, msg.phase || 'running', msg.pct);
-    } else if (msg.type === 'status') {
-      updateJobRow(jobId, msg.phase, 100);
-    } else if (msg.type === 'done') {
-      updateJobRow(jobId, 'done', 100);
-      es.close();
-      delete activeEventSources[jobId];
-      updateActiveBadge();
-    } else if (msg.type === 'error') {
-      updateJobRow(jobId, 'error', 0, msg.message);
-      es.close();
-      delete activeEventSources[jobId];
-      updateActiveBadge();
+    switch (msg.type) {
+      case 'snapshot':
+        _jobs.clear();
+        msg.jobs.forEach(j => _jobs.set(j.job_id, j));
+        renderAllJobCards();
+        updateActiveBadge();
+        break;
+      case 'job_created':
+        _jobs.set(msg.job.job_id, msg.job);
+        addJobCard(msg.job);
+        updateActiveBadge();
+        break;
+      case 'job_status':
+        if (_jobs.has(msg.job_id)) {
+          _jobs.get(msg.job_id).status = msg.status;
+          refreshCardAppearance(msg.job_id);
+          updateActiveBadge();
+        }
+        break;
+      case 'progress':
+        handleProgressEvent(msg);
+        break;
+      case 'status':
+        handlePhaseEvent(msg.job_id, msg.phase);
+        break;
+      case 'done':
+        handleDoneEvent(msg.job_id, msg.output_path);
+        break;
+      case 'error':
+        handleErrorEvent(msg.job_id, msg.message);
+        break;
     }
   };
-  es.onerror = () => { es.close(); delete activeEventSources[jobId]; };
-  updateActiveBadge();
+
+  es.onerror = () => {
+    es.close();
+    document.getElementById('stream-label').textContent='Riconnessione...';
+    document.querySelector('.stream-dot').style.background='#d63939';
+    setTimeout(connectGlobalStream, 3000);
+  };
 }
 
-async function refreshJobs() {
-  try {
-    const res = await fetch('/api/jobs');
-    const jobs = await safeJson(res);
-    syncJobsTable(jobs);
-    // Only open SSE for running jobs — queued jobs emit no events
-    jobs.filter(j => j.status === 'running').forEach(j => watchJob(j.job_id));
-    updateActiveBadge();
-  } catch (e) { console.error('refreshJobs:', e); }
-}
+// ── Job cards ──────────────────────────────────────────────────────────────────
 
-function _buildJobRow(j) {
-  const phase = j.status === 'running' ? (jobPhases[j.job_id] || 'running') : j.status;
-  const statusBadge = {
-    queued:   '<span class="badge bg-secondary-lt">In coda</span>',
-    running:  '<span class="badge bg-blue-lt">In corso</span>',
-    joining:  '<span class="badge bg-yellow-lt">Finalizzazione</span>',
-    audio:    '<span class="badge bg-teal-lt">Audio</span>',
-    merging:  '<span class="badge bg-purple-lt">Unione</span>',
-    done:     '<span class="badge bg-success-lt">Completato</span>',
-    error:    '<span class="badge bg-danger-lt">Errore</span>',
-    cancelled:'<span class="badge bg-secondary-lt">Annullato</span>',
-  }[phase] || phase;
+const PHASE_LABELS = {
+  queued:'In coda', running:'In corso', joining:'Finalizzazione',
+  audio:'Audio', merging:'Unione', done:'Completato', error:'Errore', cancelled:'Annullato',
+};
+const PHASE_BADGE = {
+  queued:'bg-secondary-lt', running:'bg-blue-lt', joining:'bg-yellow-lt',
+  audio:'bg-teal-lt', merging:'bg-purple-lt', done:'bg-success-lt',
+  error:'bg-danger-lt', cancelled:'bg-secondary-lt',
+};
+const PHASE_BAR = {
+  running:'bg-blue', joining:'phase-bar-joining bg-warning',
+  audio:'phase-bar-audio bg-teal', merging:'phase-bar-merging bg-purple',
+  done:'phase-bar-done bg-success', error:'phase-bar-error bg-danger',
+};
 
-  const progress = phase === 'running'
-    ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-blue" id="prog-${j.job_id}" style="width:${j.progress.pct}%"></div></div><small class="text-muted">${j.progress.pct}%</small>`
-    : phase === 'joining'
-    ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-yellow" style="width:100%"></div></div><small class="text-muted">Finalizzazione video...</small>`
-    : phase === 'audio'
-    ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-teal" id="prog-${j.job_id}" style="width:${j.progress.pct}%"></div></div><small class="text-muted">Audio ${j.progress.pct}%</small>`
-    : phase === 'merging'
-    ? `<div class="progress"><div class="progress-bar progress-bar-animated bg-purple" style="width:100%"></div></div><small class="text-muted">Unione tracce...</small>`
-    : j.status === 'done'
-    ? `<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>`
-    : j.status === 'error'
-    ? `<small class="text-danger">${escapeHtml(j.error || 'Errore')}</small>`
-    : '—';
+function _buildJobCard(j) {
+  const phase = _jobPhases[j.job_id] || j.status;
+  const isActive = j.status==='running' || j.status==='queued';
+  const isMovie = j.type==='film';
+  const pct = j.progress?.pct||0;
+  const barClass = PHASE_BAR[phase] || 'bg-secondary';
+  const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
+  const barWidth = j.status==='queued' ? 0 : (j.status==='done' ? 100 : pct);
+  const badgeClass = PHASE_BADGE[phase]||'bg-secondary-lt';
+  const label = PHASE_LABELS[phase] || phase;
+
+  const speed = j.progress?.speed;
+  const eta = j.progress?.eta;
+  const speedStr = (speed && speed>0 && isActive && j.status!=='queued')
+    ? `${speed} seg/s` : '';
+  const etaStr = eta ? fmtEta(eta) : '';
+  const infoStr = [speedStr, etaStr].filter(Boolean).join(' · ');
+
+  const stopBtn = isActive
+    ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelJob('${j.job_id}')" title="Interrompi">
+         <i class="ti ti-player-stop"></i>
+       </button>` : '';
 
   const rawTs = j.created_at;
-  const date = rawTs
-    ? new Date(/[Z+]/.test(rawTs) ? rawTs : rawTs + 'Z').toLocaleString('it-IT')
-    : '—';
-  const typeBadge = j.type === 'film'
-    ? '<span class="badge bg-blue-lt">Film</span>'
-    : '<span class="badge bg-green-lt">Serie</span>';
-  const canStop = j.status === 'running' || j.status === 'queued';
-  const stopBtn = canStop
-    ? `<button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${j.job_id}')" title="Interrompi"><i class="ti ti-player-stop"></i></button>`
+  const dateStr = rawTs
+    ? new Date(/[Z+]/.test(rawTs)?rawTs:rawTs+'Z').toLocaleString('it-IT',{hour:'2-digit',minute:'2-digit'})
     : '';
 
-  return `<tr id="job-row-${j.job_id}">
-    <td>${escapeHtml(j.title)}</td>
-    <td>${typeBadge}</td>
-    <td>${statusBadge}</td>
-    <td style="min-width:160px">${progress}</td>
-    <td class="text-muted">${date}</td>
-    <td id="job-actions-${j.job_id}">${stopBtn}</td>
-  </tr>`;
+  return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}" id="job-card-${j.job_id}">
+    <div class="card-body py-2 px-3">
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge ${isMovie?'bg-blue-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':'TV'}</span>
+        <span class="fw-medium text-truncate flex-1" style="min-width:0" title="${escapeHtml(j.title)}">${escapeHtml(j.title)}</span>
+        <span class="badge ${badgeClass} flex-shrink-0" id="job-badge-${j.job_id}">${label}</span>
+        ${stopBtn ? `<span id="job-stop-${j.job_id}">${stopBtn}</span>` : `<span id="job-stop-${j.job_id}"></span>`}
+      </div>
+      <div class="progress my-1" style="height:5px">
+        <div class="progress-bar ${barClass}${animated} job-progress-bar" id="job-bar-${j.job_id}" style="width:${barWidth}%"></div>
+      </div>
+      <div class="d-flex justify-content-between align-items-center">
+        <small class="text-muted" id="job-info-${j.job_id}">${infoStr || (j.status==='error' ? escapeHtml(j.error||'Errore') : (j.status==='done'?'Completato':''))}</small>
+        <small class="text-muted">${dateStr}</small>
+      </div>
+    </div>
+  </div>`;
 }
 
-function syncJobsTable(jobs) {
-  const tbody = document.getElementById('jobs-table-body');
-
-  if (jobs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4">Nessun download</td></tr>';
+function renderAllJobCards() {
+  const container = document.getElementById('jobs-container');
+  const empty = document.getElementById('jobs-empty');
+  if (!_jobs.size) {
+    empty.style.display=''; container.innerHTML=''; container.appendChild(empty);
     return;
   }
-
-  // Remove placeholder row if present
-  const placeholder = tbody.querySelector('td[colspan]');
-  if (placeholder) tbody.innerHTML = '';
-
-  const renderedIds = new Set([...tbody.querySelectorAll('tr[id]')].map(r => r.id.replace('job-row-', '')));
-  const serverIds = new Set(jobs.map(j => j.job_id));
-
-  // Remove rows no longer in server list
-  for (const id of renderedIds) {
-    if (!serverIds.has(id)) document.getElementById(`job-row-${id}`)?.remove();
-  }
-
-  for (const j of jobs) {
-    const existing = document.getElementById(`job-row-${j.job_id}`);
-    if (!existing) {
-      // New row — insert in correct position
-      const allRows = [...tbody.querySelectorAll('tr[id]')];
-      const serverIdx = jobs.indexOf(j);
-      const refRow = allRows[serverIdx] || null;
-      const tmp = document.createElement('tbody');
-      tmp.innerHTML = _buildJobRow(j);
-      tbody.insertBefore(tmp.firstElementChild, refRow);
-    } else if (j.status === 'running') {
-      // SSE manages running rows — skip polling update
-    } else {
-      // Queued / done / error: update status and actions cells only
-      const cells = existing.querySelectorAll('td');
-      const phase = j.status;
-      const statusBadge = {
-        queued:    '<span class="badge bg-secondary-lt">In coda</span>',
-        done:      '<span class="badge bg-success-lt">Completato</span>',
-        error:     '<span class="badge bg-danger-lt">Errore</span>',
-        cancelled: '<span class="badge bg-secondary-lt">Annullato</span>',
-      }[phase] || phase;
-      cells[2].innerHTML = statusBadge;
-      if (j.status === 'done') {
-        cells[3].innerHTML = '<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>';
-      } else if (j.status === 'error') {
-        cells[3].innerHTML = `<small class="text-danger">${escapeHtml(j.error || 'Errore')}</small>`;
-      }
-      const actionsEl = document.getElementById(`job-actions-${j.job_id}`);
-      if (actionsEl && j.status !== 'queued') actionsEl.innerHTML = '';
-    }
-  }
+  // Sort: active first, then by created_at desc
+  const sorted = [..._jobs.values()].sort((a,b) => {
+    const aActive = (a.status==='running'||a.status==='queued')?1:0;
+    const bActive = (b.status==='running'||b.status==='queued')?1:0;
+    if (aActive!==bActive) return bActive-aActive;
+    return new Date(b.created_at)-new Date(a.created_at);
+  });
+  empty.style.display='none';
+  container.innerHTML = sorted.map(j=>_buildJobCard(j)).join('');
+  updateActiveSection();
 }
 
-// Keep renderJobsTable as alias for backward compat (called nowhere externally now)
-function renderJobsTable(jobs) { syncJobsTable(jobs); }
+function addJobCard(job) {
+  const container = document.getElementById('jobs-container');
+  const empty = document.getElementById('jobs-empty');
+  empty.style.display='none';
+  // Insert at top of container
+  const tmp = document.createElement('div');
+  tmp.innerHTML = _buildJobCard(job);
+  container.insertBefore(tmp.firstElementChild, container.firstChild);
+  updateActiveSection();
+}
 
-function updateJobRow(jobId, status, pct, errorMsg = '') {
-  const row = document.getElementById(`job-row-${jobId}`);
-  if (!row) { refreshJobs(); return; }
+function refreshCardAppearance(jobId) {
+  const j = _jobs.get(jobId);
+  if (!j) return;
+  const card = document.getElementById(`job-card-${jobId}`);
+  if (!card) return;
+  // Rebuild the card in place
+  const tmp = document.createElement('div');
+  tmp.innerHTML = _buildJobCard(j);
+  card.replaceWith(tmp.firstElementChild);
+  updateActiveSection();
+}
 
-  const progEl = document.getElementById(`prog-${jobId}`);
-  if (progEl) {
-    progEl.style.width = pct + '%';
-  }
-
-  const cells = row.querySelectorAll('td');
-  const actionsEl = document.getElementById(`job-actions-${jobId}`);
-  if (status === 'done') {
-    delete jobPhases[jobId];
-    cells[2].innerHTML = '<span class="badge bg-success-lt">Completato</span>';
-    cells[3].innerHTML = '<div class="progress"><div class="progress-bar bg-success" style="width:100%"></div></div>';
-    if (actionsEl) actionsEl.innerHTML = '';
-    if (document.getElementById('page-files').style.display !== 'none') loadFiles();
-  } else if (status === 'error') {
-    delete jobPhases[jobId];
-    cells[2].innerHTML = '<span class="badge bg-danger-lt">Errore</span>';
-    cells[3].innerHTML = `<small class="text-danger">${escapeHtml(errorMsg)}</small>`;
-    if (actionsEl) actionsEl.innerHTML = '';
-  } else if (status === 'joining') {
-    jobPhases[jobId] = 'joining';
-    cells[2].innerHTML = '<span class="badge bg-yellow-lt">Finalizzazione</span>';
-    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-yellow" style="width:100%"></div></div><small class="text-muted">Finalizzazione video...</small>`;
-  } else if (status === 'audio') {
-    jobPhases[jobId] = 'audio';
-    cells[2].innerHTML = '<span class="badge bg-teal-lt">Audio</span>';
-    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-teal" id="prog-${jobId}" style="width:${pct}%"></div></div><small class="text-muted">Audio ${pct}%</small>`;
-  } else if (status === 'merging') {
-    jobPhases[jobId] = 'merging';
-    cells[2].innerHTML = '<span class="badge bg-purple-lt">Unione</span>';
-    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-purple" style="width:100%"></div></div><small class="text-muted">Unione tracce...</small>`;
-  } else if (status === 'running') {
-    jobPhases[jobId] = 'running';
-    cells[2].innerHTML = '<span class="badge bg-blue-lt">In corso</span>';
-    cells[3].innerHTML = `<div class="progress"><div class="progress-bar progress-bar-animated bg-blue" id="prog-${jobId}" style="width:${pct}%"></div></div><small class="text-muted">${pct}%</small>`;
+function updateActiveSection() {
+  const active = [..._jobs.values()].filter(j=>j.status==='running'||j.status==='queued');
+  const pill = document.getElementById('dl-active-pill');
+  const countEl = document.getElementById('dl-active-count');
+  if (active.length) {
+    pill.style.display=''; countEl.textContent=active.length;
+  } else {
+    pill.style.display='none';
   }
 }
 
 function updateActiveBadge() {
-  const count = Object.keys(activeEventSources).length;
+  const count = [..._jobs.values()].filter(j=>j.status==='running'||j.status==='queued').length;
   const badge = document.getElementById('active-jobs-badge');
-  if (count > 0) {
-    badge.style.display = '';
-    badge.textContent = count;
-  } else {
-    badge.style.display = 'none';
+  if (count>0) { badge.style.display=''; badge.textContent=count; }
+  else badge.style.display='none';
+  updateActiveSection();
+}
+
+function handleProgressEvent(msg) {
+  const job = _jobs.get(msg.job_id);
+  if (job) {
+    job.progress = { current:msg.current, total:msg.total, pct:msg.pct, speed:msg.speed||0, eta:msg.eta||null };
+    const phase = msg.phase || _jobPhases[msg.job_id] || 'running';
+    _jobPhases[msg.job_id] = phase;
   }
+  // Update bar and info without full card rebuild
+  const bar = document.getElementById(`job-bar-${msg.job_id}`);
+  if (bar) bar.style.width = msg.pct + '%';
+  const info = document.getElementById(`job-info-${msg.job_id}`);
+  if (info) {
+    const speedStr = msg.speed>0 ? `${msg.speed} seg/s` : '';
+    const etaStr = msg.eta ? fmtEta(msg.eta) : '';
+    info.textContent = [speedStr, etaStr, `${msg.pct}%`].filter(Boolean).join(' · ');
+  }
+}
+
+function handlePhaseEvent(jobId, phase) {
+  _jobPhases[jobId] = phase;
+  const job = _jobs.get(jobId);
+  if (job) job.status = 'running';
+
+  const badge = document.getElementById(`job-badge-${jobId}`);
+  if (badge) {
+    badge.className = `badge ${PHASE_BADGE[phase]||'bg-secondary-lt'} flex-shrink-0`;
+    badge.textContent = PHASE_LABELS[phase] || phase;
+  }
+  const bar = document.getElementById(`job-bar-${jobId}`);
+  if (bar) {
+    bar.className = `progress-bar ${PHASE_BAR[phase]||'bg-secondary'} progress-bar-striped progress-bar-animated job-progress-bar`;
+    if (phase==='joining'||phase==='merging') bar.style.width='100%';
+  }
+  const info = document.getElementById(`job-info-${jobId}`);
+  if (info && (phase==='joining'||phase==='merging')) {
+    info.textContent = PHASE_LABELS[phase]+'...';
+  }
+}
+
+function handleDoneEvent(jobId, outputPath) {
+  delete _jobPhases[jobId];
+  const job = _jobs.get(jobId);
+  if (job) { job.status='done'; job.output_path=outputPath; }
+
+  const card = document.getElementById(`job-card-${jobId}`);
+  if (card) card.classList.add('is-done');
+  const badge = document.getElementById(`job-badge-${jobId}`);
+  if (badge) { badge.className='badge bg-success-lt flex-shrink-0'; badge.textContent='Completato'; }
+  const bar = document.getElementById(`job-bar-${jobId}`);
+  if (bar) {
+    bar.style.width='100%';
+    bar.className='progress-bar phase-bar-done bg-success job-progress-bar';
+  }
+  const info = document.getElementById(`job-info-${jobId}`);
+  if (info) info.textContent='Completato';
+  const stop = document.getElementById(`job-stop-${jobId}`);
+  if (stop) stop.innerHTML='';
+
+  updateActiveBadge();
+  // Refresh file manager if open
+  if (document.getElementById('page-files')?.style.display!=='none') loadFiles();
+}
+
+function handleErrorEvent(jobId, message) {
+  delete _jobPhases[jobId];
+  const job = _jobs.get(jobId);
+  if (job) { job.status='error'; job.error=message; }
+
+  const card = document.getElementById(`job-card-${jobId}`);
+  if (card) card.classList.add('is-error');
+  const badge = document.getElementById(`job-badge-${jobId}`);
+  if (badge) { badge.className='badge bg-danger-lt flex-shrink-0'; badge.textContent='Errore'; }
+  const bar = document.getElementById(`job-bar-${jobId}`);
+  if (bar) { bar.className='progress-bar phase-bar-error bg-danger job-progress-bar'; bar.style.width='100%'; }
+  const info = document.getElementById(`job-info-${jobId}`);
+  if (info) info.textContent = message==='Annullato' ? 'Annullato' : escapeHtml(message||'Errore');
+  const stop = document.getElementById(`job-stop-${jobId}`);
+  if (stop) stop.innerHTML='';
+
+  updateActiveBadge();
 }
 
 async function cancelJob(jobId) {
   if (!confirm('Interrompere il download?')) return;
   try {
-    const res = await fetch(`/api/download/${jobId}`, { method: 'DELETE' });
-    if (!res.ok) {
-      const data = await safeJson(res);
-      showToast(data.detail || 'Errore annullamento', 'danger');
+    const res = await fetch(`/api/download/${jobId}`, {method:'DELETE'});
+    if (!res.ok) { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
+  } catch(e) { showToast('Errore di rete','danger'); }
+}
+
+function clearFinished() {
+  for (const [id, j] of _jobs) {
+    if (j.status==='done'||j.status==='error'||j.status==='cancelled') {
+      _jobs.delete(id);
+      document.getElementById(`job-card-${id}`)?.remove();
     }
-  } catch (e) {
-    showToast('Errore di rete', 'danger');
   }
+  if (!_jobs.size) {
+    const container = document.getElementById('jobs-container');
+    const empty = document.getElementById('jobs-empty');
+    empty.style.display='';
+    container.innerHTML='';
+    container.appendChild(empty);
+  }
+  updateActiveBadge();
 }
 
-function pollJobs() {
-  setInterval(async () => {
-    if (document.getElementById('page-downloads').style.display !== 'none') {
-      await refreshJobs();
-    }
-  }, 5000);
-}
-
-// ─── File Manager ─────────────────────────────────────────────────────────────
+// ── File Manager ───────────────────────────────────────────────────────────────
 
 let _collapsedFolders = new Set();
 let _draggedPath = null;
 
 function setupFileManager() {
-  // ── Drag source ───────────────────────────────────────────────────────────────
   document.addEventListener('dragstart', (e) => {
     const row = e.target.closest('[data-drag-path]');
     if (!row) return;
     _draggedPath = row.dataset.dragPath;
-    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.effectAllowed='move';
     e.dataTransfer.setData('text/plain', _draggedPath);
     row.classList.add('dragging');
   });
   document.addEventListener('dragend', () => {
-    document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
-    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-    _draggedPath = null;
+    document.querySelectorAll('.dragging').forEach(el=>el.classList.remove('dragging'));
+    document.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));
+    _draggedPath=null;
   });
-
-  // ── Drop targets (folders in the tree) ───────────────────────────────────────
   document.addEventListener('dragover', (e) => {
     if (!e.target.closest('.fm-drop-zone')) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.preventDefault(); e.dataTransfer.dropEffect='move';
   });
   document.addEventListener('dragenter', (e) => {
     const zone = e.target.closest('.fm-drop-zone');
     if (!zone || !_draggedPath) return;
-    // Skip if hovering over source or a descendant of source
     const dest = zone.dataset.dropPath;
-    if (dest === _draggedPath || dest.startsWith(_draggedPath + '/')) return;
+    if (dest===_draggedPath || dest.startsWith(_draggedPath+'/')) return;
     e.preventDefault();
-    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    document.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));
     zone.classList.add('drag-over');
   });
   document.addEventListener('dragleave', (e) => {
@@ -814,37 +780,30 @@ function setupFileManager() {
   document.addEventListener('drop', (e) => {
     const zone = e.target.closest('.fm-drop-zone');
     if (!zone) return;
-    e.preventDefault();
-    zone.classList.remove('drag-over');
+    e.preventDefault(); zone.classList.remove('drag-over');
     const destDirPath = zone.dataset.dropPath;
-    if (!_draggedPath || destDirPath === undefined) return;
-    if (destDirPath === _draggedPath || destDirPath.startsWith(_draggedPath + '/')) return;
+    if (!_draggedPath||destDirPath===undefined) return;
+    if (destDirPath===_draggedPath||destDirPath.startsWith(_draggedPath+'/')) return;
     const name = _draggedPath.split(/[/\\]/).pop();
     moveToPath(_draggedPath, name, destDirPath);
-    _draggedPath = null;
+    _draggedPath=null;
   });
-
-  // ── Click delegation ──────────────────────────────────────────────────────────
   document.addEventListener('click', (e) => {
     const toggle = e.target.closest('.fm-toggle');
     if (toggle) {
       const path = toggle.dataset.folderPath;
       if (_collapsedFolders.has(path)) _collapsedFolders.delete(path);
       else _collapsedFolders.add(path);
-      loadFiles();
-      return;
+      loadFiles(); return;
     }
     const delBtn = e.target.closest('[data-delete-path]');
     if (delBtn && delBtn.closest('#files-left-pane')) {
-      deletePath(delBtn.dataset.deletePath, delBtn.dataset.deleteName, !!delBtn.dataset.deleteDir);
-      return;
+      deletePath(delBtn.dataset.deletePath, delBtn.dataset.deleteName, !!delBtn.dataset.deleteDir); return;
     }
     const playBtn = e.target.closest('[data-play-path]');
     if (playBtn) playFile(playBtn.dataset.playPath, playBtn.dataset.playName);
   });
 }
-
-// ─── File tree ────────────────────────────────────────────────────────────────
 
 async function loadFiles() {
   const pane = document.getElementById('files-left-pane');
@@ -852,40 +811,34 @@ async function loadFiles() {
   try {
     const res = await fetch('/api/files');
     const tree = await safeJson(res);
-    if (!tree || tree.length === 0) {
-      pane.innerHTML = '<div class="text-muted text-center py-4">Nessun file trovato</div>';
-      return;
-    }
-    pane.innerHTML = '';
-    // Root drop zone: drop here to move back to root of videos/
+    if (!tree||!tree.length) { pane.innerHTML='<div class="text-muted text-center py-4">Nessun file trovato</div>'; return; }
+    pane.innerHTML='';
     const rootZone = document.createElement('div');
-    rootZone.className = 'fm-row fm-drop-zone fm-root-zone';
-    rootZone.dataset.dropPath = '';
-    rootZone.innerHTML = `<span style="min-width:14px;flex-shrink:0"></span>
+    rootZone.className='fm-row fm-drop-zone fm-root-zone';
+    rootZone.dataset.dropPath='';
+    rootZone.innerHTML=`<span style="min-width:14px;flex-shrink:0"></span>
       <i class="ti ti-home text-muted" style="flex-shrink:0"></i>
       <span class="fm-meta ms-1">radice</span>`;
     pane.appendChild(rootZone);
     renderTreeItems(tree, pane, 0);
-  } catch (e) {
-    pane.innerHTML = `<div class="text-danger text-center py-4">Errore: ${escapeHtml(e.message)}</div>`;
+  } catch(e) {
+    pane.innerHTML=`<div class="text-danger text-center py-4">Errore: ${escapeHtml(e.message)}</div>`;
   }
 }
 
 function renderTreeItems(items, container, depth) {
   items.forEach(item => {
     const row = document.createElement('div');
-    row.className = 'fm-row';
-    row.style.paddingLeft = `${8 + depth * 16}px`;
-    row.setAttribute('draggable', 'true');
-    row.dataset.dragPath = item.path;
-
-    if (item.type === 'directory') {
+    row.className='fm-row';
+    row.style.paddingLeft=`${8+depth*16}px`;
+    row.setAttribute('draggable','true');
+    row.dataset.dragPath=item.path;
+    if (item.type==='directory') {
       const collapsed = _collapsedFolders.has(item.path);
-      // Folders are also drop targets
       row.classList.add('fm-drop-zone');
-      row.dataset.dropPath = item.path;
-      row.innerHTML = `
-        <i class="ti ${collapsed ? 'ti-chevron-right' : 'ti-chevron-down'} text-muted fm-toggle"
+      row.dataset.dropPath=item.path;
+      row.innerHTML=`
+        <i class="ti ${collapsed?'ti-chevron-right':'ti-chevron-down'} text-muted fm-toggle"
            data-folder-path="${escapeHtml(item.path)}"
            style="font-size:.75em;cursor:pointer;min-width:14px;flex-shrink:0"></i>
         <i class="ti ti-folder-filled text-yellow" style="flex-shrink:0"></i>
@@ -894,127 +847,56 @@ function renderTreeItems(items, container, depth) {
           <button class="btn btn-sm btn-outline-danger"
                   data-delete-path="${escapeHtml(item.path)}"
                   data-delete-name="${escapeHtml(item.name)}"
-                  data-delete-dir="1">
-            <i class="ti ti-trash"></i>
-          </button>
+                  data-delete-dir="1"><i class="ti ti-trash"></i></button>
         </div>`;
       container.appendChild(row);
-      if (!collapsed && item.children) renderTreeItems(item.children, container, depth + 1);
+      if (!collapsed && item.children) renderTreeItems(item.children, container, depth+1);
     } else {
       const size = formatSize(item.size);
       const isMp4 = item.name.toLowerCase().endsWith('.mp4');
-      const fileIcon = isMp4 ? 'ti-file-type-mp4 text-red' : 'ti-file text-muted';
-      row.innerHTML = `
+      row.innerHTML=`
         <span style="min-width:14px;flex-shrink:0"></span>
-        <i class="ti ${fileIcon}" style="flex-shrink:0"></i>
+        <i class="ti ${isMp4?'ti-file-type-mp4 text-red':'ti-file text-muted'}" style="flex-shrink:0"></i>
         <span class="fm-name">${escapeHtml(item.name)}</span>
         <span class="fm-meta">${size}</span>
         <div class="fm-actions">
-          ${isMp4 ? `<button class="btn btn-sm btn-outline-primary"
-              data-play-path="${escapeHtml(item.path)}"
-              data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>` : ''}
-          <a class="btn btn-sm btn-outline-secondary"
-             href="/api/files/download/${encodeURI(item.path)}">
-            <i class="ti ti-download"></i>
-          </a>
-          <button class="btn btn-sm btn-outline-danger"
-                  data-delete-path="${escapeHtml(item.path)}"
-                  data-delete-name="${escapeHtml(item.name)}">
-            <i class="ti ti-trash"></i>
-          </button>
+          ${isMp4?`<button class="btn btn-sm btn-outline-primary" data-play-path="${escapeHtml(item.path)}" data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>`:''}
+          <a class="btn btn-sm btn-outline-secondary" href="/api/files/download/${encodeURI(item.path)}"><i class="ti ti-download"></i></a>
+          <button class="btn btn-sm btn-outline-danger" data-delete-path="${escapeHtml(item.path)}" data-delete-name="${escapeHtml(item.name)}"><i class="ti ti-trash"></i></button>
         </div>`;
       container.appendChild(row);
     }
   });
 }
 
-// ─── Move (within videos/) ────────────────────────────────────────────────────
-
 async function moveToPath(sourcePath, name, destDirPath) {
   try {
     const res = await fetch('/api/files/move', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: sourcePath, dest_dir_path: destDirPath }),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({path:sourcePath, dest_dir_path:destDirPath}),
     });
     const data = await safeJson(res);
-    if (res.ok) {
-      showToast(`Spostato: ${name}`, 'success');
-      loadFiles();
-    } else {
-      showToast(data.detail || 'Errore spostamento', 'danger');
-    }
-  } catch (e) {
-    showToast('Errore di rete', 'danger');
-  }
+    if (res.ok) { showToast(`Spostato: ${name}`,'success'); loadFiles(); }
+    else showToast(data.detail||'Errore spostamento','danger');
+  } catch(e) { showToast('Errore di rete','danger'); }
 }
 
-// ─── Player / Delete ──────────────────────────────────────────────────────────
-
 function playFile(path, name) {
-  document.getElementById('player-modal-title').textContent = name;
+  document.getElementById('player-modal-title').textContent=name;
   const video = document.getElementById('video-player');
-  video.src = `/api/files/stream/${encodeURI(path)}`;
-  video.load();
+  video.src=`/api/files/stream/${encodeURI(path)}`; video.load();
   showModal('player-modal');
   document.getElementById('player-modal').addEventListener('click', (e) => {
-    if (e.target.closest('[data-bs-dismiss="modal"]')) {
-      video.pause();
-      video.src = '';
-    }
-  }, { once: true });
+    if (e.target.closest('[data-bs-dismiss="modal"]')) { video.pause(); video.src=''; }
+  }, {once:true});
 }
 
 async function deletePath(path, name, isDir) {
-  const msg = isDir
-    ? `Eliminare la cartella "${name}" e tutto il suo contenuto?`
-    : `Eliminare il file "${name}"?`;
+  const msg = isDir ? `Eliminare la cartella "${name}" e tutto il suo contenuto?` : `Eliminare il file "${name}"?`;
   if (!confirm(msg)) return;
   try {
-    const res = await fetch(`/api/files/delete/${encodeURI(path)}`, { method: 'DELETE' });
-    if (res.ok || res.status === 204) {
-      showToast(`Eliminato: ${name}`, 'success');
-      loadFiles();
-    } else {
-      const data = await safeJson(res);
-      showToast(data.detail || 'Errore eliminazione', 'danger');
-    }
-  } catch (e) {
-    showToast('Errore di rete', 'danger');
-  }
-}
-
-// ─── Toast ────────────────────────────────────────────────────────────────────
-
-function showToast(message, type = 'info') {
-  const colors = { success: 'bg-success', danger: 'bg-danger', info: 'bg-info', warning: 'bg-warning' };
-  const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;z-index:9999';
-  toast.innerHTML = `
-    <div class="alert ${colors[type] || 'bg-info'} alert-dismissible text-white mb-0 shadow" role="alert">
-      ${escapeHtml(message)}
-      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert"></button>
-    </div>`;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 5000);
-}
-
-// ─── Utilities ────────────────────────────────────────────────────────────────
-
-function formatSize(bytes) {
-  if (bytes === undefined || bytes === null) return '—';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-}
-
-function escapeHtml(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function escapeStr(s) {
-  if (!s) return '';
-  return String(s).replace(/'/g, "\\'").replace(/"/g, '\\"');
+    const res = await fetch(`/api/files/delete/${encodeURI(path)}`, {method:'DELETE'});
+    if (res.ok||res.status===204) { showToast(`Eliminato: ${name}`,'success'); loadFiles(); }
+    else { const d=await safeJson(res); showToast(d.detail||'Errore eliminazione','danger'); }
+  } catch(e) { showToast('Errore di rete','danger'); }
 }

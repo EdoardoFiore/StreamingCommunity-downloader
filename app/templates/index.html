@@ -3,17 +3,21 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>StreamingCommunity Panel</title>
+  <title>SC Panel</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css"/>
   <style>
-    .progress-bar-animated { transition: width 0.3s ease; }
-    .nav-link.active { font-weight: 600; }
-    #player-modal video { width: 100%; max-height: 70vh; background: #000; }
+    /* ── Job cards ─────────────────────────────────────────────── */
+    .job-card { transition: opacity .2s; }
+    .job-card.is-done { opacity: .65; }
+    .job-card.is-error { opacity: .75; }
+    .job-progress-bar { height: 5px; border-radius: 3px; transition: width .4s ease; }
+
+    /* ── Search cards ──────────────────────────────────────────── */
     .result-card { cursor: pointer; transition: transform .15s, box-shadow .15s; }
     .result-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
 
-    /* ─── File Manager ──────────────────────────────── */
+    /* ── File manager ──────────────────────────────────────────── */
     .fm-pane { overflow-y: auto; max-height: calc(100vh - 220px); }
     .fm-row { display: flex; align-items: center; padding: 3px 8px; border-radius: 4px; gap: 6px; min-height: 30px; }
     .fm-row:hover { background: rgba(0,0,0,.04); }
@@ -27,12 +31,22 @@
     .fm-row:hover .fm-actions { opacity: 1; }
     .fm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
     .fm-meta { white-space: nowrap; color: var(--tblr-muted); font-size: .8em; flex-shrink: 0; }
+
+    /* ── Misc ──────────────────────────────────────────────────── */
+    .stream-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #2fb344; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .phase-bar-joining  { background: var(--tblr-yellow) !important; }
+    .phase-bar-audio    { background: var(--tblr-teal) !important; }
+    .phase-bar-merging  { background: var(--tblr-purple) !important; }
+    .phase-bar-done     { background: var(--tblr-green) !important; }
+    .phase-bar-error    { background: var(--tblr-red) !important; }
+    #stream-status { font-size: .7rem; }
   </style>
 </head>
 <body class="antialiased">
 <div class="wrapper">
 
-  <!-- Sidebar -->
+  <!-- ── Sidebar ────────────────────────────────────────────────────────── -->
   <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
     <div class="container-fluid">
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu">
@@ -44,26 +58,29 @@
       <div class="collapse navbar-collapse" id="sidebar-menu">
         <ul class="navbar-nav pt-lg-3">
           <li class="nav-item">
-            <a class="nav-link active" href="#" data-page="search" onclick="showPage('search')">
+            <a class="nav-link active" href="#" data-page="search" onclick="showPage('search');return false">
               <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti ti-search"></i></span>
               <span class="nav-link-title">Cerca</span>
             </a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="#" data-page="downloads" onclick="showPage('downloads')">
+            <a class="nav-link" href="#" data-page="downloads" onclick="showPage('downloads');return false">
               <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti ti-download"></i></span>
               <span class="nav-link-title">Download</span>
               <span class="badge bg-red ms-auto" id="active-jobs-badge" style="display:none"></span>
             </a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="#" data-page="files" onclick="showPage('files')">
+            <a class="nav-link" href="#" data-page="files" onclick="showPage('files');return false">
               <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti ti-folder-filled"></i></span>
               <span class="nav-link-title">File</span>
             </a>
           </li>
         </ul>
-        <div class="mt-auto pb-3">
+        <div class="mt-auto pb-3 d-flex flex-column gap-2">
+          <div id="stream-status" class="text-muted px-1 d-flex align-items-center gap-2">
+            <span class="stream-dot"></span><span id="stream-label">Connessione...</span>
+          </div>
           <button class="btn btn-ghost-light w-100" onclick="openSettings()">
             <i class="ti ti-settings me-2"></i>Impostazioni
           </button>
@@ -72,7 +89,7 @@
     </div>
   </aside>
 
-  <!-- Main content -->
+  <!-- ── Main content ───────────────────────────────────────────────────── -->
   <div class="page-wrapper">
     <div class="page-header d-print-none">
       <div class="container-xl">
@@ -80,8 +97,8 @@
           <div class="col">
             <h2 class="page-title" id="page-title">Cerca</h2>
           </div>
-          <div class="col-auto" id="domain-indicator">
-            <span class="badge bg-secondary" id="domain-badge">Domain: caricamento...</span>
+          <div class="col-auto">
+            <span class="badge bg-secondary" id="domain-badge">caricamento...</span>
           </div>
         </div>
       </div>
@@ -90,12 +107,14 @@
     <div class="page-body">
       <div class="container-xl">
 
-        <!-- Search page -->
+        <!-- ── Search ─────────────────────────────────────────────────── -->
         <div id="page-search">
           <div class="row mb-3">
             <div class="col-md-8 col-lg-6">
               <div class="input-group">
-                <input type="text" id="search-input" class="form-control" placeholder="Cerca film o serie TV..." onkeydown="if(event.key==='Enter') doSearch()">
+                <input type="text" id="search-input" class="form-control"
+                       placeholder="Cerca film o serie TV..."
+                       onkeydown="if(event.key==='Enter') doSearch()">
                 <button class="btn btn-primary" onclick="doSearch()" id="search-btn">
                   <i class="ti ti-search me-1"></i>Cerca
                 </button>
@@ -105,47 +124,36 @@
           <div id="search-results" class="row g-2"></div>
         </div>
 
-        <!-- Downloads page -->
+        <!-- ── Downloads ──────────────────────────────────────────────── -->
         <div id="page-downloads" style="display:none">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">Coda download</h3>
-              <div class="card-options">
-                <button class="btn btn-sm btn-outline-secondary" onclick="refreshJobs()">
-                  <i class="ti ti-refresh"></i>
-                </button>
-              </div>
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <div class="d-flex align-items-center gap-2">
+              <span id="dl-active-pill" class="badge bg-blue" style="display:none">
+                <i class="ti ti-loader-2 ti-spin me-1"></i><span id="dl-active-count">0</span> attivi
+              </span>
             </div>
-            <div class="card-body p-0">
-              <div class="table-responsive">
-                <table class="table table-vcenter card-table">
-                  <thead>
-                    <tr>
-                      <th>Titolo</th>
-                      <th>Tipo</th>
-                      <th>Stato</th>
-                      <th>Progresso</th>
-                      <th>Avviato</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="jobs-table-body">
-                    <tr><td colspan="6" class="text-muted text-center py-4">Nessun download</td></tr>
-                  </tbody>
-                </table>
-              </div>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearFinished()">
+              <i class="ti ti-trash me-1"></i>Rimuovi completati
+            </button>
+          </div>
+          <div id="jobs-container">
+            <div id="jobs-empty" class="text-center text-muted py-6">
+              <i class="ti ti-download ti-lg mb-2 d-block" style="font-size:2rem"></i>
+              Nessun download
             </div>
           </div>
         </div>
 
-        <!-- Files page -->
+        <!-- ── Files ──────────────────────────────────────────────────── -->
         <div id="page-files" style="display:none">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title"><i class="ti ti-folder-filled text-yellow me-1"></i>File scaricati</h3>
               <div class="card-options">
-                <span class="text-muted small me-3 d-none d-md-inline">Trascina file o cartelle per spostarli</span>
-                <button class="btn btn-sm btn-outline-secondary" onclick="loadFiles()"><i class="ti ti-refresh"></i></button>
+                <span class="text-muted small me-3 d-none d-md-inline">Trascina per spostare</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadFiles()">
+                  <i class="ti ti-refresh"></i>
+                </button>
               </div>
             </div>
             <div class="card-body p-0 fm-pane" id="files-left-pane">
@@ -159,7 +167,7 @@
   </div>
 </div>
 
-<!-- Settings Modal -->
+<!-- ── Settings Modal ────────────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="settings-modal" tabindex="-1" style="display:none" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
@@ -189,8 +197,9 @@
 
         <hr class="my-3">
         <h6 class="text-uppercase text-muted small fw-bold mb-2">Cartelle escluse</h6>
-        <input type="text" id="excluded-input" class="form-control form-control-sm" placeholder="lost+found, .recycle, @eaDir, ...">
-        <div class="form-text">Nomi separati da virgola — non verranno mostrate nella pagina File</div>
+        <input type="text" id="excluded-input" class="form-control form-control-sm"
+               placeholder="lost+found, .recycle, @eaDir, ...">
+        <div class="form-text">Nomi separati da virgola</div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
@@ -200,8 +209,7 @@
   </div>
 </div>
 
-
-<!-- Detail Modal -->
+<!-- ── Detail Modal ──────────────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="detail-modal" tabindex="-1" style="display:none" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered" style="max-width:520px">
     <div class="modal-content">
@@ -211,7 +219,9 @@
       <div class="modal-body pt-0">
         <div class="row g-3">
           <div class="col-auto">
-            <img id="detail-poster" src="" alt="" style="width:120px;height:180px;object-fit:cover;border-radius:6px;background:#eee" onerror="this.style.display='none'">
+            <img id="detail-poster" src="" alt=""
+                 style="width:120px;height:180px;object-fit:cover;border-radius:6px;background:#eee"
+                 onerror="this.style.display='none'">
           </div>
           <div class="col">
             <div class="mb-1">
@@ -233,7 +243,7 @@
   </div>
 </div>
 
-<!-- Episode Browser Modal -->
+<!-- ── Episode Browser Modal ─────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="episode-modal" tabindex="-1" style="display:none" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
@@ -242,6 +252,8 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+        <!-- Season tabs injected here -->
+        <ul class="nav nav-tabs mb-3" id="season-tabs" style="display:none"></ul>
         <div id="episode-modal-body">
           <div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>
         </div>
@@ -250,7 +262,7 @@
   </div>
 </div>
 
-<!-- Video Player Modal -->
+<!-- ── Player Modal ───────────────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="player-modal" tabindex="-1" style="display:none" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-centered">
     <div class="modal-content bg-dark">
@@ -259,7 +271,7 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-0">
-        <video id="video-player" controls preload="metadata"></video>
+        <video id="video-player" controls preload="metadata" style="width:100%;max-height:70vh;background:#000"></video>
       </div>
     </div>
   </div>
