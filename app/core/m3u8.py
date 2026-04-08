@@ -476,6 +476,17 @@ def _fetch_text(url):
     raise RuntimeError(f"Failed to fetch {url}: HTTP {response.status_code}")
 
 
+def _fetch_text_with_b1_fallback(url):
+    response = requests.get(url)
+    if response.status_code == 403:
+        logger.warning("M3U8 fetch returned 403, retrying with ?b=1: %s", url)
+        b1_url = url + ("&b=1" if "?" in url else "?b=1")
+        response = requests.get(b1_url)
+    if response.ok:
+        return response.text
+    raise RuntimeError(f"Failed to fetch {url}: HTTP {response.status_code}")
+
+
 def fetch_master_languages(m3u8_url: str, referer: str) -> dict:
     """Fetch a master M3U8 playlist and return available audio/subtitle language codes."""
     req = requests.get(m3u8_url, headers={"user-agent": get_headers(), "referer": referer}, timeout=10)
@@ -526,7 +537,7 @@ def download_m3u8(
     elif m3u8_index is not None and DOWNLOAD_SUB:
         # m3u8_index is a master playlist URL — parse it to extract subtitles
         try:
-            master_content = _fetch_text(m3u8_index)
+            master_content = _fetch_text_with_b1_fallback(m3u8_index)
             parse_master = M3U8_Parser()
             parse_master.parse_data(master_content)
             langs = parse_master.available_languages()

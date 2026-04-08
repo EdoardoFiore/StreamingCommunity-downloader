@@ -132,15 +132,19 @@ def _get_m3u8_key(json_win_video, json_win_param, referer):
 
 
 def _get_m3u8_audio(json_win_video, json_win_param, referer):
+    from app.core.m3u8 import M3U8_Parser
     master_url = _get_m3u8_url(json_win_video, json_win_param)
     req = requests.get(master_url, headers={"referer": referer})
-    if req.ok:
-        for row in req.text.split():
-            if "audio" in str(row) and "ita" in str(row):
-                return row.split(",")[-1].split('"')[-2]
+    if req.status_code == 403:
+        logger.warning("Audio master M3U8 returned 403, retrying with ?b=1")
+        master_url = _get_m3u8_url(json_win_video, json_win_param, add_b1=True)
+        req = requests.get(master_url, headers={"referer": referer})
+    if not req.ok:
+        logger.warning("Audio playlist returned HTTP %d, skipping audio track", req.status_code)
         return None
-    logger.warning("Audio playlist returned HTTP %d, skipping audio track", req.status_code)
-    return None
+    parser = M3U8_Parser()
+    parser.parse_data(req.text)
+    return parser.get_track_audio("Italian") or parser.get_track_audio("ita")
 
 
 def get_tv_languages(tv_id: int, slug: str, domain: str, version: str) -> dict:
