@@ -28,19 +28,60 @@ def get_domain_version(domain: str) -> str:
     return ""
 
 
-
 def search(title_search: str, domain: str) -> list[dict]:
-    req = requests.get(
-        f"https://{domain}/api/search",
-        params={"q": title_search},
-        headers={"user-agent": get_headers()},
+    session = requests.Session()
+    ua = get_headers()
+
+    # Step 1: GET homepage to get cookies and Inertia version
+    home = session.get(
+        f"https://{domain}",
+        headers={"user-agent": ua},
+        timeout=10,
     )
+    home.raise_for_status()
+
+    # Extract Inertia version from data-page attribute
+    inertia_version = ""
+    try:
+        soup = BeautifulSoup(home.text, "lxml")
+        app_div = soup.find("div", {"id": "app"})
+        if app_div and app_div.get("data-page"):
+            inertia_version = json.loads(app_div.get("data-page")).get("version", "")
+    except Exception:
+        pass
+
+    # Step 2: Search using Inertia headers + session cookies
+    headers = {
+        "user-agent": ua,
+        "X-Inertia": "true",
+        "X-Inertia-Version": inertia_version,
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": f"https://{domain}",
+    }
+
+    req = session.get(
+        f"https://{domain}/it/search",
+        params={"q": title_search},
+        headers=headers,
+        timeout=10,
+    )
+
     if not req.ok:
         raise RuntimeError(f"Search failed: HTTP {req.status_code}")
+
     try:
         data = req.json()
     except Exception:
         raise RuntimeError(f"Search returned invalid response (body: {req.text[:200]!r})")
+
+    # Inertia wraps data in component props
+    titles = []
+    if "props" in data:
+        titles = data["props"].get("titles", data["props"].get("results", []))
+    elif "data" in data:
+        titles = data.get("data", [])
+
     def _poster(images):
         for img in (images or []):
             if img.get("type") == "poster":
@@ -60,5 +101,5 @@ def search(title_search: str, domain: str) -> list[dict]:
             "seasons_count": t.get("seasons_count", 0),
             "poster": _poster(t.get("images", [])),
         }
-        for t in data.get("data", [])
+        for t in titles
     ][:21]
