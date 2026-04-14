@@ -1,0 +1,23 @@
+services:
+  web:
+    image: ghcr.io/edoardofiore/streamingcommunity-downloader:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - nfs_storage:/app/videos
+    environment:
+      - VIDEOS_DIR=/app/videos
+      - HOST=0.0.0.0
+      - PORT=8000
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: unless-stopped
+
+volumes:
+  nfs_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/nfs/storage  # ← cambia con il percorso locale dove vuoi salvare i video

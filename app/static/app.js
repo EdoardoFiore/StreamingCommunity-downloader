@@ -245,19 +245,23 @@ async function doSearch() {
       const posterUrl = item.poster ? `/api/image/${currentDomain}/${item.poster}` : '';
       const card = document.createElement('div');
       card.className = 'col-6 col-sm-4 col-md-3 col-lg-2';
+      const posterHtml = posterUrl
+        ? `<img src="${posterUrl}" alt="" onerror="this.closest('.poster-wrap').querySelector('.poster-noimg').style.display='flex';this.style.display='none'">`
+        : '';
       card.innerHTML = `
-        <div class="card result-card h-100" onclick="openDetailModal(${idx})" style="overflow:hidden">
-          <div style="aspect-ratio:2/3;overflow:hidden;background:#1a1a2e">
-            ${posterUrl
-              ? `<img src="${posterUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.parentElement.innerHTML='<div style=\\'width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#666;font-size:2rem\\'>&#127916;</div>'">`
-              : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#666;font-size:2rem">&#127916;</div>`}
+        <div class="result-card" onclick="openDetailModal(${idx})">
+          <div class="poster-wrap">
+            ${posterHtml}
+            <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
+            <div class="poster-overlay"></div>
+            <div class="poster-play"><i class="ti ti-player-play-filled" style="font-size:16px"></i></div>
           </div>
-          <div class="card-body p-2">
-            <div class="fw-bold small lh-sm mb-1">${escapeHtml(item.name)}</div>
-            <div class="d-flex align-items-center gap-1 flex-wrap">
-              <span class="badge ${isMovie?'bg-blue-lt':'bg-green-lt'}" style="font-size:.65em">${isMovie?'Film':'TV'}</span>
-              ${score?`<span class="badge bg-yellow-lt" style="font-size:.65em">★ ${score}</span>`:''}
-              ${year?`<span class="text-muted" style="font-size:.7em">${year}</span>`:''}
+          <div class="card-meta">
+            <div class="card-title-text" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
+            <div class="card-badges">
+              <span class="badge ${isMovie?'bg-blue-lt':'bg-green-lt'}">${isMovie?'Film':'TV'}</span>
+              ${score?`<span class="badge bg-yellow-lt">★ ${score}</span>`:''}
+              ${year?`<span style="font-size:10px;color:var(--text-muted)">${year}</span>`:''}
             </div>
           </div>
         </div>`;
@@ -536,6 +540,12 @@ function _buildJobCard(j) {
   const barWidth = j.status==='queued' ? 0 : (j.status==='done' ? 100 : pct);
   const badgeClass = PHASE_BADGE[phase]||'bg-secondary-lt';
   const label = PHASE_LABELS[phase] || phase;
+  const PHASE_BORDER = {
+    queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
+    audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
+    error:'var(--accent)', cancelled:'var(--text-dim)',
+  };
+  const borderColor = PHASE_BORDER[phase] || 'transparent';
 
   const speed = j.progress?.speed;
   const eta = j.progress?.eta;
@@ -554,7 +564,7 @@ function _buildJobCard(j) {
     ? new Date(/[Z+]/.test(rawTs)?rawTs:rawTs+'Z').toLocaleString('it-IT',{hour:'2-digit',minute:'2-digit'})
     : '';
 
-  return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}" id="job-card-${j.job_id}">
+  return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}" id="job-card-${j.job_id}" style="border-left:3px solid ${borderColor} !important">
     <div class="card-body py-2 px-3">
       <div class="d-flex align-items-center gap-2">
         <span class="badge ${isMovie?'bg-blue-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':'TV'}</span>
