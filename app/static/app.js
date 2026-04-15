@@ -81,7 +81,7 @@ document.addEventListener('click', (e) => {
 function showToast(message, type = 'info') {
   const colors = { success:'bg-success', danger:'bg-danger', info:'bg-info', warning:'bg-warning' };
   const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;z-index:9999;min-width:220px';
+  toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;left:auto;z-index:9999;min-width:220px;max-width:calc(100vw - 2rem)';
   toast.innerHTML = `<div class="alert ${colors[type]||'bg-info'} alert-dismissible text-white mb-0 shadow" role="alert">
     ${escapeHtml(message)}
     <button type="button" class="btn-close btn-close-white" onclick="this.closest('.alert').parentElement.remove()"></button>
@@ -134,6 +134,11 @@ function setSource(src) {
 // ── Navigation ─────────────────────────────────────────────────────────────────
 
 function showPage(page) {
+  // Close mobile menu if open
+  const mobileMenu = document.getElementById('sidebar-menu');
+  if (mobileMenu && mobileMenu.classList.contains('show')) {
+    mobileMenu.classList.remove('show');
+  }
   ['search','downloads','files'].forEach(p => {
     document.getElementById(`page-${p}`).style.display = p === page ? '' : 'none';
   });
