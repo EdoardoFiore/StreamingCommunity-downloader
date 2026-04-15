@@ -11,38 +11,38 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css"/>
   <style>
     /* ═══════════════════════════════════════════════════════
-       OBSIDIAN CINEMA — Design Tokens
+       THEME — Dark Mode (Medium Gray)
        ═══════════════════════════════════════════════════════ */
     :root {
-      --bg-base:       #09090f;
-      --bg-surface:    #101018;
-      --bg-raised:     #17172a;
-      --bg-hover:      #1d1d30;
-      --bg-input:      #141422;
+      --bg-base:       #1a1a24;
+      --bg-surface:    #242433;
+      --bg-raised:     #2d2d3f;
+      --bg-hover:      #35354a;
+      --bg-input:      #1f1f2b;
 
-      --border:        rgba(255,255,255,.06);
-      --border-mid:    rgba(255,255,255,.09);
-      --border-strong: rgba(255,255,255,.14);
+      --border:        rgba(255,255,255,.08);
+      --border-mid:    rgba(255,255,255,.12);
+      --border-strong: rgba(255,255,255,.18);
 
       --accent:        #e02444;
-      --accent-dim:    rgba(224,36,68,.13);
-      --accent-glow:   rgba(224,36,68,.28);
+      --accent-dim:    rgba(224,36,68,.15);
+      --accent-glow:   rgba(224,36,68,.25);
 
       --blue:          #4f80ff;
-      --blue-dim:      rgba(79,128,255,.13);
+      --blue-dim:      rgba(79,128,255,.12);
       --green:         #0ec47c;
-      --green-dim:     rgba(14,196,124,.13);
+      --green-dim:     rgba(14,196,124,.12);
       --yellow:        #f5a931;
-      --yellow-dim:    rgba(245,169,49,.13);
+      --yellow-dim:    rgba(245,169,49,.12);
       --teal:          #18c8c8;
-      --teal-dim:      rgba(24,200,200,.13);
+      --teal-dim:      rgba(24,200,200,.12);
       --purple:        #9d6bfa;
-      --purple-dim:    rgba(157,107,250,.13);
+      --purple-dim:    rgba(157,107,250,.12);
 
-      --text:          #eceef8;
-      --text-sub:      #a0a0c0;
-      --text-muted:    #606080;
-      --text-dim:      #3a3a58;
+      --text:          #e0e0e8;
+      --text-sub:      #b0b0b8;
+      --text-muted:    #808088;
+      --text-dim:      #505060;
 
       --sidebar-w:     228px;
       --radius:        10px;
@@ -72,8 +72,8 @@
     /* ── Scrollbars ───────────────────────────────────────── */
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.16); }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.18); }
 
     /* ═══════════════════════════════════════════════════════
        SIDEBAR
@@ -289,7 +289,7 @@
       border-color: var(--border-mid) !important;
       background: transparent !important;
     }
-    .navbar-toggler-icon { filter: invert(1) opacity(.5); }
+    .navbar-toggler-icon { filter: invert(1) opacity(.6); }
 
     /* ═══════════════════════════════════════════════════════
        PAGE LAYOUT
@@ -378,6 +378,38 @@
     .sc-searchbar .sc-search-btn:active { transform: scale(.97); }
     .sc-searchbar .sc-search-btn:disabled { opacity: .45; cursor: not-allowed; }
 
+    /* ── Source selector ──────────────────────────────────────── */
+    .source-selector {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .source-btn {
+      padding: 5px 16px;
+      border-radius: 20px;
+      border: 1px solid var(--border-mid);
+      background: transparent;
+      color: var(--text-muted);
+      font-family: var(--font-ui);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .source-btn.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-color: rgba(224,36,68,.25);
+    }
+    .source-btn:hover:not(.active) {
+      background: var(--bg-hover);
+      color: var(--text-sub);
+      border-color: var(--border-strong);
+    }
+
     /* ═══════════════════════════════════════════════════════
        RESULT CARDS
        ═══════════════════════════════════════════════════════ */
@@ -394,7 +426,7 @@
 
     .result-card:hover {
       transform: translateY(-7px) scale(1.015) !important;
-      box-shadow: 0 14px 40px rgba(0,0,0,.55) !important;
+      box-shadow: 0 14px 40px rgba(0,0,0,.35) !important;
       border-color: var(--border-strong) !important;
     }
 
@@ -420,8 +452,8 @@
       inset: 0;
       background: linear-gradient(
         to top,
-        rgba(9,9,15,.98) 0%,
-        rgba(9,9,15,.4) 45%,
+        rgba(26,26,36,.96) 0%,
+        rgba(26,26,36,.35) 45%,
         transparent 100%
       );
       opacity: 0;
@@ -825,7 +857,7 @@
        MODALS
        ═══════════════════════════════════════════════════════ */
     .modal-backdrop {
-      background: rgba(0,0,0,.72) !important;
+      background: rgba(0,0,0,.50) !important;
       backdrop-filter: blur(5px);
       -webkit-backdrop-filter: blur(5px);
     }
@@ -835,7 +867,7 @@
       border: 1px solid var(--border-mid) !important;
       border-radius: 14px !important;
       color: var(--text) !important;
-      box-shadow: 0 28px 70px rgba(0,0,0,.75) !important;
+      box-shadow: 0 28px 70px rgba(0,0,0,.45) !important;
     }
 
     .modal-header {
@@ -855,6 +887,7 @@
     .modal-footer {
       border-top: 1px solid var(--border) !important;
       padding: 14px 20px !important;
+      background: transparent !important;
     }
 
     /* Detail modal poster title */
@@ -872,7 +905,7 @@
 
     #detail-poster {
       border-radius: var(--radius) !important;
-      box-shadow: 0 8px 28px rgba(0,0,0,.55) !important;
+      box-shadow: 0 8px 28px rgba(0,0,0,.40) !important;
     }
 
     /* Nav tabs */
@@ -993,10 +1026,10 @@
 
     /* Player modal */
     #player-modal .modal-content {
-      background: #000 !important;
-      border-color: rgba(255,255,255,.07) !important;
+      background: #1a1a24 !important;
+      border-color: rgba(255,255,255,.08) !important;
     }
-    #player-modal .modal-title { color: rgba(255,255,255,.65) !important; }
+    #player-modal .modal-title { color: rgba(255,255,255,.55) !important; }
 
     /* Page fade-in */
     @keyframes sc-fadein {
@@ -1043,14 +1076,122 @@
        ═══════════════════════════════════════════════════════ */
     @media (max-width: 991px) {
       aside.navbar {
-        position: sticky !important;
+        position: fixed !important;
         top: 0;
         width: 100% !important;
         height: auto !important;
+        max-height: none !important;
         flex-direction: row;
+        z-index: 1050 !important;
+        border-right: none !important;
+        border-bottom: 1px solid var(--border) !important;
       }
-      .page-wrapper { margin-left: 0 !important; }
-      .fm-pane { max-height: 55vh; }
+      
+      aside.navbar .container-fluid {
+        flex-direction: row !important;
+        align-items: center !important;
+        padding: 0 14px !important;
+        height: auto !important;
+      }
+      
+      .sc-brand {
+        padding: 14px 0 !important;
+        border-bottom: none !important;
+        flex-shrink: 0;
+        margin-right: auto;
+      }
+      
+      aside.navbar .collapse {
+        position: fixed !important;
+        left: 0;
+        top: 56px;
+        right: 0;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+        border-radius: 0;
+        flex-direction: column !important;
+        max-height: calc(100vh - 56px);
+        overflow-y: auto;
+      }
+      
+      aside.navbar .navbar-nav {
+        padding: 8px 12px !important;
+        flex-direction: row !important;
+        flex-wrap: wrap;
+      }
+      
+      .navbar-collapse {
+        display: none !important;
+      }
+
+      .navbar-collapse.show {
+        display: flex !important;
+      }
+
+      aside.navbar .nav-link {
+        margin: 0 4px !important;
+        padding: 7px 12px !important;
+        font-size: 13px !important;
+      }
+      
+      .sidebar-footer {
+        display: none;
+      }
+      
+      .page-wrapper {
+        margin-left: 0 !important;
+        margin-top: 56px;
+      }
+      
+      .page-header {
+        padding: 12px 0 !important;
+      }
+      
+      .page-title {
+        font-size: 20px !important;
+      }
+    }
+
+    @media (max-width: 575px) {
+      aside.navbar .container-fluid {
+        padding: 0 10px !important;
+      }
+
+      .sc-brand {
+        gap: 8px !important;
+        padding: 10px 0 !important;
+      }
+
+      .brand-icon {
+        width: 32px !important;
+        height: 32px !important;
+        font-size: 15px !important;
+      }
+
+      .brand-text {
+        font-size: 18px !important;
+        letter-spacing: 2px !important;
+      }
+
+      aside.navbar .nav-link {
+        margin: 0 2px !important;
+        padding: 6px 10px !important;
+        font-size: 12px !important;
+      }
+
+      .sc-searchbar {
+        max-width: 100% !important;
+        padding: 4px 4px 4px 16px !important;
+      }
+
+      .sc-searchbar .sc-search-btn {
+        padding: 6px 14px !important;
+        font-size: 12px !important;
+      }
+
+      .page-body {
+        padding-top: 16px !important;
+      }
     }
   </style>
 </head>
@@ -1122,6 +1263,14 @@
         <!-- ── Search ──────────────────────────────────────────── -->
         <div id="page-search">
           <div class="mb-4">
+            <div class="source-selector">
+              <button class="source-btn active" id="src-sc" onclick="setSource('streamingcommunity')">
+                <i class="ti ti-device-tv"></i>StreamingCommunity
+              </button>
+              <button class="source-btn" id="src-au" onclick="setSource('animeunity')">
+                <i class="ti ti-sword"></i>AnimeUnity
+              </button>
+            </div>
             <div class="sc-searchbar">
               <input type="text" id="search-input"
                      placeholder="Film, serie TV..."
@@ -1291,6 +1440,25 @@
       <div class="modal-body">
         <ul class="nav nav-tabs mb-3" id="season-tabs" style="display:none"></ul>
         <div id="episode-modal-body">
+          <div class="text-center py-4">
+            <div class="spinner-border" role="status"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Anime Browser Modal (AnimeUnity) ─────────────────────────────── -->
+<div class="modal modal-blur fade" id="anime-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="anime-modal-title">Episodi</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="anime-modal-body">
           <div class="text-center py-4">
             <div class="spinner-border" role="status"></div>
           </div>

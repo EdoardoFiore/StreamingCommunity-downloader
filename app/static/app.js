@@ -3,10 +3,12 @@
 // ── State ──────────────────────────────────────────────────────────────────────
 let currentDomain = '';
 let currentVersion = '';
+let currentSource = 'streamingcommunity'; // 'streamingcommunity' | 'animeunity'
 let _searchResults = [];
 let _libraries = [];
 let _jobPhases = {};      // job_id → current phase string
 const _jobs = new Map();  // job_id → job dict (source of truth)
+let _animeCtx = {};       // context for anime episode browser
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
 
@@ -116,6 +118,17 @@ async function loadDomainStatus() {
       openSettings();
     }
   } catch(e) { console.error('loadDomainStatus:', e); }
+}
+
+// ── Source selector ────────────────────────────────────────────────────────────
+
+function setSource(src) {
+  currentSource = src;
+  document.getElementById('src-sc').classList.toggle('active', src === 'streamingcommunity');
+  document.getElementById('src-au').classList.toggle('active', src === 'animeunity');
+  const input = document.getElementById('search-input');
+  if (input) input.placeholder = src === 'animeunity' ? 'Cerca anime...' : 'Film, serie TV...';
+  document.getElementById('search-results').innerHTML = '';
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
@@ -254,7 +267,7 @@ function _showSearchSkeletons() {
 async function doSearch() {
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
-  if (!currentDomain) { openSettings(); return; }
+  if (!currentDomain && currentSource !== 'animeunity') { openSettings(); return; }
   // Cancel previous in-flight request
   if (_searchAbort) _searchAbort.abort();
   _searchAbort = new AbortController();
@@ -263,7 +276,9 @@ async function doSearch() {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Cerca';
   _showSearchSkeletons();
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&domain=${currentDomain}`, {signal: _searchAbort.signal});
+    const searchParams = new URLSearchParams({ q, source: currentSource });
+    if (currentSource !== 'animeunity') searchParams.set('domain', currentDomain);
+    const res = await fetch(`/api/search?${searchParams}`, {signal: _searchAbort.signal});
     const container = document.getElementById('search-results');
     const results = await safeJson(res);
     if (!res.ok) { container.innerHTML=`<div class="col-12"><div class="alert alert-danger">${results.detail||'Errore'}</div></div>`; return; }
@@ -273,7 +288,9 @@ async function doSearch() {
       const isMovie = item.type==='movie';
       const year = itemYear(item);
       const score = item.score ? parseFloat(item.score).toFixed(1) : null;
-      const posterUrl = item.poster ? `/api/image/${currentDomain}/${item.poster}` : '';
+      const posterUrl = item.poster
+        ? (item.poster.startsWith('http') ? item.poster : `/api/image/${currentDomain}/${item.poster}`)
+        : '';
       const card = document.createElement('div');
       card.className = 'col-6 col-sm-4 col-md-3 col-lg-2';
       const posterHtml = posterUrl
@@ -320,10 +337,13 @@ const langName = c => LANG_NAMES[c] || c;
 function openDetailModal(idx) {
   const item = _searchResults[idx];
   if (!item) return;
-  const isMovie = item.type==='movie';
+  const isAnime = item.type === 'anime';
+  const isMovie = item.type === 'movie';
   const year = itemYear(item);
   const score = item.score ? parseFloat(item.score).toFixed(1) : null;
-  const posterUrl = item.poster ? `/api/image/${currentDomain}/${item.poster}` : '';
+  const posterUrl = item.poster
+    ? (item.poster.startsWith('http') ? item.poster : `/api/image/${currentDomain}/${item.poster}`)
+    : '';
 
   const poster = document.getElementById('detail-poster');
   if (posterUrl) { poster.src=posterUrl; poster.style.display=''; poster.onerror=()=>poster.style.display='none'; }
@@ -331,20 +351,25 @@ function openDetailModal(idx) {
 
   document.getElementById('detail-title').textContent = item.name;
   const tb = document.getElementById('detail-type-badge');
-  tb.className = `badge me-1 ${isMovie?'bg-blue-lt':'bg-green-lt'}`;
-  tb.textContent = isMovie ? 'Film' : 'Serie TV';
+  if (isAnime) { tb.className='badge me-1 bg-purple-lt'; tb.textContent='Anime'; }
+  else if (isMovie) { tb.className='badge me-1 bg-blue-lt'; tb.textContent='Film'; }
+  else { tb.className='badge me-1 bg-green-lt'; tb.textContent='Serie TV'; }
   const ab = document.getElementById('detail-age-badge');
   if (item.age) { ab.textContent=`${item.age}+`; ab.style.display=''; } else ab.style.display='none';
 
   const meta = [];
   if (year) meta.push(year);
-  if (!isMovie && item.seasons_count) meta.push(`${item.seasons_count} stagion${item.seasons_count===1?'e':'i'}`);
+  if (isAnime && item.episodes_count) meta.push(`${item.episodes_count} episodi`);
+  else if (!isMovie && item.seasons_count) meta.push(`${item.seasons_count} stagion${item.seasons_count===1?'e':'i'}`);
   document.getElementById('detail-meta').textContent = meta.join(' · ');
   document.getElementById('detail-score').innerHTML = score
     ? `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${score}</span>` : '';
 
   const btn = document.getElementById('detail-action-btn');
-  if (isMovie) {
+  if (isAnime) {
+    btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
+    btn.onclick = () => { hideModal('detail-modal'); openAnimeBrowser(item.id, item.name, item.type, year); };
+  } else if (isMovie) {
     btn.className='btn btn-primary'; btn.innerHTML='<i class="ti ti-download me-1"></i>Scarica';
     btn.onclick = () => { hideModal('detail-modal'); startFilmDownload(item.id, item.name, year); };
   } else {
@@ -353,6 +378,12 @@ function openDetailModal(idx) {
   }
 
   const langsEl = document.getElementById('detail-langs');
+  if (isAnime) {
+    langsEl.innerHTML = '';
+    showModal('detail-modal');
+    return;
+  }
+
   langsEl.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Caricamento lingue...';
   showModal('detail-modal');
 
@@ -492,6 +523,132 @@ async function downloadWholeSeason(season) {
   showPage('downloads'); hideModal('episode-modal');
 }
 
+// ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
+
+async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null) {
+  // Auto-detect if film (1 episode) but allow user override
+  const isAutoFilm = _searchResults.find(r => r.id === animeId)?.episodes_count === 1;
+  const effectiveType = (isAutoFilm && animeType === 'anime') ? 'movie' : animeType;
+  
+  _animeCtx = { animeId, animeName, animeType: effectiveType, animeYear, episodes: [], isAutoFilm };
+  document.getElementById('anime-modal-title').textContent = animeName;
+  document.getElementById('anime-modal-body').innerHTML =
+    '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
+  showModal('anime-modal');
+
+  try {
+    const res = await fetch(`/api/anime/${encodeURIComponent(animeId)}/episodes`);
+    const episodes = await safeJson(res);
+    if (!res.ok) throw new Error(episodes.detail || 'Errore');
+    _animeCtx.episodes = episodes;
+
+    if (!episodes.length) {
+      document.getElementById('anime-modal-body').innerHTML =
+        '<p class="text-muted">Nessun episodio trovato.</p>';
+      return;
+    }
+
+    const rows = episodes.map((ep, idx) => {
+      let epNum = ep.number;
+      try { epNum = String(parseFloat(ep.number)); } catch(e) {}
+      // If only one episode and it's auto-detected as film, don't show as series
+      if (_animeCtx.isAutoFilm && episodes.length === 1) {
+        return `
+          <tr>
+            <td class="text-muted w-1 text-nowrap">Film</td>
+            <td class="text-muted" style="font-size:12px">1 episodio</td>
+            <td class="w-1">
+              <button class="btn btn-sm btn-primary" onclick="startAnimeDownload(${idx})" title="Scarica">
+                <i class="ti ti-download"></i>
+              </button>
+            </td>
+          </tr>`;
+      }
+      return `
+        <tr>
+          <td class="text-muted w-1 text-nowrap">E${epNum}</td>
+          <td class="text-muted" style="font-size:12px">ep. ${epNum}</td>
+          <td class="w-1">
+            <button class="btn btn-sm btn-primary" onclick="startAnimeDownload(${idx})" title="Scarica">
+              <i class="ti ti-download"></i>
+            </button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    let typeToggle = '';
+    if (_animeCtx.isAutoFilm) {
+      const currentType = _animeCtx.animeType === 'movie' ? 'Film' : 'Serie';
+      typeToggle = `
+        <div class="mb-2 d-flex align-items-center gap-2">
+          <span class="text-muted small">Tipo:</span>
+          <button class="btn btn-sm ${_animeCtx.animeType === 'movie' ? 'btn-primary' : 'btn-outline-secondary'}"
+                  onclick="toggleAnimeType('movie')" title="Film">
+            <i class="ti ti-ticket me-1"></i>Film
+          </button>
+          <button class="btn btn-sm ${_animeCtx.animeType === 'tv' ? 'btn-primary' : 'btn-outline-secondary'}"
+                  onclick="toggleAnimeType('tv')" title="Serie">
+            <i class="ti ti-list me-1"></i>Serie
+          </button>
+        </div>`;
+    }
+
+    document.getElementById('anime-modal-body').innerHTML = `
+      ${typeToggle}
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <span class="text-muted small">${episodes.length} episodi</span>
+        <button class="btn btn-sm btn-outline-success" onclick="downloadAllAnime()">
+          <i class="ti ti-download me-1"></i>Scarica tutti
+        </button>
+      </div>
+      <div class="table-responsive" style="max-height:380px;overflow-y:auto">
+        <table class="table table-sm table-hover">
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch(e) {
+    document.getElementById('anime-modal-body').innerHTML =
+      `<div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function startAnimeDownload(epIndex) {
+  const { animeId, animeName, animeType, animeYear, episodes } = _animeCtx;
+  const episode = episodes[epIndex];
+  try {
+    const res = await fetch('/api/download/anime', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ 
+        anime_id: animeId, 
+        episode, 
+        anime_name: animeName, 
+        anime_type: animeType,
+        year: animeYear
+      }),
+    });
+    const data = await safeJson(res);
+    if (res.ok) showToast(`In coda: ${animeName} E${episode.number}`, 'success');
+    else showToast(data.detail || 'Errore', 'danger');
+  } catch(e) { showToast('Errore di rete', 'danger'); }
+}
+
+function toggleAnimeType(newType) {
+  _animeCtx.animeType = newType;
+  // Ricarica il modal per mostrare il toggle aggiornato
+  const { animeId, animeName, animeYear } = _animeCtx;
+  openAnimeBrowser(animeId, animeName, newType, animeYear);
+}
+
+async function downloadAllAnime() {
+  const { episodes } = _animeCtx;
+  if (!confirm(`Aggiungere tutti i ${episodes.length} episodi alla coda?`)) return;
+  for (let i = 0; i < episodes.length; i++) {
+    await startAnimeDownload(i);
+    await new Promise(r => setTimeout(r, 150));
+  }
+  showPage('downloads'); hideModal('anime-modal');
+}
+
 // ── Global SSE stream ──────────────────────────────────────────────────────────
 
 function connectGlobalStream() {
@@ -567,6 +724,7 @@ function _buildJobCard(j) {
   const phase = _jobPhases[j.job_id] || j.status;
   const isActive = j.status==='running' || j.status==='queued';
   const isMovie = j.type==='film';
+  const isAnimeJob = j.type==='anime';
   const pct = j.progress?.pct||0;
   const barClass = PHASE_BAR[phase] || 'bg-secondary';
   const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
@@ -600,7 +758,7 @@ function _buildJobCard(j) {
   return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}" id="job-card-${j.job_id}" style="border-left:3px solid ${borderColor} !important">
     <div class="card-body py-2 px-3">
       <div class="d-flex align-items-center gap-2">
-        <span class="badge ${isMovie?'bg-blue-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':'TV'}</span>
+        <span class="badge ${isMovie?'bg-blue-lt':isAnimeJob?'bg-purple-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':isAnimeJob?'Anime':'TV'}</span>
         <span class="fw-medium text-truncate flex-1" style="min-width:0" title="${escapeHtml(j.title)}">${escapeHtml(j.title)}</span>
         <span class="badge ${badgeClass} flex-shrink-0" id="job-badge-${j.job_id}">${label}</span>
         ${stopBtn ? `<span id="job-stop-${j.job_id}">${stopBtn}</span>` : `<span id="job-stop-${j.job_id}"></span>`}
