@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import shutil
@@ -83,15 +84,15 @@ _DEFAULT_EXCLUDED = {"images", "snippets", "lost+found"}
 
 
 @router.get("")
-def list_files():
+async def list_files():
     if not VIDEOS_DIR.exists():
         return []
     excluded = _DEFAULT_EXCLUDED | set(_read_data().get("excluded_folders", []))
-    return _build_tree(VIDEOS_DIR, VIDEOS_DIR, excluded)
+    return await asyncio.to_thread(_build_tree, VIDEOS_DIR, VIDEOS_DIR, excluded)
 
 
 @router.get("/library-tree")
-def list_library_tree():
+async def list_library_tree():
     data = _read_data()
     result = []
     for lib in data.get("libraries", []):
@@ -101,7 +102,7 @@ def list_library_tree():
             "name": lib["name"],
             "abs_path": str(lib_path.resolve()),
             "exists": exists,
-            "children": _build_library_tree(lib_path) if exists else [],
+            "children": (await asyncio.to_thread(_build_library_tree, lib_path)) if exists else [],
         })
     return result
 
@@ -134,8 +135,17 @@ class MoveRequest(BaseModel):
     library_name: str | None = None   # legacy
 
 
+class BatchMoveRequest(BaseModel):
+    paths: list[str]
+    dest_dir_path: str
+
+
+class BatchDeleteRequest(BaseModel):
+    paths: list[str]
+
+
 @router.post("/move")
-def move_to_library(body: MoveRequest):
+async def move_to_library(body: MoveRequest):
     data = _read_data()
     source = _safe_path(body.path)
 
@@ -177,22 +187,93 @@ def move_to_library(body: MoveRequest):
 
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(dest))
+        await asyncio.to_thread(shutil.move, str(source), str(dest))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Spostamento fallito: {e}")
 
     return {"moved_to": str(dest)}
 
 
+def _delete_sync(target: Path):
+    """Synchronous delete helper (runs in thread)."""
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+
+
 @router.delete("/delete/{file_path:path}", status_code=204)
-def delete_path(file_path: str):
+async def delete_path(file_path: str):
     base = VIDEOS_DIR.resolve()
     target = (base / file_path).resolve()
     if not target.is_relative_to(base):
         raise HTTPException(status_code=400, detail="Invalid path")
     if not target.exists():
         raise HTTPException(status_code=404, detail="Not found")
-    if target.is_dir():
-        shutil.rmtree(target)
-    else:
-        target.unlink()
+    await asyncio.to_thread(_delete_sync, target)
+
+
+def _batch_move_sync(paths: list[str], dest_dir_path: str) -> list[dict]:
+    """Move multiple paths within VIDEOS_DIR (blocking, runs in thread)."""
+    base = VIDEOS_DIR.resolve()
+    dest_dir = (base / dest_dir_path).resolve() if dest_dir_path else base
+    results = []
+    for p in paths:
+        try:
+            source = (base / p).resolve()
+            if not source.is_relative_to(base) or not source.exists():
+                results.append({"path": p, "ok": False, "error": "File non trovato"})
+                continue
+            if not dest_dir.is_relative_to(base) and dest_dir != base:
+                results.append({"path": p, "ok": False, "error": "Destinazione non valida"})
+                continue
+            if source.is_dir():
+                if dest_dir == source.resolve() or dest_dir.is_relative_to(source.resolve()):
+                    results.append({"path": p, "ok": False, "error": "Non puoi spostare una cartella dentro se stessa"})
+                    continue
+            dest = dest_dir / source.name
+            if dest.exists():
+                results.append({"path": p, "ok": False, "error": f"'{source.name}' esiste già nella destinazione"})
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(dest))
+            results.append({"path": p, "ok": True, "moved_to": str(dest)})
+        except Exception as e:
+            results.append({"path": p, "ok": False, "error": str(e)})
+    return results
+
+
+@router.post("/move-batch")
+async def batch_move(body: BatchMoveRequest):
+    if not body.paths:
+        raise HTTPException(status_code=400, detail="Nessun file selezionato")
+    results = await asyncio.to_thread(_batch_move_sync, body.paths, body.dest_dir_path)
+    return {"results": results}
+
+
+def _batch_delete_sync(paths: list[str]) -> list[dict]:
+    """Delete multiple paths within VIDEOS_DIR (blocking, runs in thread)."""
+    base = VIDEOS_DIR.resolve()
+    results = []
+    for p in paths:
+        try:
+            target = (base / p).resolve()
+            if not target.is_relative_to(base):
+                results.append({"path": p, "ok": False, "error": "Path non valido"})
+                continue
+            if not target.exists():
+                results.append({"path": p, "ok": False, "error": "Non trovato"})
+                continue
+            _delete_sync(target)
+            results.append({"path": p, "ok": True})
+        except Exception as e:
+            results.append({"path": p, "ok": False, "error": str(e)})
+    return results
+
+
+@router.post("/delete-batch")
+async def batch_delete(body: BatchDeleteRequest):
+    if not body.paths:
+        raise HTTPException(status_code=400, detail="Nessun file selezionato")
+    results = await asyncio.to_thread(_batch_delete_sync, body.paths)
+    return {"results": results}

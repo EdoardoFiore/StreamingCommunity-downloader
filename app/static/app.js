@@ -95,6 +95,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadLibraries();
   connectGlobalStream();
   setupFileManager();
+  setupSearchDebounce();
 });
 
 // ── Domain ─────────────────────────────────────────────────────────────────────
@@ -224,20 +225,50 @@ async function saveLibraries() {
 
 // ── Search ─────────────────────────────────────────────────────────────────────
 
+let _searchAbort = null;
+let _searchDebounceTimer = null;
+
+function setupSearchDebounce() {
+  const input = document.getElementById('search-input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    clearTimeout(_searchDebounceTimer);
+    const q = input.value.trim();
+    if (q.length >= 3) {
+      _searchDebounceTimer = setTimeout(() => doSearch(), 400);
+    }
+  });
+}
+
+function _showSearchSkeletons() {
+  const container = document.getElementById('search-results');
+  container.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const col = document.createElement('div');
+    col.className = 'col-6 col-sm-4 col-md-3 col-lg-2';
+    col.innerHTML = '<div class="skeleton skeleton-card"></div>';
+    container.appendChild(col);
+  }
+}
+
 async function doSearch() {
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
   if (!currentDomain) { openSettings(); return; }
+  // Cancel previous in-flight request
+  if (_searchAbort) _searchAbort.abort();
+  _searchAbort = new AbortController();
   const btn = document.getElementById('search-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Cerca';
-  const container = document.getElementById('search-results');
-  container.innerHTML = '';
+  _showSearchSkeletons();
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&domain=${currentDomain}`);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&domain=${currentDomain}`, {signal: _searchAbort.signal});
+    const container = document.getElementById('search-results');
     const results = await safeJson(res);
     if (!res.ok) { container.innerHTML=`<div class="col-12"><div class="alert alert-danger">${results.detail||'Errore'}</div></div>`; return; }
     if (!results.length) { container.innerHTML='<div class="col-12"><p class="text-muted">Nessun risultato.</p></div>'; return; }
+    container.innerHTML = '';
     results.forEach((item, idx) => {
       const isMovie = item.type==='movie';
       const year = itemYear(item);
@@ -269,6 +300,8 @@ async function doSearch() {
     });
     _searchResults = results;
   } catch(e) {
+    if (e.name === 'AbortError') return; // cancelled by new search
+    const container = document.getElementById('search-results');
     container.innerHTML=`<div class="col-12"><div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div></div>`;
   } finally {
     btn.disabled=false; btn.innerHTML='<i class="ti ti-search me-1"></i>Cerca';
@@ -598,7 +631,14 @@ function renderAllJobCards() {
     return new Date(b.created_at)-new Date(a.created_at);
   });
   empty.style.display='none';
-  container.innerHTML = sorted.map(j=>_buildJobCard(j)).join('');
+  const frag = document.createDocumentFragment();
+  sorted.forEach(j => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = _buildJobCard(j);
+    frag.appendChild(tmp.firstElementChild);
+  });
+  container.innerHTML = '';
+  container.appendChild(frag);
   updateActiveSection();
 }
 
@@ -618,10 +658,52 @@ function refreshCardAppearance(jobId) {
   if (!j) return;
   const card = document.getElementById(`job-card-${jobId}`);
   if (!card) return;
-  // Rebuild the card in place
-  const tmp = document.createElement('div');
-  tmp.innerHTML = _buildJobCard(j);
-  card.replaceWith(tmp.firstElementChild);
+
+  const phase = _jobPhases[j.job_id] || j.status;
+  const isActive = j.status==='running' || j.status==='queued';
+
+  // Update card classes and border
+  card.classList.toggle('is-done', j.status==='done');
+  card.classList.toggle('is-error', j.status==='error');
+  const PHASE_BORDER = {
+    queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
+    audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
+    error:'var(--accent)', cancelled:'var(--text-dim)',
+  };
+  card.style.borderLeftColor = PHASE_BORDER[phase] || 'transparent';
+
+  // Update badge
+  const badge = document.getElementById(`job-badge-${jobId}`);
+  if (badge) {
+    badge.className = `badge ${PHASE_BADGE[phase]||'bg-secondary-lt'} flex-shrink-0`;
+    badge.textContent = PHASE_LABELS[phase] || phase;
+  }
+
+  // Update progress bar
+  const bar = document.getElementById(`job-bar-${jobId}`);
+  if (bar) {
+    const barClass = PHASE_BAR[phase] || 'bg-secondary';
+    const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
+    bar.className = `progress-bar ${barClass}${animated} job-progress-bar`;
+    bar.style.width = (j.status==='queued' ? 0 : (j.status==='done' ? 100 : (j.progress?.pct||0))) + '%';
+  }
+
+  // Update stop button
+  const stop = document.getElementById(`job-stop-${jobId}`);
+  if (stop) {
+    stop.innerHTML = isActive
+      ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelJob('${j.job_id}')" title="Interrompi"><i class="ti ti-player-stop"></i></button>`
+      : '';
+  }
+
+  // Update info text
+  const info = document.getElementById(`job-info-${jobId}`);
+  if (info) {
+    if (j.status==='error') info.textContent = j.error||'Errore';
+    else if (j.status==='done') info.textContent = 'Completato';
+    else if (j.status==='cancelled') info.textContent = 'Annullato';
+  }
+
   updateActiveSection();
 }
 
@@ -753,22 +835,37 @@ function clearFinished() {
 
 // ── File Manager ───────────────────────────────────────────────────────────────
 
-let _collapsedFolders = new Set();
-let _draggedPath = null;
+let _expandedFolders = new Set();
+let _cachedTree = null;
+let _selectedPaths = new Set();
+let _draggedPaths = [];
+let _allVisiblePaths = [];  // flat list of visible paths for shift-click range
+let _lastSelectedIndex = -1;
 
 function setupFileManager() {
+  // ── Drag & Drop (supports multi-drag) ──
   document.addEventListener('dragstart', (e) => {
     const row = e.target.closest('[data-drag-path]');
     if (!row) return;
-    _draggedPath = row.dataset.dragPath;
+    const path = row.dataset.dragPath;
+    // If dragged item is selected, drag all selected; otherwise just the one
+    if (_selectedPaths.has(path) && _selectedPaths.size > 1) {
+      _draggedPaths = [..._selectedPaths];
+    } else {
+      _draggedPaths = [path];
+    }
     e.dataTransfer.effectAllowed='move';
-    e.dataTransfer.setData('text/plain', _draggedPath);
-    row.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', _draggedPaths.join('\n'));
+    // Visual: mark all dragged rows
+    _draggedPaths.forEach(p => {
+      const el = document.querySelector(`[data-drag-path="${CSS.escape(p)}"]`);
+      if (el) el.classList.add('dragging');
+    });
   });
   document.addEventListener('dragend', () => {
     document.querySelectorAll('.dragging').forEach(el=>el.classList.remove('dragging'));
     document.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));
-    _draggedPath=null;
+    _draggedPaths=[];
   });
   document.addEventListener('dragover', (e) => {
     if (!e.target.closest('.fm-drop-zone')) return;
@@ -776,9 +873,10 @@ function setupFileManager() {
   });
   document.addEventListener('dragenter', (e) => {
     const zone = e.target.closest('.fm-drop-zone');
-    if (!zone || !_draggedPath) return;
+    if (!zone || !_draggedPaths.length) return;
     const dest = zone.dataset.dropPath;
-    if (dest===_draggedPath || dest.startsWith(_draggedPath+'/')) return;
+    // Prevent dropping into any of the dragged items
+    if (_draggedPaths.some(p => dest===p || dest.startsWith(p+'/'))) return;
     e.preventDefault();
     document.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));
     zone.classList.add('drag-over');
@@ -792,19 +890,49 @@ function setupFileManager() {
     if (!zone) return;
     e.preventDefault(); zone.classList.remove('drag-over');
     const destDirPath = zone.dataset.dropPath;
-    if (!_draggedPath||destDirPath===undefined) return;
-    if (destDirPath===_draggedPath||destDirPath.startsWith(_draggedPath+'/')) return;
-    const name = _draggedPath.split(/[/\\]/).pop();
-    moveToPath(_draggedPath, name, destDirPath);
-    _draggedPath=null;
+    if (!_draggedPaths.length||destDirPath===undefined) return;
+    if (_draggedPaths.some(p => destDirPath===p||destDirPath.startsWith(p+'/'))) return;
+    if (_draggedPaths.length > 1) {
+      batchMoveToPath(_draggedPaths, destDirPath);
+    } else {
+      const name = _draggedPaths[0].split(/[/\\]/).pop();
+      moveToPath(_draggedPaths[0], name, destDirPath);
+    }
+    _draggedPaths=[];
   });
+
+  // ── Click handlers ──
   document.addEventListener('click', (e) => {
+    // Checkbox toggle
+    const check = e.target.closest('.fm-check');
+    if (check) {
+      e.stopPropagation();
+      const path = check.dataset.selectPath;
+      const idx = _allVisiblePaths.indexOf(path);
+      if (e.shiftKey && _lastSelectedIndex >= 0 && idx >= 0) {
+        // Shift-click: range select
+        const start = Math.min(_lastSelectedIndex, idx);
+        const end = Math.max(_lastSelectedIndex, idx);
+        for (let i = start; i <= end; i++) {
+          _selectedPaths.add(_allVisiblePaths[i]);
+        }
+      } else {
+        if (_selectedPaths.has(path)) _selectedPaths.delete(path);
+        else _selectedPaths.add(path);
+      }
+      if (idx >= 0) _lastSelectedIndex = idx;
+      syncSelectionUI();
+      return;
+    }
+
+    // Folder toggle
     const toggle = e.target.closest('.fm-toggle');
     if (toggle) {
       const path = toggle.dataset.folderPath;
-      if (_collapsedFolders.has(path)) _collapsedFolders.delete(path);
-      else _collapsedFolders.add(path);
-      loadFiles(); return;
+      if (_expandedFolders.has(path)) _expandedFolders.delete(path);
+      else _expandedFolders.add(path);
+      if (_cachedTree) renderFileTree(_cachedTree);
+      return;
     }
     const delBtn = e.target.closest('[data-delete-path]');
     if (delBtn && delBtn.closest('#files-left-pane')) {
@@ -813,44 +941,105 @@ function setupFileManager() {
     const playBtn = e.target.closest('[data-play-path]');
     if (playBtn) playFile(playBtn.dataset.playPath, playBtn.dataset.playName);
   });
+
+  // ── Batch toolbar buttons ──
+  const batchMoveBtn = document.getElementById('fm-batch-move-btn');
+  if (batchMoveBtn) batchMoveBtn.addEventListener('click', () => {
+    if (!_selectedPaths.size) return;
+    const dest = prompt('Percorso cartella di destinazione (vuoto = radice):','');
+    if (dest === null) return; // cancelled
+    batchMoveToPath([..._selectedPaths], dest);
+  });
+  const batchDeleteBtn = document.getElementById('fm-batch-delete-btn');
+  if (batchDeleteBtn) batchDeleteBtn.addEventListener('click', () => {
+    if (!_selectedPaths.size) return;
+    if (!confirm(`Eliminare ${_selectedPaths.size} elementi selezionati?`)) return;
+    batchDeletePaths([..._selectedPaths]);
+  });
+  const deselectBtn = document.getElementById('fm-deselect-btn');
+  if (deselectBtn) deselectBtn.addEventListener('click', () => {
+    _selectedPaths.clear();
+    _lastSelectedIndex = -1;
+    syncSelectionUI();
+  });
+}
+
+function syncSelectionUI() {
+  // Update checkboxes and row highlights
+  document.querySelectorAll('.fm-check').forEach(cb => {
+    const path = cb.dataset.selectPath;
+    cb.checked = _selectedPaths.has(path);
+    const row = cb.closest('.fm-row');
+    if (row) row.classList.toggle('fm-selected', _selectedPaths.has(path));
+  });
+  // Update toolbar
+  const bar = document.getElementById('fm-selection-bar');
+  const count = document.getElementById('fm-selection-count');
+  if (bar) bar.style.visibility = _selectedPaths.size ? '' : 'hidden';
+  if (count) count.textContent = `${_selectedPaths.size} selezionat${_selectedPaths.size===1?'o':'i'}`;
 }
 
 async function loadFiles() {
   const pane = document.getElementById('files-left-pane');
   if (!pane) return;
+  // Show skeleton while loading
+  if (!_cachedTree) {
+    let skeletonHtml = '';
+    for (let i = 0; i < 5; i++) skeletonHtml += `<div class="skeleton skeleton-row"></div>`;
+    pane.innerHTML = skeletonHtml;
+  }
   try {
     const res = await fetch('/api/files');
     const tree = await safeJson(res);
+    _cachedTree = tree;
     if (!tree||!tree.length) { pane.innerHTML='<div class="text-muted text-center py-4">Nessun file trovato</div>'; return; }
-    pane.innerHTML='';
-    const rootZone = document.createElement('div');
-    rootZone.className='fm-row fm-drop-zone fm-root-zone';
-    rootZone.dataset.dropPath='';
-    rootZone.innerHTML=`<span style="min-width:14px;flex-shrink:0"></span>
-      <i class="ti ti-home text-muted" style="flex-shrink:0"></i>
-      <span class="fm-meta ms-1">radice</span>`;
-    pane.appendChild(rootZone);
-    renderTreeItems(tree, pane, 0);
+    renderFileTree(tree);
   } catch(e) {
     pane.innerHTML=`<div class="text-danger text-center py-4">Errore: ${escapeHtml(e.message)}</div>`;
   }
 }
 
+function renderFileTree(tree) {
+  const pane = document.getElementById('files-left-pane');
+  if (!pane) return;
+  _allVisiblePaths = [];
+  const frag = document.createDocumentFragment();
+  const rootZone = document.createElement('div');
+  rootZone.className='fm-row fm-drop-zone fm-root-zone';
+  rootZone.dataset.dropPath='';
+  rootZone.innerHTML=`<span style="min-width:14px;flex-shrink:0"></span>
+    <i class="ti ti-home text-muted" style="flex-shrink:0"></i>
+    <span class="fm-meta ms-1">radice</span>`;
+  frag.appendChild(rootZone);
+  renderTreeItems(tree, frag, 0);
+  pane.innerHTML='';
+  pane.appendChild(frag);
+  // Clean stale selections (paths no longer visible)
+  for (const p of _selectedPaths) {
+    if (!_allVisiblePaths.includes(p)) _selectedPaths.delete(p);
+  }
+  syncSelectionUI();
+}
+
 function renderTreeItems(items, container, depth) {
   items.forEach(item => {
+    _allVisiblePaths.push(item.path);
     const row = document.createElement('div');
     row.className='fm-row';
+    if (_selectedPaths.has(item.path)) row.classList.add('fm-selected');
     row.style.paddingLeft=`${8+depth*16}px`;
     row.setAttribute('draggable','true');
     row.dataset.dragPath=item.path;
+    const checked = _selectedPaths.has(item.path) ? 'checked' : '';
     if (item.type==='directory') {
-      const collapsed = _collapsedFolders.has(item.path);
+      const expanded = _expandedFolders.has(item.path);
       row.classList.add('fm-drop-zone');
       row.dataset.dropPath=item.path;
       row.innerHTML=`
-        <i class="ti ${collapsed?'ti-chevron-right':'ti-chevron-down'} text-muted fm-toggle"
+        <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
+        <i class="ti ${expanded?'ti-chevron-down':'ti-chevron-right'} text-muted fm-toggle"
            data-folder-path="${escapeHtml(item.path)}"
-           style="font-size:.75em;cursor:pointer;min-width:14px;flex-shrink:0"></i>
+           style="font-size:1em;cursor:pointer;min-width:22px;flex-shrink:0;padding:4px 3px;margin:-4px -3px"></i>
         <i class="ti ti-folder-filled text-yellow" style="flex-shrink:0"></i>
         <span class="fm-name">${escapeHtml(item.name)}</span>
         <div class="fm-actions">
@@ -860,11 +1049,12 @@ function renderTreeItems(items, container, depth) {
                   data-delete-dir="1"><i class="ti ti-trash"></i></button>
         </div>`;
       container.appendChild(row);
-      if (!collapsed && item.children) renderTreeItems(item.children, container, depth+1);
+      if (expanded && item.children) renderTreeItems(item.children, container, depth+1);
     } else {
       const size = formatSize(item.size);
       const isMp4 = item.name.toLowerCase().endsWith('.mp4');
       row.innerHTML=`
+        <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
         <span style="min-width:14px;flex-shrink:0"></span>
         <i class="ti ${isMp4?'ti-file-type-mp4 text-red':'ti-file text-muted'}" style="flex-shrink:0"></i>
         <span class="fm-name">${escapeHtml(item.name)}</span>
@@ -888,6 +1078,42 @@ async function moveToPath(sourcePath, name, destDirPath) {
     const data = await safeJson(res);
     if (res.ok) { showToast(`Spostato: ${name}`,'success'); loadFiles(); }
     else showToast(data.detail||'Errore spostamento','danger');
+  } catch(e) { showToast('Errore di rete','danger'); }
+}
+
+async function batchMoveToPath(paths, destDirPath) {
+  try {
+    const res = await fetch('/api/files/move-batch', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({paths, dest_dir_path:destDirPath}),
+    });
+    const data = await safeJson(res);
+    if (res.ok) {
+      const ok = data.results.filter(r=>r.ok).length;
+      const fail = data.results.filter(r=>!r.ok).length;
+      if (ok) showToast(`${ok} file spostati`,'success');
+      if (fail) showToast(`${fail} file non spostati`,'danger');
+      _selectedPaths.clear();
+      loadFiles();
+    } else showToast(data.detail||'Errore spostamento','danger');
+  } catch(e) { showToast('Errore di rete','danger'); }
+}
+
+async function batchDeletePaths(paths) {
+  try {
+    const res = await fetch('/api/files/delete-batch', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({paths}),
+    });
+    const data = await safeJson(res);
+    if (res.ok) {
+      const ok = data.results.filter(r=>r.ok).length;
+      const fail = data.results.filter(r=>!r.ok).length;
+      if (ok) showToast(`${ok} file eliminati`,'success');
+      if (fail) showToast(`${fail} file non eliminati`,'danger');
+      _selectedPaths.clear();
+      loadFiles();
+    } else showToast(data.detail||'Errore eliminazione','danger');
   } catch(e) { showToast('Errore di rete','danger'); }
 }
 

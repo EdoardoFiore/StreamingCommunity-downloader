@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -11,9 +12,9 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 
 
 @router.get("")
-def search(q: str = Query(..., min_length=1), domain: str = Query(...)):
+async def search(q: str = Query(..., min_length=1), domain: str = Query(...)):
     try:
-        results = core_search(q, domain)
+        results = await asyncio.to_thread(core_search, q, domain)
     except Exception as e:
         logger.exception("Search error")
         raise HTTPException(status_code=502, detail=str(e))
@@ -21,7 +22,7 @@ def search(q: str = Query(..., min_length=1), domain: str = Query(...)):
 
 
 @router.get("/languages/{title_id}")
-def title_languages(
+async def title_languages(
     title_id: int,
     type: str = Query(..., pattern="^(movie|tv)$"),
     domain: str = Query(...),
@@ -30,11 +31,11 @@ def title_languages(
 ):
     try:
         if type == "movie":
-            langs = get_film_languages(title_id, domain)
+            langs = await asyncio.to_thread(get_film_languages, title_id, domain)
         else:
             if not slug:
                 raise ValueError("slug is required for tv type")
-            langs = get_tv_languages(title_id, slug, domain, version)
+            langs = await asyncio.to_thread(get_tv_languages, title_id, slug, domain, version)
     except Exception as e:
         logger.warning("Languages fetch error for %s %d: %s", type, title_id, e)
         raise HTTPException(status_code=502, detail=str(e))

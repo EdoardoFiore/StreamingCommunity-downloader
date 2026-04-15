@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -25,14 +26,14 @@ def _write_data(data: dict):
 
 
 @router.get("")
-def get_domain():
+async def get_domain():
     data = _read_data()
     domain = data.get("domain", "")
     version = None
     valid = False
     if domain:
         try:
-            version = get_domain_version(domain)
+            version = await asyncio.to_thread(get_domain_version, domain)
             valid = True
         except Exception:
             valid = False
@@ -72,12 +73,12 @@ def set_libraries(body: LibrariesUpdate):
 
 
 @router.put("")
-def set_domain(body: DomainUpdate):
+async def set_domain(body: DomainUpdate):
     domain = body.domain.strip()
     if not domain:
         raise HTTPException(status_code=400, detail="Domain cannot be empty")
     try:
-        version = get_domain_version(domain)
+        version = await asyncio.to_thread(get_domain_version, domain)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
