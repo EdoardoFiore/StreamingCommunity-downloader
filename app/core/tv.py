@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 
 import requests
 from bs4 import BeautifulSoup
@@ -190,9 +190,9 @@ def download_episode(
 
     embed_referer = (
         f"https://vixcloud.co/embed/{json_win_video['id']}"
-        f"?token={json_win_param['token']}&title={tv_name}"
+        f"?token={json_win_param['token']}&title={quote(tv_name)}"
         f"&referer=1&expires={json_win_param['expires']}"
-        f"&description=S{season}%3AE{ep['n']}+{ep['name']}&nextEpisode=1"
+        f"&description=S{season}%3AE{ep['n']}+{quote(ep['name'])}&nextEpisode=1"
     )
     m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
     m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_referer)
