@@ -10,6 +10,8 @@ from fastapi.requests import Request
 from fastapi.responses import HTMLResponse
 
 from app.jobs import job_manager
+from app.schedule import ScheduleStore
+from app.config import SCHEDULE_FILE
 from app.routers import domain, search, tv, downloads, progress, files, images, anime
 
 logging.basicConfig(
@@ -22,6 +24,9 @@ BASE_DIR = Path(__file__).parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    store = ScheduleStore(SCHEDULE_FILE)
+    job_manager.set_schedule_store(store)
+    job_manager.load_scheduled_from_store()
     job_manager.set_loop(asyncio.get_event_loop())
     yield
 

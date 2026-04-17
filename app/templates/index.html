@@ -1540,8 +1540,12 @@
           </div>
         </div>
       </div>
-      <div class="modal-footer border-0 pt-0">
+      <div class="modal-footer border-0 pt-0" style="flex-wrap:wrap;gap:8px">
         <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
+        <div class="d-flex align-items-center gap-2 flex-shrink-0" id="detail-schedule-wrap" style="display:none!important">
+          <i class="ti ti-clock text-muted" style="font-size:15px"></i>
+          <input type="datetime-local" id="detail-scheduled-at" class="form-control form-control-sm" style="max-width:196px" title="Lascia vuoto per scaricare subito">
+        </div>
         <button type="button" class="btn btn-primary" id="detail-action-btn"></button>
       </div>
     </div>

@@ -370,16 +370,32 @@ function openDetailModal(idx) {
   document.getElementById('detail-score').innerHTML = score
     ? `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${score}</span>` : '';
 
+  const scheduleWrap = document.getElementById('detail-schedule-wrap');
+  const scheduledAtInput = document.getElementById('detail-scheduled-at');
+  scheduledAtInput.value = '';
+  scheduleWrap.style.display = '';
   const btn = document.getElementById('detail-action-btn');
   if (isAnime) {
     btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
-    btn.onclick = () => { hideModal('detail-modal'); openAnimeBrowser(item.id, item.name, item.type, year); };
+    btn.onclick = () => {
+      const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
+      hideModal('detail-modal');
+      openAnimeBrowser(item.id, item.name, item.type, year, scheduledAt);
+    };
   } else if (isMovie) {
     btn.className='btn btn-primary'; btn.innerHTML='<i class="ti ti-download me-1"></i>Scarica';
-    btn.onclick = () => { hideModal('detail-modal'); startFilmDownload(item.id, item.name, year); };
+    btn.onclick = () => {
+      const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
+      hideModal('detail-modal');
+      startFilmDownload(item.id, item.name, year, scheduledAt);
+    };
   } else {
     btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
-    btn.onclick = () => { hideModal('detail-modal'); openEpisodeBrowser(item.id, item.name, item.slug, year); };
+    btn.onclick = () => {
+      const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
+      hideModal('detail-modal');
+      openEpisodeBrowser(item.id, item.name, item.slug, year, scheduledAt);
+    };
   }
 
   const langsEl = document.getElementById('detail-langs');
@@ -412,15 +428,23 @@ function openDetailModal(idx) {
 
 // ── Film download ──────────────────────────────────────────────────────────────
 
-async function startFilmDownload(id, title, year=null) {
+async function startFilmDownload(id, title, year=null, scheduledAt=null) {
   try {
-    const res = await fetch('/api/download/film', {
+    const endpoint = scheduledAt ? '/api/download/schedule/film' : '/api/download/film';
+    const body = {id, title, year, domain:currentDomain};
+    if (scheduledAt) body.scheduled_at = scheduledAt;
+    const res = await fetch(endpoint, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({id, title, year, domain:currentDomain}),
+      body: JSON.stringify(body),
     });
     const data = await safeJson(res);
-    if (res.ok) { showToast(`Download avviato: ${title}`,'success'); showPage('downloads'); }
-    else showToast(data.detail||'Errore','danger');
+    if (res.ok) {
+      const msg = scheduledAt
+        ? `Programmato: ${title} — ${new Date(scheduledAt).toLocaleString('it-IT')}`
+        : `Download avviato: ${title}`;
+      showToast(msg, 'success');
+      showPage('downloads');
+    } else showToast(data.detail||'Errore','danger');
   } catch(e) { showToast('Errore di rete','danger'); }
 }
 
@@ -428,8 +452,8 @@ async function startFilmDownload(id, title, year=null) {
 
 let _epCtx = {};
 
-async function openEpisodeBrowser(tvId, tvName, slug, year=null) {
-  _epCtx = { tvId, tvName, slug, year, token:null, episodes:[], currentSeason:null };
+async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=null) {
+  _epCtx = { tvId, tvName, slug, year, scheduledAt, token:null, episodes:[], currentSeason:null };
   document.getElementById('episode-modal-title').textContent = tvName;
   document.getElementById('season-tabs').style.display='none';
   document.getElementById('episode-modal-body').innerHTML =
@@ -505,22 +529,27 @@ async function loadSeason(season) {
 }
 
 async function startEpisodeDownload(epIndex) {
-  const { tvId, tvName, year, token, episodes, currentSeason } = _epCtx;
+  const { tvId, tvName, year, scheduledAt, token, episodes, currentSeason } = _epCtx;
   const ep = episodes[epIndex];
+  const endpoint = scheduledAt ? '/api/download/schedule/episode' : '/api/download/episode';
+  const body = { tv_id:tvId, eps:episodes, ep_index:epIndex, domain:currentDomain, token, tv_name:tvName, season:currentSeason, year };
+  if (scheduledAt) body.scheduled_at = scheduledAt;
   try {
-    const res = await fetch('/api/download/episode', {
+    const res = await fetch(endpoint, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ tv_id:tvId, eps:episodes, ep_index:epIndex, domain:currentDomain, token, tv_name:tvName, season:currentSeason, year }),
+      body: JSON.stringify(body),
     });
     const data = await safeJson(res);
-    if (res.ok) showToast(`In coda: ${tvName} S${String(currentSeason).padStart(2,'0')}E${String(ep.n).padStart(2,'0')}`,'success');
+    const label = `${tvName} S${String(currentSeason).padStart(2,'0')}E${String(ep.n).padStart(2,'0')}`;
+    if (res.ok) showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
     else showToast(data.detail||'Errore','danger');
   } catch(e) { showToast('Errore di rete','danger'); }
 }
 
 async function downloadWholeSeason(season) {
-  const { episodes } = _epCtx;
-  if (!confirm(`Aggiungere tutti i ${episodes.length} episodi della stagione ${season} alla coda?`)) return;
+  const { episodes, scheduledAt } = _epCtx;
+  const label = scheduledAt ? 'programmare' : 'aggiungere alla coda';
+  if (!confirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutti i ${episodes.length} episodi della stagione ${season}?`)) return;
   for (let i=0; i<episodes.length; i++) {
     await startEpisodeDownload(i);
     await new Promise(r=>setTimeout(r,150));
@@ -530,12 +559,12 @@ async function downloadWholeSeason(season) {
 
 // ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
 
-async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null) {
+async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null, scheduledAt = null) {
   // Auto-detect if film (1 episode) but allow user override
   const isAutoFilm = _searchResults.find(r => r.id === animeId)?.episodes_count === 1;
   const effectiveType = (isAutoFilm && animeType === 'anime') ? 'movie' : animeType;
   
-  _animeCtx = { animeId, animeName, animeType: effectiveType, animeYear, episodes: [], isAutoFilm };
+  _animeCtx = { animeId, animeName, animeType: effectiveType, animeYear, scheduledAt, episodes: [], isAutoFilm };
   document.getElementById('anime-modal-title').textContent = animeName;
   document.getElementById('anime-modal-body').innerHTML =
     '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
@@ -618,35 +647,33 @@ async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null)
 }
 
 async function startAnimeDownload(epIndex) {
-  const { animeId, animeName, animeType, animeYear, episodes } = _animeCtx;
+  const { animeId, animeName, animeType, animeYear, scheduledAt, episodes } = _animeCtx;
   const episode = episodes[epIndex];
+  const endpoint = scheduledAt ? '/api/download/schedule/anime' : '/api/download/anime';
+  const body = { anime_id: animeId, episode, anime_name: animeName, anime_type: animeType, year: animeYear };
+  if (scheduledAt) body.scheduled_at = scheduledAt;
   try {
-    const res = await fetch('/api/download/anime', {
+    const res = await fetch(endpoint, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ 
-        anime_id: animeId, 
-        episode, 
-        anime_name: animeName, 
-        anime_type: animeType,
-        year: animeYear
-      }),
+      body: JSON.stringify(body),
     });
     const data = await safeJson(res);
-    if (res.ok) showToast(`In coda: ${animeName} E${episode.number}`, 'success');
+    const label = `${animeName} E${episode.number}`;
+    if (res.ok) showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
     else showToast(data.detail || 'Errore', 'danger');
   } catch(e) { showToast('Errore di rete', 'danger'); }
 }
 
 function toggleAnimeType(newType) {
   _animeCtx.animeType = newType;
-  // Ricarica il modal per mostrare il toggle aggiornato
-  const { animeId, animeName, animeYear } = _animeCtx;
-  openAnimeBrowser(animeId, animeName, newType, animeYear);
+  const { animeId, animeName, animeYear, scheduledAt } = _animeCtx;
+  openAnimeBrowser(animeId, animeName, newType, animeYear, scheduledAt);
 }
 
 async function downloadAllAnime() {
-  const { episodes } = _animeCtx;
-  if (!confirm(`Aggiungere tutti i ${episodes.length} episodi alla coda?`)) return;
+  const { episodes, scheduledAt } = _animeCtx;
+  const label = scheduledAt ? 'programmare' : 'aggiungere alla coda';
+  if (!confirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutti i ${episodes.length} episodi?`)) return;
   for (let i = 0; i < episodes.length; i++) {
     await startAnimeDownload(i);
     await new Promise(r => setTimeout(r, 150));
@@ -697,6 +724,11 @@ function connectGlobalStream() {
       case 'error':
         handleErrorEvent(msg.job_id, msg.message);
         break;
+      case 'job_dismissed':
+        _jobs.delete(msg.job_id);
+        document.getElementById(`job-card-${msg.job_id}`)?.remove();
+        updateActiveBadge();
+        break;
     }
   };
 
@@ -711,11 +743,11 @@ function connectGlobalStream() {
 // ── Job cards ──────────────────────────────────────────────────────────────────
 
 const PHASE_LABELS = {
-  queued:'In coda', running:'In corso', joining:'Finalizzazione',
+  scheduled:'Programmato', queued:'In coda', running:'In corso', joining:'Finalizzazione',
   audio:'Audio', merging:'Unione', done:'Completato', error:'Errore', cancelled:'Annullato',
 };
 const PHASE_BADGE = {
-  queued:'bg-secondary-lt', running:'bg-blue-lt', joining:'bg-yellow-lt',
+  scheduled:'bg-yellow-lt', queued:'bg-secondary-lt', running:'bg-blue-lt', joining:'bg-yellow-lt',
   audio:'bg-teal-lt', merging:'bg-purple-lt', done:'bg-success-lt',
   error:'bg-danger-lt', cancelled:'bg-secondary-lt',
 };
@@ -727,7 +759,7 @@ const PHASE_BAR = {
 
 function _buildJobCard(j) {
   const phase = _jobPhases[j.job_id] || j.status;
-  const isActive = j.status==='running' || j.status==='queued';
+  const isActive = j.status==='running' || j.status==='queued' || j.status==='scheduled';
   const isMovie = j.type==='film';
   const isAnimeJob = j.type==='anime';
   const pct = j.progress?.pct||0;
@@ -737,7 +769,7 @@ function _buildJobCard(j) {
   const badgeClass = PHASE_BADGE[phase]||'bg-secondary-lt';
   const label = PHASE_LABELS[phase] || phase;
   const PHASE_BORDER = {
-    queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
+    scheduled:'var(--yellow)', queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
     audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
     error:'var(--accent)', cancelled:'var(--text-dim)',
   };
@@ -750,15 +782,20 @@ function _buildJobCard(j) {
   const etaStr = eta ? fmtEta(eta) : '';
   const infoStr = [speedStr, etaStr].filter(Boolean).join(' · ');
 
+  const fireBtn = j.status === 'scheduled'
+    ? `<button class="btn btn-sm btn-outline-success ms-1" onclick="fireNow('${j.job_id}')" title="Lancia subito">
+         <i class="ti ti-player-play"></i>
+       </button>` : '';
   const stopBtn = isActive
-    ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelJob('${j.job_id}')" title="Interrompi">
+    ? `<button class="btn btn-sm btn-outline-danger ms-1" onclick="cancelJob('${j.job_id}')" title="Interrompi">
          <i class="ti ti-player-stop"></i>
        </button>` : '';
 
-  const rawTs = j.created_at;
+  const rawTs = j.scheduled_at || j.created_at;
   const dateStr = rawTs
-    ? new Date(/[Z+]/.test(rawTs)?rawTs:rawTs+'Z').toLocaleString('it-IT',{hour:'2-digit',minute:'2-digit'})
+    ? new Date(/[Z+]/.test(rawTs)?rawTs:rawTs+'Z').toLocaleString('it-IT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
     : '';
+  const dateLabel = j.scheduled_at ? `⏰ ${dateStr}` : dateStr;
 
   return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}" id="job-card-${j.job_id}" style="border-left:3px solid ${borderColor} !important">
     <div class="card-body py-2 px-3">
@@ -766,6 +803,7 @@ function _buildJobCard(j) {
         <span class="badge ${isMovie?'bg-blue-lt':isAnimeJob?'bg-purple-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':isAnimeJob?'Anime':'TV'}</span>
         <span class="fw-medium text-truncate flex-1" style="min-width:0" title="${escapeHtml(j.title)}">${escapeHtml(j.title)}</span>
         <span class="badge ${badgeClass} flex-shrink-0" id="job-badge-${j.job_id}">${label}</span>
+        <span id="job-fire-${j.job_id}">${fireBtn}</span>
         ${stopBtn ? `<span id="job-stop-${j.job_id}">${stopBtn}</span>` : `<span id="job-stop-${j.job_id}"></span>`}
       </div>
       <div class="progress my-1" style="height:5px">
@@ -773,7 +811,7 @@ function _buildJobCard(j) {
       </div>
       <div class="d-flex justify-content-between align-items-center">
         <small class="text-muted" id="job-info-${j.job_id}">${infoStr || (j.status==='error' ? escapeHtml(j.error||'Errore') : (j.status==='done'?'Completato':''))}</small>
-        <small class="text-muted">${dateStr}</small>
+        <small class="text-muted">${dateLabel}</small>
       </div>
     </div>
   </div>`;
@@ -823,13 +861,13 @@ function refreshCardAppearance(jobId) {
   if (!card) return;
 
   const phase = _jobPhases[j.job_id] || j.status;
-  const isActive = j.status==='running' || j.status==='queued';
+  const isActive = j.status==='running' || j.status==='queued' || j.status==='scheduled';
 
   // Update card classes and border
   card.classList.toggle('is-done', j.status==='done');
   card.classList.toggle('is-error', j.status==='error');
   const PHASE_BORDER = {
-    queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
+    scheduled:'var(--yellow)', queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
     audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
     error:'var(--accent)', cancelled:'var(--text-dim)',
   };
@@ -851,11 +889,15 @@ function refreshCardAppearance(jobId) {
     bar.style.width = (j.status==='queued' ? 0 : (j.status==='done' ? 100 : (j.progress?.pct||0))) + '%';
   }
 
-  // Update stop button
+  // Update fire/stop buttons
+  const fire = document.getElementById(`job-fire-${jobId}`);
+  if (fire) fire.innerHTML = j.status === 'scheduled'
+    ? `<button class="btn btn-sm btn-outline-success ms-1" onclick="fireNow('${j.job_id}')" title="Lancia subito"><i class="ti ti-player-play"></i></button>`
+    : '';
   const stop = document.getElementById(`job-stop-${jobId}`);
   if (stop) {
-    stop.innerHTML = isActive
-      ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelJob('${j.job_id}')" title="Interrompi"><i class="ti ti-player-stop"></i></button>`
+    stop.innerHTML = isActive && j.status !== 'scheduled'
+      ? `<button class="btn btn-sm btn-outline-danger ms-1" onclick="cancelJob('${j.job_id}')" title="Interrompi"><i class="ti ti-player-stop"></i></button>`
       : '';
   }
 
@@ -871,7 +913,7 @@ function refreshCardAppearance(jobId) {
 }
 
 function updateActiveSection() {
-  const active = [..._jobs.values()].filter(j=>j.status==='running'||j.status==='queued');
+  const active = [..._jobs.values()].filter(j=>j.status==='running'||j.status==='queued'||j.status==='scheduled');
   const pill = document.getElementById('dl-active-pill');
   const countEl = document.getElementById('dl-active-count');
   if (active.length) {
@@ -882,7 +924,7 @@ function updateActiveSection() {
 }
 
 function updateActiveBadge() {
-  const count = [..._jobs.values()].filter(j=>j.status==='running'||j.status==='queued').length;
+  const count = [..._jobs.values()].filter(j=>j.status==='running'||j.status==='queued'||j.status==='scheduled').length;
   const badge = document.getElementById('active-jobs-badge');
   if (count>0) { badge.style.display=''; badge.textContent=count; }
   else badge.style.display='none';
@@ -971,6 +1013,13 @@ function handleErrorEvent(jobId, message) {
   updateActiveBadge();
 }
 
+async function fireNow(jobId) {
+  try {
+    const res = await fetch(`/api/download/${jobId}/fire`, {method:'POST'});
+    if (!res.ok) { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
+  } catch(e) { showToast('Errore di rete','danger'); }
+}
+
 async function cancelJob(jobId) {
   if (!confirm('Interrompere il download?')) return;
   try {
@@ -979,12 +1028,17 @@ async function cancelJob(jobId) {
   } catch(e) { showToast('Errore di rete','danger'); }
 }
 
-function clearFinished() {
-  for (const [id, j] of _jobs) {
-    if (j.status==='done'||j.status==='error'||j.status==='cancelled') {
-      _jobs.delete(id);
-      document.getElementById(`job-card-${id}`)?.remove();
-    }
+async function clearFinished() {
+  const finished = [..._jobs.entries()]
+    .filter(([,j]) => j.status==='done'||j.status==='error'||j.status==='cancelled')
+    .map(([id]) => id);
+  await Promise.allSettled(finished.map(id =>
+    fetch(`/api/download/${id}`, {method:'DELETE'})
+  ));
+  // UI cleanup handled by job_dismissed SSE; also clean locally in case SSE lags
+  for (const id of finished) {
+    _jobs.delete(id);
+    document.getElementById(`job-card-${id}`)?.remove();
   }
   if (!_jobs.size) {
     const container = document.getElementById('jobs-container');
