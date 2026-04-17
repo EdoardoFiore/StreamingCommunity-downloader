@@ -6,15 +6,23 @@ from fastapi import APIRouter, HTTPException, Query
 from app.core.page import search as core_search
 from app.core.film import get_film_languages
 from app.core.tv import get_tv_languages
+from app.core import animeunity
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
 @router.get("")
-async def search(q: str = Query(..., min_length=1), domain: str = Query(...)):
+async def search(
+    q: str = Query(..., min_length=1),
+    domain: str = Query(default=""),
+    source: str = Query(default="streamingcommunity"),
+):
     try:
-        results = await asyncio.to_thread(core_search, q, domain)
+        if source == "animeunity":
+            results = await asyncio.to_thread(animeunity.search, q)
+        else:
+            results = await asyncio.to_thread(core_search, q, domain)
     except Exception as e:
         logger.exception("Search error")
         raise HTTPException(status_code=502, detail=str(e))

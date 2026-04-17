@@ -28,6 +28,14 @@ class EpisodeDownloadRequest(BaseModel):
     year: str | None = None
 
 
+class AnimeDownloadRequest(BaseModel):
+    anime_id: str
+    episode: dict   # {"id": <ep_id>, "number": "<ep_number>"}
+    anime_name: str
+    anime_type: str = "tv"  # "tv", "movie", "film", etc.
+    year: str | None = None
+
+
 @router.post("/film", status_code=202)
 def download_film(body: FilmDownloadRequest):
     job_id = job_manager.submit_film(body.id, body.title, body.domain, year=body.year)
@@ -43,6 +51,12 @@ def download_episode(body: EpisodeDownloadRequest):
         body.domain, body.token, body.tv_name, body.season,
         year=body.year,
     )
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.post("/anime", status_code=202)
+def download_anime(body: AnimeDownloadRequest):
+    job_id = job_manager.submit_anime_episode(body.anime_id, body.episode, body.anime_name, body.anime_type, year=body.year)
     return {"job_id": job_id, "status": "queued"}
 
 

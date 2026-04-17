@@ -209,4 +209,32 @@ class JobManager:
         )
 
 
+    def submit_anime_episode(
+        self,
+        anime_id: str,
+        episode: dict,
+        anime_name: str,
+        anime_type: str = "tv",
+        year: str = None,
+    ) -> str:
+        from app.core.animeunity import download_anime_episode
+
+        ep_num = episode.get("number", "?")
+        title = f"{anime_name} E{ep_num}"
+        job_id = str(uuid.uuid4())
+        job = DownloadJob(
+            job_id=job_id, title=title, type="anime",
+            status="queued", created_at=datetime.utcnow(),
+        )
+        return self._submit_job(
+            job, download_anime_episode,
+            anime_id, episode, anime_name, anime_type,
+            output_dir=str(VIDEOS_DIR),
+            temp_dir=str(TMP_DIR / job_id),
+            progress_factory=self._make_progress_factory(job),
+            cancel_event=job.cancel_event,
+            year=year,
+        )
+
+
 job_manager = JobManager()

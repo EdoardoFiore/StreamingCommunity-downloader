@@ -10,7 +10,7 @@ from fastapi.requests import Request
 from fastapi.responses import HTMLResponse
 
 from app.jobs import job_manager
-from app.routers import domain, search, tv, downloads, progress, files, images
+from app.routers import domain, search, tv, downloads, progress, files, images, anime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +38,7 @@ app.include_router(downloads.router)
 app.include_router(progress.router)
 app.include_router(files.router)
 app.include_router(images.router)
+app.include_router(anime.router)
 
 
 @app.get("/", response_class=HTMLResponse)
