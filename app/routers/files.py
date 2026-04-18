@@ -144,6 +144,11 @@ class BatchDeleteRequest(BaseModel):
     paths: list[str]
 
 
+class RenameRequest(BaseModel):
+    path: str
+    new_name: str
+
+
 @router.post("/move")
 async def move_to_library(body: MoveRequest):
     data = _read_data()
@@ -269,6 +274,21 @@ def _batch_delete_sync(paths: list[str]) -> list[dict]:
         except Exception as e:
             results.append({"path": p, "ok": False, "error": str(e)})
     return results
+
+
+@router.post("/rename")
+async def rename_path(body: RenameRequest):
+    if not body.new_name or '/' in body.new_name or '\\' in body.new_name or body.new_name in ('.', '..'):
+        raise HTTPException(status_code=400, detail="Nome non valido")
+    source = _safe_path(body.path)
+    dest = source.parent / body.new_name
+    if dest.exists():
+        raise HTTPException(status_code=409, detail=f"'{body.new_name}' esiste già")
+    try:
+        await asyncio.to_thread(source.rename, dest)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rinomina fallita: {e}")
+    return {"renamed_to": str(dest.relative_to(VIDEOS_DIR.resolve()))}
 
 
 @router.post("/delete-batch")

@@ -12,6 +12,46 @@ let _animeCtx = {};       // context for anime episode browser
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
 
+function scConfirm(msg) {
+  return new Promise(resolve => {
+    document.getElementById('sc-confirm-msg').textContent = msg;
+    const ok = document.getElementById('sc-confirm-ok');
+    const cancel = document.getElementById('sc-confirm-cancel');
+    function cleanup() {
+      ok.removeEventListener('click', onOk);
+      cancel.removeEventListener('click', onCancel);
+    }
+    function onOk()     { cleanup(); hideModal('sc-confirm-modal'); resolve(true); }
+    function onCancel() { cleanup(); hideModal('sc-confirm-modal'); resolve(false); }
+    ok.addEventListener('click', onOk, {once:true});
+    cancel.addEventListener('click', onCancel, {once:true});
+    showModal('sc-confirm-modal');
+  });
+}
+
+function scPrompt(msg, defaultVal='') {
+  return new Promise(resolve => {
+    document.getElementById('sc-prompt-msg').textContent = msg;
+    const input = document.getElementById('sc-prompt-input');
+    input.value = defaultVal;
+    const ok = document.getElementById('sc-prompt-ok');
+    const cancel = document.getElementById('sc-prompt-cancel');
+    function cleanup() {
+      ok.removeEventListener('click', onOk);
+      cancel.removeEventListener('click', onCancel);
+      input.removeEventListener('keydown', onKey);
+    }
+    function onOk()     { cleanup(); hideModal('sc-prompt-modal'); resolve(input.value); }
+    function onCancel() { cleanup(); hideModal('sc-prompt-modal'); resolve(null); }
+    function onKey(e)   { if (e.key === 'Enter') onOk(); }
+    ok.addEventListener('click', onOk, {once:true});
+    cancel.addEventListener('click', onCancel, {once:true});
+    input.addEventListener('keydown', onKey);
+    showModal('sc-prompt-modal');
+    setTimeout(() => input.focus(), 50);
+  });
+}
+
 function escapeHtml(s) {
   if (!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -455,7 +495,8 @@ let _epCtx = {};
 async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=null) {
   _epCtx = { tvId, tvName, slug, year, scheduledAt, token:null, episodes:[], currentSeason:null };
   document.getElementById('episode-modal-title').textContent = tvName;
-  document.getElementById('season-tabs').style.display='none';
+  document.getElementById('season-tabs-wrap').style.display='none';
+  document.getElementById('dl-whole-series-btn').style.display='none';
   document.getElementById('episode-modal-body').innerHTML =
     '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
   showModal('episode-modal');
@@ -466,6 +507,7 @@ async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=nul
       fetch(`/api/tv/${tvId}/seasons?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}`).then(r=>r.json()),
     ]);
     _epCtx.token = tokenData.token;
+    _epCtx.seasonsCount = seasonsData.seasons_count;
     renderSeasonTabs(seasonsData.seasons_count);
     loadSeason(1);
   } catch(e) {
@@ -488,7 +530,10 @@ function renderSeasonTabs(count) {
     });
     tabs.appendChild(li);
   }
-  tabs.style.display='flex';
+  const wrap = document.getElementById('season-tabs-wrap');
+  wrap.style.display = 'flex';
+  const dlAllBtn = document.getElementById('dl-whole-series-btn');
+  dlAllBtn.style.display = count > 1 ? '' : 'none';
 }
 
 async function loadSeason(season) {
@@ -549,12 +594,34 @@ async function startEpisodeDownload(epIndex) {
 async function downloadWholeSeason(season) {
   const { episodes, scheduledAt } = _epCtx;
   const label = scheduledAt ? 'programmare' : 'aggiungere alla coda';
-  if (!confirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutti i ${episodes.length} episodi della stagione ${season}?`)) return;
+  if (!await scConfirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutti i ${episodes.length} episodi della stagione ${season}?`)) return;
   for (let i=0; i<episodes.length; i++) {
     await startEpisodeDownload(i);
     await new Promise(r=>setTimeout(r,150));
   }
   showPage('downloads'); hideModal('episode-modal');
+}
+
+async function downloadWholeSeries() {
+  const { tvId, slug, token, scheduledAt, seasonsCount } = _epCtx;
+  const label = scheduledAt ? 'programmare' : 'aggiungere alla coda';
+  if (!await scConfirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutte le ${seasonsCount} stagioni?`)) return;
+  hideModal('episode-modal');
+  showPage('downloads');
+  for (let s = 1; s <= seasonsCount; s++) {
+    try {
+      const res = await fetch(`/api/tv/${tvId}/seasons/${s}/episodes?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
+      const eps = await safeJson(res);
+      _epCtx.episodes = eps;
+      _epCtx.currentSeason = s;
+      for (let i = 0; i < eps.length; i++) {
+        await startEpisodeDownload(i);
+        await new Promise(r => setTimeout(r, 150));
+      }
+    } catch(e) {
+      showToast(`Errore stagione ${s}: ${e.message}`, 'danger');
+    }
+  }
 }
 
 // ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
@@ -673,7 +740,7 @@ function toggleAnimeType(newType) {
 async function downloadAllAnime() {
   const { episodes, scheduledAt } = _animeCtx;
   const label = scheduledAt ? 'programmare' : 'aggiungere alla coda';
-  if (!confirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutti i ${episodes.length} episodi?`)) return;
+  if (!await scConfirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutti i ${episodes.length} episodi?`)) return;
   for (let i = 0; i < episodes.length; i++) {
     await startAnimeDownload(i);
     await new Promise(r => setTimeout(r, 150));
@@ -1021,7 +1088,7 @@ async function fireNow(jobId) {
 }
 
 async function cancelJob(jobId) {
-  if (!confirm('Interrompere il download?')) return;
+  if (!await scConfirm('Interrompere il download?')) return;
   try {
     const res = await fetch(`/api/download/${jobId}`, {method:'DELETE'});
     if (!res.ok) { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
@@ -1151,6 +1218,10 @@ function setupFileManager() {
       if (_cachedTree) renderFileTree(_cachedTree);
       return;
     }
+    const renameBtn = e.target.closest('[data-rename-path]');
+    if (renameBtn && renameBtn.closest('#files-left-pane')) {
+      renamePath(renameBtn.dataset.renamePath, renameBtn.dataset.renameName); return;
+    }
     const delBtn = e.target.closest('[data-delete-path]');
     if (delBtn && delBtn.closest('#files-left-pane')) {
       deletePath(delBtn.dataset.deletePath, delBtn.dataset.deleteName, !!delBtn.dataset.deleteDir); return;
@@ -1161,16 +1232,16 @@ function setupFileManager() {
 
   // ── Batch toolbar buttons ──
   const batchMoveBtn = document.getElementById('fm-batch-move-btn');
-  if (batchMoveBtn) batchMoveBtn.addEventListener('click', () => {
+  if (batchMoveBtn) batchMoveBtn.addEventListener('click', async () => {
     if (!_selectedPaths.size) return;
-    const dest = prompt('Percorso cartella di destinazione (vuoto = radice):','');
-    if (dest === null) return; // cancelled
+    const dest = await scPrompt('Percorso cartella di destinazione (vuoto = radice):','');
+    if (dest === null) return;
     batchMoveToPath([..._selectedPaths], dest);
   });
   const batchDeleteBtn = document.getElementById('fm-batch-delete-btn');
-  if (batchDeleteBtn) batchDeleteBtn.addEventListener('click', () => {
+  if (batchDeleteBtn) batchDeleteBtn.addEventListener('click', async () => {
     if (!_selectedPaths.size) return;
-    if (!confirm(`Eliminare ${_selectedPaths.size} elementi selezionati?`)) return;
+    if (!await scConfirm(`Eliminare ${_selectedPaths.size} elementi selezionati?`)) return;
     batchDeletePaths([..._selectedPaths]);
   });
   const deselectBtn = document.getElementById('fm-deselect-btn');
@@ -1260,6 +1331,7 @@ function renderTreeItems(items, container, depth) {
         <i class="ti ti-folder-filled text-yellow" style="flex-shrink:0"></i>
         <span class="fm-name">${escapeHtml(item.name)}</span>
         <div class="fm-actions">
+          <button class="btn btn-sm btn-outline-secondary" data-rename-path="${escapeHtml(item.path)}" data-rename-name="${escapeHtml(item.name)}"><i class="ti ti-pencil"></i></button>
           <button class="btn btn-sm btn-outline-danger"
                   data-delete-path="${escapeHtml(item.path)}"
                   data-delete-name="${escapeHtml(item.name)}"
@@ -1278,6 +1350,7 @@ function renderTreeItems(items, container, depth) {
         <span class="fm-meta">${size}</span>
         <div class="fm-actions">
           ${isMp4?`<button class="btn btn-sm btn-outline-primary" data-play-path="${escapeHtml(item.path)}" data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>`:''}
+          <button class="btn btn-sm btn-outline-secondary" data-rename-path="${escapeHtml(item.path)}" data-rename-name="${escapeHtml(item.name)}"><i class="ti ti-pencil"></i></button>
           <a class="btn btn-sm btn-outline-secondary" href="/api/files/download/${encodeURI(item.path)}"><i class="ti ti-download"></i></a>
           <button class="btn btn-sm btn-outline-danger" data-delete-path="${escapeHtml(item.path)}" data-delete-name="${escapeHtml(item.name)}"><i class="ti ti-trash"></i></button>
         </div>`;
@@ -1344,9 +1417,23 @@ function playFile(path, name) {
   }, {once:true});
 }
 
+async function renamePath(path, name) {
+  const newName = await scPrompt(`Nuovo nome:`, name);
+  if (!newName || newName === name) return;
+  try {
+    const res = await fetch('/api/files/rename', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ path, new_name: newName }),
+    });
+    if (res.ok) { showToast(`Rinominato in: ${newName}`, 'success'); loadFiles(); }
+    else { const d = await safeJson(res); showToast(d.detail || 'Errore rinomina', 'danger'); }
+  } catch(e) { showToast('Errore di rete', 'danger'); }
+}
+
 async function deletePath(path, name, isDir) {
   const msg = isDir ? `Eliminare la cartella "${name}" e tutto il suo contenuto?` : `Eliminare il file "${name}"?`;
-  if (!confirm(msg)) return;
+  if (!await scConfirm(msg)) return;
   try {
     const res = await fetch(`/api/files/delete/${encodeURI(path)}`, {method:'DELETE'});
     if (res.ok||res.status===204) { showToast(`Eliminato: ${name}`,'success'); loadFiles(); }

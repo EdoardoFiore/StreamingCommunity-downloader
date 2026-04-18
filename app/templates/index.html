@@ -1561,7 +1561,12 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <ul class="nav nav-tabs mb-3" id="season-tabs" style="display:none"></ul>
+        <div id="season-tabs-wrap" style="display:none;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+          <ul class="nav nav-tabs" id="season-tabs" style="flex:1;min-width:0;margin-bottom:0"></ul>
+          <button class="btn btn-sm btn-outline-primary flex-shrink-0" id="dl-whole-series-btn" style="display:none" onclick="downloadWholeSeries()">
+            <i class="ti ti-download me-1"></i>Tutta la serie
+          </button>
+        </div>
         <div id="episode-modal-body">
           <div class="text-center py-4">
             <div class="spinner-border" role="status"></div>
@@ -1602,6 +1607,38 @@
       <div class="modal-body p-0">
         <video id="video-player" controls preload="metadata"
                style="width:100%;max-height:70vh;background:#000;display:block"></video>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Confirm Modal ──────────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="sc-confirm-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:400px">
+    <div class="modal-content">
+      <div class="modal-body text-center" style="padding:28px 24px 16px">
+        <i class="ti ti-alert-triangle" style="font-size:2.4rem;color:var(--yellow);display:block;margin-bottom:14px"></i>
+        <p id="sc-confirm-msg" style="font-size:14px;margin:0;color:var(--text);line-height:1.5"></p>
+      </div>
+      <div class="modal-footer justify-content-center border-0" style="padding:12px 24px 22px;gap:10px">
+        <button type="button" class="btn btn-secondary" id="sc-confirm-cancel">Annulla</button>
+        <button type="button" class="btn btn-primary" id="sc-confirm-ok">Conferma</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Prompt Modal ───────────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="sc-prompt-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:420px">
+    <div class="modal-content">
+      <div class="modal-body" style="padding:24px 24px 16px">
+        <p id="sc-prompt-msg" style="font-size:14px;margin-bottom:14px;color:var(--text);line-height:1.5"></p>
+        <input type="text" id="sc-prompt-input" class="form-control">
+      </div>
+      <div class="modal-footer justify-content-end border-0" style="padding:12px 24px 22px;gap:10px">
+        <button type="button" class="btn btn-secondary" id="sc-prompt-cancel">Annulla</button>
+        <button type="button" class="btn btn-primary" id="sc-prompt-ok">OK</button>
       </div>
     </div>
   </div>
