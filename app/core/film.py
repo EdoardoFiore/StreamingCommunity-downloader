@@ -83,6 +83,16 @@ def _get_m3u8_audio(json_win_video, json_win_param, embed_referer):
         m3u8_url,
         headers={"user-agent": get_headers(), "referer": embed_referer},
     )
+    
+    # Fallback logic: if 403, retry with &b=1
+    if req.status_code == 403:
+        logger.warning("Audio playlist returned HTTP 403, retrying with &b=1")
+        b1_url = m3u8_url + ("&b=1" if "?" in m3u8_url else "?b=1")
+        req = requests.get(
+            b1_url,
+            headers={"user-agent": get_headers(), "referer": embed_referer},
+        )
+    
     if req.ok:
         for row in req.text.split():
             if "audio" in str(row) and "ita" in str(row):
