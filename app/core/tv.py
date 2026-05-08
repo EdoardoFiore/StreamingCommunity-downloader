@@ -13,6 +13,13 @@ from app.core.m3u8 import download_m3u8, fetch_master_languages
 logger = logging.getLogger(__name__)
 
 
+def fmt_ep(n) -> str:
+    """Format episode number with zero-padded integer part (e.g. '7' → '07', '7.5' → '07.5')."""
+    s = str(n)
+    parts = s.split(".", 1)
+    return parts[0].zfill(2) if len(parts) == 1 else parts[0].zfill(2) + "." + parts[1]
+
+
 def get_token(id_tv: int, domain: str) -> str:
     session = requests.Session()
     ua = get_headers()
@@ -182,7 +189,7 @@ def download_episode(
     year: str = None,
 ) -> str:
     ep = eps[ep_index]
-    logger.info(f"Downloading S{season:02d}E{ep['n']:02d} — {ep['name']}")
+    logger.info(f"Downloading S{season:02d}E{fmt_ep(ep['n'])} — {ep['name']}")
 
     embed_content, url_embed = _get_iframe(tv_id, ep["id"], domain, token)
     json_win_video, json_win_param = _parse_content(embed_content, url_embed)
@@ -202,7 +209,7 @@ def download_episode(
         logger.info("Audio track found, will merge")
 
     series_folder = f"{tv_name} ({year})" if year else tv_name
-    mp4_name = f"{tv_name} S{season:02d}E{ep['n']:02d}"
+    mp4_name = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
     mp4_path = os.path.join(output_dir, series_folder, f"Season {season:02d}", mp4_name + ".mp4")
 
     download_m3u8(

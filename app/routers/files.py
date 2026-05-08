@@ -41,13 +41,13 @@ def _build_tree(directory: Path, base: Path, excluded: set) -> list[dict]:
                 continue
             if item.is_dir():
                 children = _build_tree(item, base, excluded)
-                if children:
-                    entries.append({
-                        "name": item.name,
-                        "type": "directory",
-                        "path": str(item.relative_to(base)),
-                        "children": children,
-                    })
+                entries.append({
+                    "name": item.name,
+                    "type": "directory",
+                    "path": str(item.relative_to(base)),
+                    "children": children,
+                    "empty": len(children) == 0,
+                })
             elif item.is_file():
                 stat = item.stat()
                 entries.append({
@@ -81,6 +81,7 @@ def _build_library_tree(directory: Path, depth: int = 0, max_depth: int = 3) -> 
 
 
 _DEFAULT_EXCLUDED = {"images", "snippets", "lost+found"}
+_TYPE_LABELS = {"film": "Film", "tv": "Serie TV", "anime": "Anime"}
 
 
 @router.get("")
@@ -98,8 +99,9 @@ async def list_library_tree():
     for lib in data.get("libraries", []):
         lib_path = Path(lib["path"])
         exists = lib_path.exists()
+        lib_type = lib.get("type", "")
         result.append({
-            "name": lib["name"],
+            "name": _TYPE_LABELS.get(lib_type, lib_type or lib.get("name", "?")),
             "abs_path": str(lib_path.resolve()),
             "exists": exists,
             "children": (await asyncio.to_thread(_build_library_tree, lib_path)) if exists else [],
@@ -176,7 +178,7 @@ async def move_to_library(body: MoveRequest):
             raise HTTPException(status_code=400, detail="Destinazione non in una libreria configurata")
         dest = dest_dir / source.name
     elif body.library_name:
-        lib_map = {lib["name"]: lib["path"] for lib in data.get("libraries", [])}
+        lib_map = {lib.get("type", lib.get("name", "")): lib["path"] for lib in data.get("libraries", [])}
         if body.library_name not in lib_map:
             raise HTTPException(status_code=400, detail=f"Libreria '{body.library_name}' non configurata")
         dest_dir_root = Path(lib_map[body.library_name])

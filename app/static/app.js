@@ -240,33 +240,42 @@ async function loadLibraries() {
     if (inp) inp.value = excl;
   } catch(e) { console.error('loadLibraries:', e); }
 }
+const _LIB_TYPE_OPTIONS = [{value:'film',label:'Film'},{value:'tv',label:'Serie TV'},{value:'anime',label:'Anime'}];
 function renderLibrariesList() {
   const c = document.getElementById('libraries-list');
   if (!c) return;
   if (!_libraries.length) { c.innerHTML = '<p class="text-muted small mb-0">Nessuna libreria.</p>'; return; }
-  c.innerHTML = _libraries.map((lib, i) => `
+  const usedTypes = _libraries.map(l => l.type);
+  c.innerHTML = _libraries.map((lib, i) => {
+    const opts = _LIB_TYPE_OPTIONS.map(o => {
+      const disabled = o.value !== lib.type && usedTypes.some((t,j) => j !== i && t === o.value) ? 'disabled' : '';
+      const selected = o.value === lib.type ? 'selected' : '';
+      return `<option value="${o.value}" ${selected} ${disabled}>${o.label}</option>`;
+    }).join('');
+    return `
     <div class="row g-2 mb-2 align-items-center">
-      <div class="col-4"><input type="text" class="form-control form-control-sm" id="lib-name-${i}" value="${escapeHtml(lib.name)}" placeholder="Nome"></div>
+      <div class="col-4"><select class="form-select form-select-sm" id="lib-type-${i}"><option value="">Tipo...</option>${opts}</select></div>
       <div class="col"><input type="text" class="form-control form-control-sm" id="lib-path-${i}" value="${escapeHtml(lib.path)}" placeholder="/srv/nfs/films"></div>
       <div class="col-auto"><button class="btn btn-sm btn-outline-danger" onclick="removeLibrary(${i})"><i class="ti ti-trash"></i></button></div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 function _syncLibs() {
   _libraries = _libraries.map((_,i) => ({
-    name: document.getElementById(`lib-name-${i}`)?.value||'',
+    type: document.getElementById(`lib-type-${i}`)?.value||'',
     path: document.getElementById(`lib-path-${i}`)?.value||'',
   }));
 }
 function addLibrary() {
-  _syncLibs(); _libraries.push({name:'',path:''}); renderLibrariesList();
-  document.getElementById(`lib-name-${_libraries.length-1}`)?.focus();
+  _syncLibs(); _libraries.push({type:'',path:''}); renderLibrariesList();
+  document.getElementById(`lib-path-${_libraries.length-1}`)?.focus();
 }
 function removeLibrary(idx) { _syncLibs(); _libraries.splice(idx,1); renderLibrariesList(); }
 async function saveLibraries() {
   const updated = _libraries.map((_,i) => ({
-    name:(document.getElementById(`lib-name-${i}`)?.value||'').trim(),
+    type:(document.getElementById(`lib-type-${i}`)?.value||'').trim(),
     path:(document.getElementById(`lib-path-${i}`)?.value||'').trim(),
-  })).filter(l => l.name && l.path);
+  })).filter(l => l.type && l.path);
   const excluded = (document.getElementById('excluded-input')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
   const btn = document.getElementById('save-libraries-btn');
   btn.disabled = true;
@@ -1323,13 +1332,7 @@ function renderTreeItems(items, container, depth) {
       const expanded = _expandedFolders.has(item.path);
       row.classList.add('fm-drop-zone');
       row.dataset.dropPath=item.path;
-      row.innerHTML=`
-        <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
-        <i class="ti ${expanded?'ti-chevron-down':'ti-chevron-right'} text-muted fm-toggle"
-           data-folder-path="${escapeHtml(item.path)}"
-           style="font-size:1em;cursor:pointer;min-width:22px;flex-shrink:0;padding:4px 3px;margin:-4px -3px"></i>
-        <i class="ti ti-folder-filled text-yellow" style="flex-shrink:0"></i>
-        <span class="fm-name">${escapeHtml(item.name)}</span>
+      const actions = `
         <div class="fm-actions">
           <button class="btn btn-sm btn-outline-secondary" data-rename-path="${escapeHtml(item.path)}" data-rename-name="${escapeHtml(item.name)}"><i class="ti ti-pencil"></i></button>
           <button class="btn btn-sm btn-outline-danger"
@@ -1337,8 +1340,26 @@ function renderTreeItems(items, container, depth) {
                   data-delete-name="${escapeHtml(item.name)}"
                   data-delete-dir="1"><i class="ti ti-trash"></i></button>
         </div>`;
-      container.appendChild(row);
-      if (expanded && item.children) renderTreeItems(item.children, container, depth+1);
+      if (item.empty) {
+        row.innerHTML=`
+          <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
+          <span style="min-width:22px;flex-shrink:0"></span>
+          <i class="ti ti-folder text-muted" style="flex-shrink:0;opacity:0.45"></i>
+          <span class="fm-name text-muted">${escapeHtml(item.name)}</span>
+          ${actions}`;
+        container.appendChild(row);
+      } else {
+        row.innerHTML=`
+          <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
+          <i class="ti ${expanded?'ti-chevron-down':'ti-chevron-right'} text-muted fm-toggle"
+             data-folder-path="${escapeHtml(item.path)}"
+             style="font-size:1em;cursor:pointer;min-width:22px;flex-shrink:0;padding:4px 3px;margin:-4px -3px"></i>
+          <i class="ti ti-folder-filled text-yellow" style="flex-shrink:0"></i>
+          <span class="fm-name">${escapeHtml(item.name)}</span>
+          ${actions}`;
+        container.appendChild(row);
+        if (expanded && item.children) renderTreeItems(item.children, container, depth+1);
+      }
     } else {
       const size = formatSize(item.size);
       const isMp4 = item.name.toLowerCase().endsWith('.mp4');

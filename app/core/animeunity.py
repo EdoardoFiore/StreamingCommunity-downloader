@@ -250,13 +250,9 @@ def download_anime_episode(
     if is_series:
         # TV series: follows same pattern as StreamingCommunity TV
         # videos/AnimeName/Season 01/AnimeName S01E01.mp4
-        try:
-            ep_num = int(float(episode_number))
-        except (ValueError, TypeError):
-            ep_num = 0
-        
+        from app.core.tv import fmt_ep
         season = 1  # For anime, assume season 1 (they typically have one season on AnimeUnity)
-        ep_filename = f"{clean_name} S01E{ep_num:02d}.mp4"
+        ep_filename = f"{clean_name} S01E{fmt_ep(episode_number)}.mp4"
         year_str = f" ({year})" if year else ""
         folder_name = f"{clean_name}{year_str}"
         mp4_path = os.path.join(output_dir, folder_name, f"Season {season:02d}", ep_filename)

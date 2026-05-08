@@ -11,6 +11,15 @@ from typing import Optional
 from app.config import VIDEOS_DIR, TMP_DIR
 from app.progress import DownloadCancelledError, WebProgressBar
 
+
+def _get_library_path(type_: str) -> str:
+    """Return the configured library path for content type, or VIDEOS_DIR as fallback."""
+    from app.routers.domain import _read_data
+    for lib in _read_data().get("libraries", []):
+        if lib.get("type") == type_:
+            return lib["path"]
+    return str(VIDEOS_DIR)
+
 logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT_DOWNLOADS = int(os.getenv("MAX_DOWNLOADS", "3"))
@@ -160,7 +169,7 @@ class JobManager:
         if type_ == "film":
             from app.core.film import download_film
             return download_film, (params["id"], params["title"], params["domain"]), dict(
-                output_dir=str(VIDEOS_DIR), temp_dir=td, progress_factory=pf,
+                output_dir=_get_library_path("film"), temp_dir=td, progress_factory=pf,
                 year=params.get("year"), cancel_event=job.cancel_event,
             )
         if type_ == "episode":
@@ -169,7 +178,7 @@ class JobManager:
                 params["tv_id"], params["eps"], params["ep_index"],
                 params["domain"], params["token"], params["tv_name"], params["season"],
             ), dict(
-                output_dir=str(VIDEOS_DIR), temp_dir=td, progress_factory=pf,
+                output_dir=_get_library_path("tv"), temp_dir=td, progress_factory=pf,
                 cancel_event=job.cancel_event, year=params.get("year"),
             )
         if type_ == "anime":
@@ -178,7 +187,7 @@ class JobManager:
                 params["anime_id"], params["episode"],
                 params["anime_name"], params.get("anime_type", "tv"),
             ), dict(
-                output_dir=str(VIDEOS_DIR), temp_dir=td, progress_factory=pf,
+                output_dir=_get_library_path("anime"), temp_dir=td, progress_factory=pf,
                 cancel_event=job.cancel_event, year=params.get("year"),
             )
         raise ValueError(f"Unknown schedule type: {type_!r}")
@@ -279,7 +288,7 @@ class JobManager:
         return self._submit_job(
             job, download_film,
             id_film, title, domain,
-            output_dir=str(VIDEOS_DIR),
+            output_dir=_get_library_path("film"),
             temp_dir=str(TMP_DIR / job.job_id),
             progress_factory=self._make_progress_factory(job),
             year=year,
@@ -289,15 +298,15 @@ class JobManager:
     def submit_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                        token: str, tv_name: str, season: int, year: str = None,
                        schedule_id: str = None) -> str:
-        from app.core.tv import download_episode
+        from app.core.tv import download_episode, fmt_ep
 
         ep = eps[ep_index]
-        title = f"{tv_name} S{season:02d}E{ep['n']:02d}"
+        title = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
         job = self._make_job(title, "episode", schedule_id=schedule_id)
         return self._submit_job(
             job, download_episode,
             tv_id, eps, ep_index, domain, token, tv_name, season,
-            output_dir=str(VIDEOS_DIR),
+            output_dir=_get_library_path("tv"),
             temp_dir=str(TMP_DIR / job.job_id),
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
@@ -315,7 +324,7 @@ class JobManager:
         return self._submit_job(
             job, download_anime_episode,
             anime_id, episode, anime_name, anime_type,
-            output_dir=str(VIDEOS_DIR),
+            output_dir=_get_library_path("anime"),
             temp_dir=str(TMP_DIR / job.job_id),
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
@@ -332,8 +341,9 @@ class JobManager:
     def schedule_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                          token: str, tv_name: str, season: int,
                          scheduled_at: datetime, year: str = None) -> str:
+        from app.core.tv import fmt_ep
         ep = eps[ep_index]
-        title = f"{tv_name} S{season:02d}E{ep['n']:02d}"
+        title = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
         params = {
             "tv_id": tv_id, "eps": eps, "ep_index": ep_index,
             "domain": domain, "token": token, "tv_name": tv_name,

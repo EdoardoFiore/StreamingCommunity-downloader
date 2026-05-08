@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -45,7 +46,7 @@ class DomainUpdate(BaseModel):
 
 
 class LibraryItem(BaseModel):
-    name: str
+    type: Literal["film", "tv", "anime"]
     path: str
 
 
@@ -66,7 +67,11 @@ def get_libraries():
 @router.put("/libraries")
 def set_libraries(body: LibrariesUpdate):
     data = _read_data()
-    data["libraries"] = [{"name": lib.name, "path": lib.path} for lib in body.libraries]
+    # Deduplicate: last entry per type wins
+    seen: dict[str, dict] = {}
+    for lib in body.libraries:
+        seen[lib.type] = {"type": lib.type, "path": lib.path}
+    data["libraries"] = list(seen.values())
     data["excluded_folders"] = body.excluded_folders
     _write_data(data)
     return {"ok": True}
