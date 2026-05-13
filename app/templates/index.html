@@ -4,6 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <title>SC Panel</title>
+  <link rel="icon" type="image/x-icon" href="/docs/favicon.ico"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Karla:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
@@ -692,6 +693,20 @@
     .phase-bar-merging { background: var(--purple) !important; }
     .phase-bar-done    { background: var(--green) !important; }
     .phase-bar-error   { background: var(--accent) !important; }
+
+    /* Download phase steps */
+    .job-phases { display:flex; align-items:center; flex-wrap:wrap; margin:3px 0 1px; gap:0; }
+    .jp {
+      font-size: 10.5px;
+      color: var(--text-dim);
+      padding: 1px 5px;
+      white-space: nowrap;
+      border-radius: 3px;
+      transition: background .15s, color .15s;
+    }
+    .jp + .jp::before { content:'›'; margin-right:4px; color:var(--text-dim); font-size:9px; }
+    .jp.active  { color:#4f80ff; font-weight:600; background:rgba(79,128,255,.12); }
+    .jp.complete { color:#2fb344; opacity:.75; }
 
     /* Active downloads pill */
     #dl-active-pill {
@@ -1503,9 +1518,34 @@
         <input type="text" id="excluded-input" class="form-control"
                placeholder="lost+found, .recycle, @eaDir, ...">
         <div class="form-text">Nomi separati da virgola</div>
+
+        <hr>
+        <p class="settings-section-label">Performance download</p>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label">
+              Download contemporanei
+              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–32)</span>
+            </label>
+            <input type="number" id="setting-max-concurrent" class="form-control" min="1" max="32" value="3">
+            <div class="form-text">Suggerito: 2–4. Valori alti aumentano l'uso di rete e RAM.</div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label">
+              Thread per segmento
+              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–128)</span>
+            </label>
+            <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
+            <div class="form-text">Suggerito: 8–32. Valori >64 raramente migliorano le prestazioni.</div>
+          </div>
+        </div>
+        <div id="perf-settings-feedback" class="form-text mt-1"></div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
+        <button type="button" class="btn btn-outline-primary me-2" onclick="savePerfSettings()" id="save-perf-btn">
+          Salva performance
+        </button>
         <button type="button" class="btn btn-primary" onclick="saveLibraries()" id="save-libraries-btn">
           Salva librerie
         </button>

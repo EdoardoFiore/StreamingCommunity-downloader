@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.config import DATA_FILE
+from app.config import DATA_FILE, get_settings, save_settings
 from app.core.page import get_domain_version
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,32 @@ def set_libraries(body: LibrariesUpdate):
     data["excluded_folders"] = body.excluded_folders
     _write_data(data)
     return {"ok": True}
+
+
+class SettingsUpdate(BaseModel):
+    max_concurrent_downloads: int
+    max_segment_workers: int
+
+
+@router.get("/settings")
+def get_app_settings():
+    return get_settings()
+
+
+@router.put("/settings")
+def set_app_settings(body: SettingsUpdate):
+    if body.max_concurrent_downloads < 1 or body.max_concurrent_downloads > 32:
+        raise HTTPException(status_code=400, detail="max_concurrent_downloads must be between 1 and 32")
+    if body.max_segment_workers < 1 or body.max_segment_workers > 128:
+        raise HTTPException(status_code=400, detail="max_segment_workers must be between 1 and 128")
+    new_settings = {
+        "max_concurrent_downloads": body.max_concurrent_downloads,
+        "max_segment_workers": body.max_segment_workers,
+    }
+    save_settings(new_settings)
+    from app.jobs import job_manager
+    job_manager.update_max_concurrent(body.max_concurrent_downloads)
+    return new_settings
 
 
 @router.put("")

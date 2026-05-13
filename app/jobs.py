@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import shutil
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -8,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.config import VIDEOS_DIR, TMP_DIR
+from app.config import VIDEOS_DIR, TMP_DIR, get_settings
 from app.progress import DownloadCancelledError, WebProgressBar
 
 
@@ -22,7 +23,6 @@ def _get_library_path(type_: str) -> str:
 
 logger = logging.getLogger(__name__)
 
-MAX_CONCURRENT_DOWNLOADS = int(os.getenv("MAX_DOWNLOADS", "3"))
 SCHEDULER_INTERVAL = 30  # seconds
 
 
@@ -38,6 +38,7 @@ class DownloadJob:
     error: Optional[str] = None
     output_path: Optional[str] = None
     progress: dict = field(default_factory=lambda: {"current": 0, "total": 0, "pct": 0, "speed": 0, "eta": None})
+    phases: list = field(default_factory=list)
     progress_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
@@ -45,10 +46,31 @@ class DownloadJob:
 class JobManager:
     def __init__(self):
         self._jobs: dict[str, DownloadJob] = {}
-        self._executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS)
+        self._lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=64)
+        n = get_settings().get("max_concurrent_downloads", 3)
+        self._semaphore = threading.BoundedSemaphore(n)
+        self._semaphore_value = n
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscribers: list[asyncio.Queue] = []
         self._schedule_store = None  # set via set_schedule_store()
+
+    @staticmethod
+    def _compute_phases(audio_languages: list) -> list:
+        """Return the ordered list of phase names that will be emitted for this job."""
+        if len(audio_languages) > 1:
+            steps = ["video"] + [f"audio_{l}" for l in audio_languages] + ["merging", "done"]
+        else:
+            steps = ["video", "done"]
+        return steps
+
+    def update_max_concurrent(self, n: int):
+        old = self._semaphore_value
+        if n == old:
+            return
+        # Replace semaphore — existing running downloads are unaffected
+        self._semaphore = threading.BoundedSemaphore(n)
+        self._semaphore_value = n
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -59,10 +81,12 @@ class JobManager:
         self._schedule_store: Optional[ScheduleStore] = store
 
     def get(self, job_id: str) -> Optional[DownloadJob]:
-        return self._jobs.get(job_id)
+        with self._lock:
+            return self._jobs.get(job_id)
 
     def list_jobs(self) -> list[dict]:
-        return [self._job_to_dict(j) for j in self._jobs.values()]
+        with self._lock:
+            return [self._job_to_dict(j) for j in self._jobs.values()]
 
     def _job_to_dict(self, job: DownloadJob) -> dict:
         return {
@@ -76,6 +100,7 @@ class JobManager:
             "error": job.error,
             "output_path": job.output_path,
             "progress": job.progress,
+            "phases": job.phases,
         }
 
     # ── Global pub/sub ─────────────────────────────────────────────────────────
@@ -136,7 +161,9 @@ class JobManager:
         while True:
             await asyncio.sleep(SCHEDULER_INTERVAL)
             now = datetime.now(timezone.utc)
-            for job in list(self._jobs.values()):
+            with self._lock:
+                jobs = list(self._jobs.values())
+            for job in jobs:
                 if job.status != "scheduled" or job.scheduled_at is None or job.schedule_id is None:
                     continue
                 sa = job.scheduled_at
@@ -157,9 +184,10 @@ class JobManager:
 
     def _fire_job(self, job: DownloadJob, type_: str, params: dict):
         fn, args, kwargs = self._build_call(type_, params, job)
-        job.status = "queued"
-        if self._schedule_store is not None and job.schedule_id:
-            self._schedule_store.mark_fired(job.schedule_id)
+        with self._lock:
+            job.status = "queued"
+            if self._schedule_store is not None and job.schedule_id:
+                self._schedule_store.mark_fired(job.schedule_id)
         self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "queued"})
         self._executor.submit(self._run_download, job, fn, *args, **kwargs)
 
@@ -171,6 +199,8 @@ class JobManager:
             return download_film, (params["id"], params["title"], params["domain"]), dict(
                 output_dir=_get_library_path("film"), temp_dir=td, progress_factory=pf,
                 year=params.get("year"), cancel_event=job.cancel_event,
+                audio_languages=params.get("audio_languages", ["ita"]),
+                subtitle_languages=params.get("subtitle_languages", ["ita", "eng"]),
             )
         if type_ == "episode":
             from app.core.tv import download_episode
@@ -180,6 +210,8 @@ class JobManager:
             ), dict(
                 output_dir=_get_library_path("tv"), temp_dir=td, progress_factory=pf,
                 cancel_event=job.cancel_event, year=params.get("year"),
+                audio_languages=params.get("audio_languages", ["ita"]),
+                subtitle_languages=params.get("subtitle_languages", ["ita", "eng"]),
             )
         if type_ == "anime":
             from app.core.animeunity import download_anime_episode
@@ -189,6 +221,8 @@ class JobManager:
             ), dict(
                 output_dir=_get_library_path("anime"), temp_dir=td, progress_factory=pf,
                 cancel_event=job.cancel_event, year=params.get("year"),
+                audio_languages=params.get("audio_languages", ["ita"]),
+                subtitle_languages=params.get("subtitle_languages", ["ita", "eng"]),
             )
         raise ValueError(f"Unknown schedule type: {type_!r}")
 
@@ -205,11 +239,12 @@ class JobManager:
         return True
 
     def cancel(self, job_id: str) -> bool:
-        job = self._jobs.get(job_id)
-        if not job or job.status not in ("scheduled", "queued", "running"):
-            return False
-        job.cancel_event.set()
-        job.status = "cancelled"
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in ("scheduled", "queued", "running"):
+                return False
+            job.cancel_event.set()
+            job.status = "cancelled"
         event = {"type": "error", "message": "Annullato"}
         asyncio.run_coroutine_threadsafe(job.progress_queue.put(event), self._loop)
         self._broadcast({**event, "job_id": job_id})
@@ -217,54 +252,62 @@ class JobManager:
 
     def dismiss(self, job_id: str) -> bool:
         """Remove a finished/cancelled job and clean it from the schedule store."""
-        job = self._jobs.get(job_id)
-        if not job or job.status not in ("done", "error", "cancelled"):
-            return False
-        del self._jobs[job_id]
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in ("done", "error", "cancelled"):
+                return False
+            del self._jobs[job_id]
         if self._schedule_store is not None:
             self._schedule_store.remove_by_job_id(job_id)
         self._broadcast({"type": "job_dismissed", "job_id": job_id})
         return True
 
     def _run_download(self, job: DownloadJob, fn, *args, **kwargs):
-        if job.cancel_event.is_set():
-            job.status = "cancelled"
-            ev = {"type": "error", "message": "Annullato"}
-            asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-            self._broadcast({**ev, "job_id": job.job_id})
-            return
+        with self._semaphore:
+            if job.cancel_event.is_set():
+                job.status = "cancelled"
+                ev = {"type": "error", "message": "Annullato"}
+                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
+                self._broadcast({**ev, "job_id": job.job_id})
+                return
 
-        job.status = "running"
-        self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
+            job.status = "running"
+            self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
 
-        try:
-            result = fn(*args, **kwargs)
-            job.status = "done"
-            job.output_path = result
-            ev = {"type": "done", "output_path": result}
-            asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-            self._broadcast({**ev, "job_id": job.job_id})
-        except DownloadCancelledError:
-            job.status = "cancelled"
-            ev = {"type": "error", "message": "Annullato"}
-            asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-            self._broadcast({**ev, "job_id": job.job_id})
-        except Exception as e:
-            logger.exception(f"Job {job.job_id} failed: {e}")
-            job.status = "error"
-            job.error = str(e)
-            ev = {"type": "error", "message": str(e)}
-            asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-            self._broadcast({**ev, "job_id": job.job_id})
+            try:
+                result = fn(*args, **kwargs)
+                job.status = "done"
+                job.output_path = result
+                ev = {"type": "done", "output_path": result}
+                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
+                self._broadcast({**ev, "job_id": job.job_id})
+            except DownloadCancelledError:
+                job.status = "cancelled"
+                ev = {"type": "error", "message": "Annullato"}
+                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
+                self._broadcast({**ev, "job_id": job.job_id})
+            except Exception as e:
+                logger.exception(f"Job {job.job_id} failed: {e}")
+                job.status = "error"
+                job.error = str(e)
+                ev = {"type": "error", "message": str(e)}
+                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
+                self._broadcast({**ev, "job_id": job.job_id})
+            finally:
+                tmp_path = TMP_DIR / job.job_id
+                if tmp_path.exists():
+                    shutil.rmtree(tmp_path, ignore_errors=True)
+                    logger.info("Cleaned up temp dir: %s", tmp_path)
 
     def _submit_job(self, job: DownloadJob, fn, *args, **kwargs) -> str:
-        self._jobs[job.job_id] = job
+        with self._lock:
+            self._jobs[job.job_id] = job
         self._broadcast({"type": "job_created", "job": self._job_to_dict(job)})
         self._executor.submit(self._run_download, job, fn, *args, **kwargs)
         return job.job_id
 
     def _make_job(self, title: str, type_: str, scheduled_at: Optional[datetime] = None,
-                  schedule_id: Optional[str] = None) -> DownloadJob:
+                  schedule_id: Optional[str] = None, phases: list = None) -> DownloadJob:
         now = datetime.now(timezone.utc)
         sa = scheduled_at.replace(tzinfo=timezone.utc) if scheduled_at and scheduled_at.tzinfo is None else scheduled_at
         status = "scheduled" if sa and sa > now else "queued"
@@ -276,15 +319,19 @@ class JobManager:
             created_at=datetime.utcnow(),
             scheduled_at=scheduled_at,
             schedule_id=schedule_id,
+            phases=phases or [],
         )
 
     # ── Submit (immediate) ─────────────────────────────────────────────────────
 
     def submit_film(self, id_film: int, title: str, domain: str, year: str = None,
-                    schedule_id: str = None) -> str:
+                    schedule_id: str = None,
+                    audio_languages: list[str] = None,
+                    subtitle_languages: list[str] = None) -> str:
         from app.core.film import download_film
 
-        job = self._make_job(title, "film", schedule_id=schedule_id)
+        job = self._make_job(title, "film", schedule_id=schedule_id,
+                             phases=self._compute_phases(audio_languages or ["ita"]))
         return self._submit_job(
             job, download_film,
             id_film, title, domain,
@@ -293,16 +340,21 @@ class JobManager:
             progress_factory=self._make_progress_factory(job),
             year=year,
             cancel_event=job.cancel_event,
+            audio_languages=audio_languages or ["ita"],
+            subtitle_languages=subtitle_languages or ["ita", "eng"],
         )
 
     def submit_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                        token: str, tv_name: str, season: int, year: str = None,
-                       schedule_id: str = None) -> str:
+                       schedule_id: str = None,
+                       audio_languages: list[str] = None,
+                       subtitle_languages: list[str] = None) -> str:
         from app.core.tv import download_episode, fmt_ep
 
         ep = eps[ep_index]
         title = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
-        job = self._make_job(title, "episode", schedule_id=schedule_id)
+        job = self._make_job(title, "episode", schedule_id=schedule_id,
+                             phases=self._compute_phases(audio_languages or ["ita"]))
         return self._submit_job(
             job, download_episode,
             tv_id, eps, ep_index, domain, token, tv_name, season,
@@ -311,16 +363,21 @@ class JobManager:
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
             year=year,
+            audio_languages=audio_languages or ["ita"],
+            subtitle_languages=subtitle_languages or ["ita", "eng"],
         )
 
     def submit_anime_episode(self, anime_id: str, episode: dict, anime_name: str,
                              anime_type: str = "tv", year: str = None,
-                             schedule_id: str = None) -> str:
+                             schedule_id: str = None,
+                             audio_languages: list[str] = None,
+                             subtitle_languages: list[str] = None) -> str:
         from app.core.animeunity import download_anime_episode
 
         ep_num = episode.get("number", "?")
         title = f"{anime_name} E{ep_num}"
-        job = self._make_job(title, "anime", schedule_id=schedule_id)
+        job = self._make_job(title, "anime", schedule_id=schedule_id,
+                             phases=self._compute_phases(audio_languages or ["ita"]))
         return self._submit_job(
             job, download_anime_episode,
             anime_id, episode, anime_name, anime_type,
@@ -329,18 +386,28 @@ class JobManager:
             progress_factory=self._make_progress_factory(job),
             cancel_event=job.cancel_event,
             year=year,
+            audio_languages=audio_languages or ["ita"],
+            subtitle_languages=subtitle_languages or ["ita", "eng"],
         )
 
     # ── Schedule (future) ──────────────────────────────────────────────────────
 
     def schedule_film(self, id_film: int, title: str, domain: str,
-                      scheduled_at: datetime, year: str = None) -> str:
-        params = {"id": id_film, "title": title, "domain": domain, "year": year}
+                      scheduled_at: datetime, year: str = None,
+                      audio_languages: list[str] = None,
+                      subtitle_languages: list[str] = None) -> str:
+        params = {
+            "id": id_film, "title": title, "domain": domain, "year": year,
+            "audio_languages": audio_languages or ["ita"],
+            "subtitle_languages": subtitle_languages or ["ita", "eng"],
+        }
         return self._add_schedule("film", scheduled_at, params, title)
 
     def schedule_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                          token: str, tv_name: str, season: int,
-                         scheduled_at: datetime, year: str = None) -> str:
+                         scheduled_at: datetime, year: str = None,
+                         audio_languages: list[str] = None,
+                         subtitle_languages: list[str] = None) -> str:
         from app.core.tv import fmt_ep
         ep = eps[ep_index]
         title = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
@@ -348,17 +415,23 @@ class JobManager:
             "tv_id": tv_id, "eps": eps, "ep_index": ep_index,
             "domain": domain, "token": token, "tv_name": tv_name,
             "season": season, "year": year,
+            "audio_languages": audio_languages or ["ita"],
+            "subtitle_languages": subtitle_languages or ["ita", "eng"],
         }
         return self._add_schedule("episode", scheduled_at, params, title)
 
     def schedule_anime_episode(self, anime_id: str, episode: dict, anime_name: str,
                                scheduled_at: datetime, anime_type: str = "tv",
-                               year: str = None) -> str:
+                               year: str = None,
+                               audio_languages: list[str] = None,
+                               subtitle_languages: list[str] = None) -> str:
         ep_num = episode.get("number", "?")
         title = f"{anime_name} E{ep_num}"
         params = {
             "anime_id": anime_id, "episode": episode, "anime_name": anime_name,
             "anime_type": anime_type, "year": year,
+            "audio_languages": audio_languages or ["ita"],
+            "subtitle_languages": subtitle_languages or ["ita", "eng"],
         }
         return self._add_schedule("anime", scheduled_at, params, title)
 
@@ -366,8 +439,10 @@ class JobManager:
         if self._schedule_store is None:
             raise RuntimeError("ScheduleStore not configured")
         schedule_id = self._schedule_store.add(type_, scheduled_at, params)
-        job = self._make_job(title, type_, scheduled_at=scheduled_at, schedule_id=schedule_id)
-        self._jobs[job.job_id] = job
+        job = self._make_job(title, type_, scheduled_at=scheduled_at, schedule_id=schedule_id,
+                             phases=self._compute_phases(params.get("audio_languages") or ["ita"]))
+        with self._lock:
+            self._jobs[job.job_id] = job
         self._schedule_store.set_job_id(schedule_id, job.job_id)
         self._broadcast({"type": "job_created", "job": self._job_to_dict(job)})
         return job.job_id
@@ -385,8 +460,10 @@ class JobManager:
             sa_raw = datetime.fromisoformat(entry["scheduled_at"])
             scheduled_at = sa_raw if sa_raw.tzinfo else sa_raw.replace(tzinfo=timezone.utc)
             title = params.get("title") or params.get("tv_name") or params.get("anime_name", "?")
-            job = self._make_job(title, type_, scheduled_at=scheduled_at, schedule_id=sid)
-            self._jobs[job.job_id] = job
+            job = self._make_job(title, type_, scheduled_at=scheduled_at, schedule_id=sid,
+                                 phases=self._compute_phases(params.get("audio_languages") or ["ita"]))
+            with self._lock:
+                self._jobs[job.job_id] = job
             self._schedule_store.set_job_id(sid, job.job_id)
             logger.info("Restored scheduled job %s (schedule_id=%s) for %s", job.job_id, sid, scheduled_at)
 

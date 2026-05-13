@@ -20,6 +20,7 @@ logging.basicConfig(
 )
 
 BASE_DIR = Path(__file__).parent
+DOCS_DIR = Path(__file__).parent.parent / "docs"
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="StreamingCommunity Web Panel", lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/docs", StaticFiles(directory=str(DOCS_DIR)), name="docs")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 app.include_router(domain.router)

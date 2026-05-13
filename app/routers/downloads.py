@@ -16,6 +16,8 @@ class FilmDownloadRequest(BaseModel):
     title: str
     domain: str
     year: str | None = None
+    audio_languages: list[str] = ["ita"]
+    subtitle_languages: list[str] = ["ita", "eng"]
 
 
 class EpisodeDownloadRequest(BaseModel):
@@ -27,14 +29,23 @@ class EpisodeDownloadRequest(BaseModel):
     tv_name: str
     season: int
     year: str | None = None
+    audio_languages: list[str] = ["ita"]
+    subtitle_languages: list[str] = ["ita", "eng"]
+
+
+class EpisodeInfo(BaseModel):
+    id: int
+    number: str | int
 
 
 class AnimeDownloadRequest(BaseModel):
     anime_id: str
-    episode: dict   # {"id": <ep_id>, "number": "<ep_number>"}
+    episode: EpisodeInfo
     anime_name: str
-    anime_type: str = "tv"  # "tv", "movie", "film", etc.
+    anime_type: str = "tv"
     year: str | None = None
+    audio_languages: list[str] = ["ita"]
+    subtitle_languages: list[str] = ["ita", "eng"]
 
 
 class FilmScheduleRequest(FilmDownloadRequest):
@@ -53,7 +64,11 @@ class AnimeScheduleRequest(AnimeDownloadRequest):
 
 @router.post("/film", status_code=202)
 def download_film(body: FilmDownloadRequest):
-    job_id = job_manager.submit_film(body.id, body.title, body.domain, year=body.year)
+    job_id = job_manager.submit_film(
+        body.id, body.title, body.domain, year=body.year,
+        audio_languages=body.audio_languages,
+        subtitle_languages=body.subtitle_languages,
+    )
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -65,6 +80,8 @@ def download_episode(body: EpisodeDownloadRequest):
         body.tv_id, body.eps, body.ep_index,
         body.domain, body.token, body.tv_name, body.season,
         year=body.year,
+        audio_languages=body.audio_languages,
+        subtitle_languages=body.subtitle_languages,
     )
     return {"job_id": job_id, "status": "queued"}
 
@@ -72,7 +89,9 @@ def download_episode(body: EpisodeDownloadRequest):
 @router.post("/anime", status_code=202)
 def download_anime(body: AnimeDownloadRequest):
     job_id = job_manager.submit_anime_episode(
-        body.anime_id, body.episode, body.anime_name, body.anime_type, year=body.year,
+        body.anime_id, body.episode.model_dump(), body.anime_name, body.anime_type, year=body.year,
+        audio_languages=body.audio_languages,
+        subtitle_languages=body.subtitle_languages,
     )
     return {"job_id": job_id, "status": "queued"}
 
@@ -83,6 +102,8 @@ def download_anime(body: AnimeDownloadRequest):
 def schedule_film(body: FilmScheduleRequest):
     job_id = job_manager.schedule_film(
         body.id, body.title, body.domain, body.scheduled_at, year=body.year,
+        audio_languages=body.audio_languages,
+        subtitle_languages=body.subtitle_languages,
     )
     return {"job_id": job_id, "status": "scheduled", "scheduled_at": body.scheduled_at.isoformat()}
 
@@ -95,6 +116,8 @@ def schedule_episode(body: EpisodeScheduleRequest):
         body.tv_id, body.eps, body.ep_index,
         body.domain, body.token, body.tv_name, body.season,
         body.scheduled_at, year=body.year,
+        audio_languages=body.audio_languages,
+        subtitle_languages=body.subtitle_languages,
     )
     return {"job_id": job_id, "status": "scheduled", "scheduled_at": body.scheduled_at.isoformat()}
 
@@ -102,8 +125,10 @@ def schedule_episode(body: EpisodeScheduleRequest):
 @router.post("/schedule/anime", status_code=202)
 def schedule_anime(body: AnimeScheduleRequest):
     job_id = job_manager.schedule_anime_episode(
-        body.anime_id, body.episode, body.anime_name, body.scheduled_at,
+        body.anime_id, body.episode.model_dump(), body.anime_name, body.scheduled_at,
         anime_type=body.anime_type, year=body.year,
+        audio_languages=body.audio_languages,
+        subtitle_languages=body.subtitle_languages,
     )
     return {"job_id": job_id, "status": "scheduled", "scheduled_at": body.scheduled_at.isoformat()}
 

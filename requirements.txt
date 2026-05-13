@@ -5,7 +5,8 @@ tqdm
 rich
 random-user-agent
 ffmpeg-python
-cryptography==3.4.8
+cryptography==3.4.8  # Pinned: newer versions (40+) removed default_backend(), requires API change in m3u8.py
+filelock>=3.12.0
 m3u8
 fastapi
 uvicorn[standard]

@@ -218,15 +218,19 @@ def download_anime_episode(
     progress_factory=None,
     cancel_event=None,
     year: str = None,
+    audio_languages: list[str] = None,
+    subtitle_languages: list[str] = None,
 ) -> str:
     """
     Full download pipeline for a single anime episode.
     - Series (anime_type="tv"): videos/AnimeName/Season 01/AnimeName S01E01.mp4
     - Movies (anime_type="movie"): videos/AnimeName (YYYY)/AnimeName.mp4
-    Reuses vixcloud.co parsing and m3u8 download logic from film.py / m3u8.py.
     """
-    # Import private helpers from film.py — same vixcloud.co infrastructure
-    from app.core.film import _parse_content, _get_m3u8_url, _get_m3u8_key, _get_m3u8_audio
+    audio_languages = audio_languages or ["ita"]
+    subtitle_languages = subtitle_languages or []
+
+    from app.core.film import _collect_audio_tracks, _collect_subtitle_tracks
+    from app.core._shared import _parse_content, _get_m3u8_url, _get_m3u8_key
     from app.core.m3u8 import download_m3u8
 
     episode_id = episode["id"]
@@ -242,38 +246,38 @@ def download_anime_episode(
 
     m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
     m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_url)
-    m3u8_audio = _get_m3u8_audio(json_win_video, json_win_param, embed_url)
+
+    audio_track_urls = _collect_audio_tracks(m3u8_url, embed_url, audio_languages)
+    subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_url, subtitle_languages)
 
     clean_name = sanitize_filename(anime_name.replace("+", " ").replace(",", ""))
-    
-    # Determine if it's a TV series or a movie
+
     is_series = anime_type.lower() in ("tv", "serie", "series", "anime")
-    
+
     if is_series:
-        # TV series: follows same pattern as StreamingCommunity TV
-        # videos/AnimeName/Season 01/AnimeName S01E01.mp4
         from app.core.tv import fmt_ep
-        season = 1  # For anime, assume season 1 (they typically have one season on AnimeUnity)
+        season = 1
         ep_filename = f"{clean_name} S01E{fmt_ep(episode_number)}.mp4"
         year_str = f" ({year})" if year else ""
         folder_name = f"{clean_name}{year_str}"
         mp4_path = os.path.join(output_dir, folder_name, f"Season {season:02d}", ep_filename)
     else:
-        # Movies: save in folder with year for consistency
-        # videos/AnimeName (YYYY)/AnimeName.mp4
         year_str = f" ({year})" if year else ""
         folder_name = f"{clean_name}{year_str}"
         mp4_path = os.path.join(output_dir, folder_name, f"{clean_name}.mp4")
 
     download_m3u8(
         m3u8_index=m3u8_url,
-        m3u8_audio=m3u8_audio,
         key=m3u8_key,
         output_filename=mp4_path,
         temp_dir=temp_dir,
         progress_factory=progress_factory,
         referer=embed_url,
         cancel_event=cancel_event,
+        audio_languages=audio_languages,
+        subtitle_languages=subtitle_languages,
+        audio_track_urls=audio_track_urls,
+        subtitle_track_urls=subtitle_track_urls,
     )
 
     return mp4_path

@@ -1,39 +1,64 @@
-# StreamingCommunity Downloader
+<p align="center">
+  <img src="docs/banner.png" alt="StreamingCommunity Downloader" width="520"/>
+</p>
 
-A Python 3.11+ tool to download films and TV series from the StreamingCommunity platform.  
-Comes with both a **CLI** and a **web panel** (FastAPI + Tabler UI).
+<p align="center">
+  A self-hosted web panel to download films and TV series from the StreamingCommunity platform.<br/>
+  Built with FastAPI, real-time progress via SSE, and an integrated file manager.
+</p>
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/search.png" alt="Search"/></td>
+    <td><img src="docs/serie-detail.png" alt="Series detail"/></td>
+  </tr>
+  <tr>
+    <td><img src="docs/episode-list.png" alt="Episode list"/></td>
+    <td><img src="docs/file-manager.png" alt="File manager"/></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/settings.png" alt="Settings" width="50%"/></td>
+  </tr>
+</table>
 
 ---
 
 ## Features
 
-- Search films and TV series via the StreamingCommunity API
-- Download movies and individual episodes or entire seasons
-- Automatic highest-quality selection (1080p → 720p → 480p → 360p)
-- AES-CBC segment decryption for HLS streams
-- Parallel segment download (up to 150 concurrent workers)
-- Subtitle download for non-Italian audio tracks (`.vtt`)
-- Alternate audio track merge via FFmpeg
-- Auto-install FFmpeg on first run (Windows/Linux)
-- Web panel with real-time download progress via SSE
-- File manager with drag-and-drop, streaming, and library support
-- Docker + NFS ready
+- Search and download films, TV series, and anime
+- Automatic quality selection (1080p → 720p → 480p → 360p)
+- Parallel HLS segment download with AES-CBC decryption
+- Multi-audio track merge via FFmpeg
+- Subtitle download (`.vtt`) for non-Italian audio tracks
+- Real-time download progress with per-phase steps (video → audio → merge)
+- Integrated file manager with drag-and-drop and video streaming
+- Jellyfin library path configuration
+- Scheduled downloads
+- Docker ready
 
 ---
 
-## Usage — Web Panel (recommended)
+## Quick Start
 
-### With Docker (no clone required)
-
-Download the stack template and start:
+### Docker (recommended)
 
 ```bash
 curl -O https://raw.githubusercontent.com/EdoardoFiore/StreamingCommunity-downloader/main/docker-compose.template.yml
-# edit the volume device path, then:
+# Edit the volume paths, then:
 docker compose -f docker-compose.template.yml up -d
 ```
 
 The panel is available at `http://localhost:8000`.
+
+The image is published to GitHub Container Registry on every push to `main`:
+
+```
+ghcr.io/edoardofiore/streamingcommunity-downloader:latest
+```
 
 ### From source
 
@@ -44,45 +69,21 @@ pip install -r requirements.txt
 python main.py
 ```
 
----
-
-## Usage — CLI
-
-**Requirements:** Python ≥ 3.11, FFmpeg (auto-installed on first run)
-
-```bash
-pip install -r requirements.txt
-python run.py
-```
-
-**Auto-update:**
-
-```bash
-python update.py
-```
-
-### Selection syntax
-
-| Syntax | Meaning |
-|--------|---------|
-| `1` | Single episode/season |
-| `[1-5]` | Range |
-| `[1,3,7]` | Discontinuous list |
-| `*` | All |
+**Prerequisites:** Python ≥ 3.11, FFmpeg (auto-installed on first run).
 
 ---
 
 ## Configuration
 
-The domain is stored in `data.json` and can be set via the web panel settings or on first CLI run.
-
-| Env variable | Default | Description |
+| Variable | Default | Description |
 |---|---|---|
-| `VIDEOS_DIR` | `videos/` | Output directory for downloaded files |
-| `HOST` | `127.0.0.1` | Web panel bind address |
-| `PORT` | `8000` | Web panel port |
-| `DATA_FILE` | `data.json` | Domain + library config file |
-| `TMP_DIR` | `tmp/` | Temp directory for segment download |
+| `HOST` | `127.0.0.1` | Bind address |
+| `PORT` | `8000` | Bind port |
+| `VIDEOS_DIR` | `videos/` | Output directory |
+| `DATA_FILE` | `data.json` | Domain + library config |
+| `TMP_DIR` | `tmp/` | Temp directory for segments |
+
+The StreamingCommunity domain and Jellyfin library paths are configurable from the **Settings** panel in the UI.
 
 ---
 
@@ -90,41 +91,13 @@ The domain is stored in `data.json` and can be set via the web panel settings or
 
 ```
 videos/
-├── MovieTitle.mp4
+├── SeriesTitle/
+|    └── MovieTitle.mp4
 └── SeriesTitle/
-    ├── S01E01.mp4
-    └── S01E02.mp4
+    └── Season 01
+        ├── S01E01.mp4
+        └── S01E02.mp4
 ```
-
----
-
-## Architecture
-
-```
-run.py / main.py
-├── Src/Api/          — Search, film and TV series metadata
-├── Src/Lib/FFmpeg/   — HLS download engine (parse → decrypt → concat → merge)
-├── Src/Util/         — Console, headers, user-agent rotation
-└── app/              — FastAPI web panel
-    ├── core/         — Web equivalents of Src/Api (film, tv, m3u8, page)
-    ├── routers/      — REST endpoints (search, downloads, files, progress, domain)
-    ├── jobs.py       — Download job queue and state machine
-    ├── progress.py   — SSE broadcast for live progress
-    ├── static/       — Frontend (app.js, CSS)
-    └── templates/    — Jinja2 HTML templates
-```
-
----
-
-## Docker
-
-The image is published automatically to GitHub Container Registry on every push to `main`:
-
-```
-ghcr.io/edoardofiore/streamingcommunity-downloader:latest
-```
-
-See [docker-compose.template.yml](docker-compose.template.yml) for a ready-to-use stack.
 
 ---
 

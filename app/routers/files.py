@@ -25,6 +25,17 @@ def _safe_path(rel_path: str) -> Path:
     return target
 
 
+def _safe_path_strict(rel_path: str) -> Path:
+    """Like _safe_path but raises ValueError/FileNotFoundError instead of HTTPException."""
+    base = VIDEOS_DIR.resolve()
+    target = (base / rel_path).resolve()
+    if not target.is_relative_to(base):
+        raise ValueError("Invalid path")
+    if not target.exists():
+        raise FileNotFoundError("Not found")
+    return target
+
+
 def _read_data() -> dict:
     try:
         with open(DATA_FILE) as f:
@@ -211,12 +222,7 @@ def _delete_sync(target: Path):
 
 @router.delete("/delete/{file_path:path}", status_code=204)
 async def delete_path(file_path: str):
-    base = VIDEOS_DIR.resolve()
-    target = (base / file_path).resolve()
-    if not target.is_relative_to(base):
-        raise HTTPException(status_code=400, detail="Invalid path")
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Not found")
+    target = _safe_path(file_path)
     await asyncio.to_thread(_delete_sync, target)
 
 
@@ -260,19 +266,14 @@ async def batch_move(body: BatchMoveRequest):
 
 def _batch_delete_sync(paths: list[str]) -> list[dict]:
     """Delete multiple paths within VIDEOS_DIR (blocking, runs in thread)."""
-    base = VIDEOS_DIR.resolve()
     results = []
     for p in paths:
         try:
-            target = (base / p).resolve()
-            if not target.is_relative_to(base):
-                results.append({"path": p, "ok": False, "error": "Path non valido"})
-                continue
-            if not target.exists():
-                results.append({"path": p, "ok": False, "error": "Non trovato"})
-                continue
+            target = _safe_path_strict(p)
             _delete_sync(target)
             results.append({"path": p, "ok": True})
+        except (ValueError, FileNotFoundError) as e:
+            results.append({"path": p, "ok": False, "error": str(e)})
         except Exception as e:
             results.append({"path": p, "ok": False, "error": str(e)})
     return results
@@ -280,7 +281,7 @@ def _batch_delete_sync(paths: list[str]) -> list[dict]:
 
 @router.post("/rename")
 async def rename_path(body: RenameRequest):
-    if not body.new_name or '/' in body.new_name or '\\' in body.new_name or body.new_name in ('.', '..'):
+    if not body.new_name or '/' in body.new_name or '\\' in body.new_name or body.new_name in ('.', '..') or '\x00' in body.new_name:
         raise HTTPException(status_code=400, detail="Nome non valido")
     source = _safe_path(body.path)
     dest = source.parent / body.new_name

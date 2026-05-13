@@ -134,7 +134,7 @@ function showToast(message, type = 'info') {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadDomainStatus();
-  await loadLibraries();
+  await Promise.all([loadLibraries(), loadPerfSettings()]);
   connectGlobalStream();
   setupFileManager();
   setupSearchDebounce();
@@ -191,11 +191,46 @@ function showPage(page) {
 
 // ── Settings ───────────────────────────────────────────────────────────────────
 
-function openSettings() {
+async function openSettings() {
   document.getElementById('domain-input').value = currentDomain;
   document.getElementById('domain-feedback').textContent = '';
   renderLibrariesList();
+  await loadPerfSettings();
   showModal('settings-modal');
+}
+
+async function loadPerfSettings() {
+  try {
+    const res = await fetch('/api/domain/settings');
+    if (!res.ok) return;
+    const data = await safeJson(res);
+    document.getElementById('setting-max-concurrent').value = data.max_concurrent_downloads ?? 3;
+    document.getElementById('setting-max-workers').value = data.max_segment_workers ?? 16;
+  } catch (e) { /* ignore */ }
+}
+
+async function savePerfSettings() {
+  const btn = document.getElementById('save-perf-btn');
+  const feedback = document.getElementById('perf-settings-feedback');
+  btn.disabled = true;
+  feedback.textContent = '';
+  const concurrent = parseInt(document.getElementById('setting-max-concurrent').value, 10);
+  const workers = parseInt(document.getElementById('setting-max-workers').value, 10);
+  if (!concurrent || !workers) { feedback.textContent = 'Valori non validi.'; btn.disabled = false; return; }
+  try {
+    const res = await fetch('/api/domain/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({max_concurrent_downloads: concurrent, max_segment_workers: workers}),
+    });
+    if (res.ok) {
+      showToast('Impostazioni salvate', 'success');
+    } else {
+      const d = await safeJson(res);
+      feedback.textContent = d.detail || 'Errore salvataggio.';
+    }
+  } catch (e) { feedback.textContent = 'Errore di rete.'; }
+  finally { btn.disabled = false; }
 }
 async function saveDomain() {
   const domain = document.getElementById('domain-input').value.trim();
@@ -388,6 +423,15 @@ const LANG_NAMES = {
 };
 const langName = c => LANG_NAMES[c] || c;
 
+function _getLangSelections() {
+  const audio = [...document.querySelectorAll('.lang-audio-check:checked')].map(cb => cb.value);
+  const subs  = [...document.querySelectorAll('.lang-sub-check:checked')].map(cb => cb.value);
+  return {
+    audio: audio.length ? audio : ['ita'],
+    subs:  subs,
+  };
+}
+
 function openDetailModal(idx) {
   const item = _searchResults[idx];
   if (!item) return;
@@ -428,22 +472,25 @@ function openDetailModal(idx) {
     btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
     btn.onclick = () => {
       const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
+      const { audio, subs } = _getLangSelections();
       hideModal('detail-modal');
-      openAnimeBrowser(item.id, item.name, item.type, year, scheduledAt);
+      openAnimeBrowser(item.id, item.name, item.type, year, scheduledAt, audio, subs);
     };
   } else if (isMovie) {
     btn.className='btn btn-primary'; btn.innerHTML='<i class="ti ti-download me-1"></i>Scarica';
     btn.onclick = () => {
       const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
+      const { audio, subs } = _getLangSelections();
       hideModal('detail-modal');
-      startFilmDownload(item.id, item.name, year, scheduledAt);
+      startFilmDownload(item.id, item.name, year, scheduledAt, audio, subs);
     };
   } else {
     btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
     btn.onclick = () => {
       const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
+      const { audio, subs } = _getLangSelections();
       hideModal('detail-modal');
-      openEpisodeBrowser(item.id, item.name, item.slug, year, scheduledAt);
+      openEpisodeBrowser(item.id, item.name, item.slug, year, scheduledAt, audio, subs);
     };
   }
 
@@ -463,12 +510,21 @@ function openDetailModal(idx) {
     .then(info => {
       if (!info) { langsEl.innerHTML=''; return; }
       let html='';
-      const audioHtml = (info.audio?.length)
-        ? info.audio.map(c=>`<span class="badge bg-blue-lt me-1">${langName(c)}</span>`).join('')
-        : `<span class="text-muted fst-italic">originale</span>`;
-      html+=`<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span>${audioHtml}</div>`;
+      if (info.audio?.length) {
+        const audioHtml = info.audio.map(c => {
+          const checked = (c === 'ita' || (info.audio.length === 1)) ? 'checked' : '';
+          return `<label class="me-2 mb-1" style="cursor:pointer"><input type="checkbox" class="lang-audio-check me-1" value="${escapeHtml(c)}" ${checked}><span class="badge bg-blue-lt">${langName(c)}</span></label>`;
+        }).join('');
+        html+=`<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span>${audioHtml}</div>`;
+      } else {
+        html+=`<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span><span class="text-muted fst-italic">originale</span></div>`;
+      }
       if (info.subtitles?.length) {
-        html+=`<div><span class="text-muted me-1"><i class="ti ti-subtitles ti-sm"></i> Sub:</span>${info.subtitles.map(c=>`<span class="badge bg-teal-lt me-1">${langName(c)}</span>`).join('')}</div>`;
+        const subHtml = info.subtitles.map(c => {
+          const checked = (c === 'ita' || c === 'eng') ? 'checked' : '';
+          return `<label class="me-2 mb-1" style="cursor:pointer"><input type="checkbox" class="lang-sub-check me-1" value="${escapeHtml(c)}" ${checked}><span class="badge bg-teal-lt">${langName(c)}</span></label>`;
+        }).join('');
+        html+=`<div><span class="text-muted me-1"><i class="ti ti-subtitles ti-sm"></i> Sub:</span>${subHtml}</div>`;
       }
       langsEl.innerHTML=html;
     })
@@ -477,10 +533,14 @@ function openDetailModal(idx) {
 
 // ── Film download ──────────────────────────────────────────────────────────────
 
-async function startFilmDownload(id, title, year=null, scheduledAt=null) {
+async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLangs=null, subLangs=null) {
   try {
     const endpoint = scheduledAt ? '/api/download/schedule/film' : '/api/download/film';
-    const body = {id, title, year, domain:currentDomain};
+    const body = {
+      id, title, year, domain: currentDomain,
+      audio_languages: audioLangs || ['ita'],
+      subtitle_languages: subLangs || ['ita', 'eng'],
+    };
     if (scheduledAt) body.scheduled_at = scheduledAt;
     const res = await fetch(endpoint, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -501,8 +561,9 @@ async function startFilmDownload(id, title, year=null, scheduledAt=null) {
 
 let _epCtx = {};
 
-async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=null) {
-  _epCtx = { tvId, tvName, slug, year, scheduledAt, token:null, episodes:[], currentSeason:null };
+async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=null, audioLangs=null, subLangs=null) {
+  _epCtx = { tvId, tvName, slug, year, scheduledAt, token:null, episodes:[], currentSeason:null,
+    audioLangs: audioLangs || ['ita'], subLangs: subLangs || ['ita', 'eng'] };
   document.getElementById('episode-modal-title').textContent = tvName;
   document.getElementById('season-tabs-wrap').style.display='none';
   document.getElementById('dl-whole-series-btn').style.display='none';
@@ -583,10 +644,15 @@ async function loadSeason(season) {
 }
 
 async function startEpisodeDownload(epIndex) {
-  const { tvId, tvName, year, scheduledAt, token, episodes, currentSeason } = _epCtx;
+  const { tvId, tvName, year, scheduledAt, token, episodes, currentSeason, audioLangs, subLangs } = _epCtx;
   const ep = episodes[epIndex];
   const endpoint = scheduledAt ? '/api/download/schedule/episode' : '/api/download/episode';
-  const body = { tv_id:tvId, eps:episodes, ep_index:epIndex, domain:currentDomain, token, tv_name:tvName, season:currentSeason, year };
+  const body = {
+    tv_id: tvId, eps: episodes, ep_index: epIndex, domain: currentDomain, token,
+    tv_name: tvName, season: currentSeason, year,
+    audio_languages: audioLangs || ['ita'],
+    subtitle_languages: subLangs || ['ita', 'eng'],
+  };
   if (scheduledAt) body.scheduled_at = scheduledAt;
   try {
     const res = await fetch(endpoint, {
@@ -635,12 +701,13 @@ async function downloadWholeSeries() {
 
 // ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
 
-async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null, scheduledAt = null) {
+async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null, scheduledAt = null, audioLangs = null, subLangs = null) {
   // Auto-detect if film (1 episode) but allow user override
   const isAutoFilm = _searchResults.find(r => r.id === animeId)?.episodes_count === 1;
   const effectiveType = (isAutoFilm && animeType === 'anime') ? 'movie' : animeType;
-  
-  _animeCtx = { animeId, animeName, animeType: effectiveType, animeYear, scheduledAt, episodes: [], isAutoFilm };
+
+  _animeCtx = { animeId, animeName, animeType: effectiveType, animeYear, scheduledAt, episodes: [], isAutoFilm,
+    audioLangs: audioLangs || ['ita'], subLangs: subLangs || ['ita', 'eng'] };
   document.getElementById('anime-modal-title').textContent = animeName;
   document.getElementById('anime-modal-body').innerHTML =
     '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
@@ -723,10 +790,14 @@ async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null,
 }
 
 async function startAnimeDownload(epIndex) {
-  const { animeId, animeName, animeType, animeYear, scheduledAt, episodes } = _animeCtx;
+  const { animeId, animeName, animeType, animeYear, scheduledAt, episodes, audioLangs, subLangs } = _animeCtx;
   const episode = episodes[epIndex];
   const endpoint = scheduledAt ? '/api/download/schedule/anime' : '/api/download/anime';
-  const body = { anime_id: animeId, episode, anime_name: animeName, anime_type: animeType, year: animeYear };
+  const body = {
+    anime_id: animeId, episode, anime_name: animeName, anime_type: animeType, year: animeYear,
+    audio_languages: audioLangs || ['ita'],
+    subtitle_languages: subLangs || ['ita', 'eng'],
+  };
   if (scheduledAt) body.scheduled_at = scheduledAt;
   try {
     const res = await fetch(endpoint, {
@@ -742,8 +813,8 @@ async function startAnimeDownload(epIndex) {
 
 function toggleAnimeType(newType) {
   _animeCtx.animeType = newType;
-  const { animeId, animeName, animeYear, scheduledAt } = _animeCtx;
-  openAnimeBrowser(animeId, animeName, newType, animeYear, scheduledAt);
+  const { animeId, animeName, animeYear, scheduledAt, audioLangs, subLangs } = _animeCtx;
+  openAnimeBrowser(animeId, animeName, newType, animeYear, scheduledAt, audioLangs, subLangs);
 }
 
 async function downloadAllAnime() {
@@ -832,6 +903,77 @@ const PHASE_BAR = {
   audio:'phase-bar-audio bg-teal', merging:'phase-bar-merging bg-purple',
   done:'phase-bar-done bg-success', error:'phase-bar-error bg-danger',
 };
+const PHASE_BORDER_MAP = {
+  scheduled:'var(--yellow)', queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
+  audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
+  error:'var(--accent)', cancelled:'var(--text-dim)',
+};
+
+function _stepLabel(phase) {
+  const map = { video:'Video', joining:'Join', merging:'Merge', done:'Fine', audio:'Audio' };
+  if (map[phase]) return map[phase];
+  if (phase && phase.startsWith('audio_')) return 'Audio ' + phase.slice(6).toUpperCase();
+  return phase;
+}
+
+function _buildStepsHtml(jobId, phases, currentPhase, status) {
+  if (!phases || phases.length <= 2) return '';
+  let activeIdx;
+  if (status === 'done') {
+    activeIdx = phases.length;
+  } else if (status === 'queued' || status === 'scheduled') {
+    activeIdx = -1;
+  } else {
+    const lookup = (currentPhase === 'joining') ? 'video' : (currentPhase || 'video');
+    activeIdx = phases.indexOf(lookup);
+    if (activeIdx < 0) activeIdx = 0;
+  }
+  const items = phases.map((p, i) => {
+    let cls = 'jp';
+    if (activeIdx === phases.length || i < activeIdx) cls += ' complete';
+    else if (i === activeIdx) cls += ' active';
+    return `<span class="${cls}" data-phase="${p}">${_stepLabel(p)}</span>`;
+  }).join('');
+  return `<div class="job-phases" id="job-steps-${jobId}">${items}</div>`;
+}
+
+function _updateSteps(jobId, phase) {
+  const job = _jobs.get(jobId);
+  if (!job || !job.phases || job.phases.length <= 2) return;
+  const container = document.getElementById(`job-steps-${jobId}`);
+  if (!container) return;
+  const phases = job.phases;
+  const isDone = job.status === 'done';
+  const lookup = isDone ? null : ((phase === 'joining') ? 'video' : phase);
+  const activeIdx = isDone ? phases.length : phases.indexOf(lookup || 'video');
+  container.querySelectorAll('.jp').forEach((el, i) => {
+    el.className = 'jp';
+    if (activeIdx === phases.length || i < activeIdx) el.className += ' complete';
+    else if (i === activeIdx) el.className += ' active';
+  });
+}
+
+function _phaseLabel(phase) {
+  if (!phase) return '';
+  if (PHASE_LABELS[phase]) return PHASE_LABELS[phase];
+  if (phase.startsWith('audio_')) return 'Audio ' + phase.slice(6).toUpperCase();
+  return phase;
+}
+function _phaseBadge(phase) {
+  if (PHASE_BADGE[phase]) return PHASE_BADGE[phase];
+  if (phase && phase.startsWith('audio_')) return 'bg-teal-lt';
+  return 'bg-secondary-lt';
+}
+function _phaseBar(phase) {
+  if (PHASE_BAR[phase]) return PHASE_BAR[phase];
+  if (phase && phase.startsWith('audio_')) return 'phase-bar-audio bg-teal';
+  return 'bg-secondary';
+}
+function _phaseBorder(phase) {
+  if (PHASE_BORDER_MAP[phase]) return PHASE_BORDER_MAP[phase];
+  if (phase && phase.startsWith('audio_')) return 'var(--teal)';
+  return 'transparent';
+}
 
 function _buildJobCard(j) {
   const phase = _jobPhases[j.job_id] || j.status;
@@ -839,17 +981,12 @@ function _buildJobCard(j) {
   const isMovie = j.type==='film';
   const isAnimeJob = j.type==='anime';
   const pct = j.progress?.pct||0;
-  const barClass = PHASE_BAR[phase] || 'bg-secondary';
+  const barClass = _phaseBar(phase);
   const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
   const barWidth = j.status==='queued' ? 0 : (j.status==='done' ? 100 : pct);
-  const badgeClass = PHASE_BADGE[phase]||'bg-secondary-lt';
-  const label = PHASE_LABELS[phase] || phase;
-  const PHASE_BORDER = {
-    scheduled:'var(--yellow)', queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
-    audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
-    error:'var(--accent)', cancelled:'var(--text-dim)',
-  };
-  const borderColor = PHASE_BORDER[phase] || 'transparent';
+  const badgeClass = _phaseBadge(phase);
+  const label = _phaseLabel(phase);
+  const borderColor = _phaseBorder(phase);
 
   const speed = j.progress?.speed;
   const eta = j.progress?.eta;
@@ -873,6 +1010,7 @@ function _buildJobCard(j) {
     : '';
   const dateLabel = j.scheduled_at ? `⏰ ${dateStr}` : dateStr;
 
+  const stepsHtml = _buildStepsHtml(j.job_id, j.phases, phase, j.status);
   return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}" id="job-card-${j.job_id}" style="border-left:3px solid ${borderColor} !important">
     <div class="card-body py-2 px-3">
       <div class="d-flex align-items-center gap-2">
@@ -882,6 +1020,7 @@ function _buildJobCard(j) {
         <span id="job-fire-${j.job_id}">${fireBtn}</span>
         ${stopBtn ? `<span id="job-stop-${j.job_id}">${stopBtn}</span>` : `<span id="job-stop-${j.job_id}"></span>`}
       </div>
+      ${stepsHtml}
       <div class="progress my-1" style="height:5px">
         <div class="progress-bar ${barClass}${animated} job-progress-bar" id="job-bar-${j.job_id}" style="width:${barWidth}%"></div>
       </div>
@@ -942,24 +1081,19 @@ function refreshCardAppearance(jobId) {
   // Update card classes and border
   card.classList.toggle('is-done', j.status==='done');
   card.classList.toggle('is-error', j.status==='error');
-  const PHASE_BORDER = {
-    scheduled:'var(--yellow)', queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
-    audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
-    error:'var(--accent)', cancelled:'var(--text-dim)',
-  };
-  card.style.borderLeftColor = PHASE_BORDER[phase] || 'transparent';
+  card.style.borderLeftColor = _phaseBorder(phase);
 
   // Update badge
   const badge = document.getElementById(`job-badge-${jobId}`);
   if (badge) {
-    badge.className = `badge ${PHASE_BADGE[phase]||'bg-secondary-lt'} flex-shrink-0`;
-    badge.textContent = PHASE_LABELS[phase] || phase;
+    badge.className = `badge ${_phaseBadge(phase)} flex-shrink-0`;
+    badge.textContent = _phaseLabel(phase);
   }
 
   // Update progress bar
   const bar = document.getElementById(`job-bar-${jobId}`);
   if (bar) {
-    const barClass = PHASE_BAR[phase] || 'bg-secondary';
+    const barClass = _phaseBar(phase);
     const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
     bar.className = `progress-bar ${barClass}${animated} job-progress-bar`;
     bar.style.width = (j.status==='queued' ? 0 : (j.status==='done' ? 100 : (j.progress?.pct||0))) + '%';
@@ -1012,7 +1146,9 @@ function handleProgressEvent(msg) {
   if (job) {
     job.progress = { current:msg.current, total:msg.total, pct:msg.pct, speed:msg.speed||0, eta:msg.eta||null };
     const phase = msg.phase || _jobPhases[msg.job_id] || 'running';
+    const prevPhase = _jobPhases[msg.job_id];
     _jobPhases[msg.job_id] = phase;
+    if (phase !== prevPhase) _updateSteps(msg.job_id, phase);
   }
   // Update bar and info without full card rebuild
   const bar = document.getElementById(`job-bar-${msg.job_id}`);
@@ -1032,24 +1168,30 @@ function handlePhaseEvent(jobId, phase) {
 
   const badge = document.getElementById(`job-badge-${jobId}`);
   if (badge) {
-    badge.className = `badge ${PHASE_BADGE[phase]||'bg-secondary-lt'} flex-shrink-0`;
-    badge.textContent = PHASE_LABELS[phase] || phase;
+    badge.className = `badge ${_phaseBadge(phase)} flex-shrink-0`;
+    badge.textContent = _phaseLabel(phase);
   }
+  const card = document.getElementById(`job-card-${jobId}`);
+  if (card) card.style.borderLeftColor = _phaseBorder(phase);
   const bar = document.getElementById(`job-bar-${jobId}`);
   if (bar) {
-    bar.className = `progress-bar ${PHASE_BAR[phase]||'bg-secondary'} progress-bar-striped progress-bar-animated job-progress-bar`;
-    if (phase==='joining'||phase==='merging') bar.style.width='100%';
+    bar.className = `progress-bar ${_phaseBar(phase)} progress-bar-striped progress-bar-animated job-progress-bar`;
+    const isIndeterminate = phase === 'joining' || phase === 'merging' || phase.startsWith('audio_');
+    if (isIndeterminate) bar.style.width = '100%';
   }
   const info = document.getElementById(`job-info-${jobId}`);
-  if (info && (phase==='joining'||phase==='merging')) {
-    info.textContent = PHASE_LABELS[phase]+'...';
+  if (info) {
+    const isIndeterminate = phase === 'joining' || phase === 'merging';
+    if (isIndeterminate) info.textContent = _phaseLabel(phase) + '...';
   }
+  _updateSteps(jobId, phase);
 }
 
 function handleDoneEvent(jobId, outputPath) {
   delete _jobPhases[jobId];
   const job = _jobs.get(jobId);
   if (job) { job.status='done'; job.output_path=outputPath; }
+  _updateSteps(jobId, 'done');
 
   const card = document.getElementById(`job-card-${jobId}`);
   if (card) card.classList.add('is-done');

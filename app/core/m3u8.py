@@ -15,6 +15,7 @@ from tqdm import TqdmExperimentalWarning
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
+from app.config import get_settings
 from app.core.headers import get_headers
 from app.progress import DownloadCancelledError
 
@@ -22,8 +23,6 @@ warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
 warnings.filterwarnings("ignore", category=UserWarning, module="cryptography")
 
 logger = logging.getLogger(__name__)
-
-MAX_WORKER = 16
 DOWNLOAD_SUB = True
 DOWNLOAD_DEFAULT_LANGUAGE = False
 
@@ -96,6 +95,7 @@ class M3U8_Parser:
 
         except Exception as e:
             logger.error(f"Error parsing M3U8 content: {e}")
+            raise
 
     def get_best_quality(self):
         if self.video_playlist:
@@ -149,12 +149,13 @@ class M3U8_Parser:
 
 
 class M3U8_Segments:
-    def __init__(self, url, key=None, temp_dir=None, progress_factory=None, referer=None, cancel_event=None, phase=None):
+    def __init__(self, url, key=None, temp_dir=None, progress_factory=None, referer=None, cancel_event=None, phase=None, emit_join_phase=True):
         self.url = url
         self.key = key
         self.referer = referer
         self._cancel = cancel_event
         self.phase = phase
+        self.emit_join_phase = emit_join_phase
 
         if key is not None:
             self.decryption = Decryption(key)
@@ -293,7 +294,7 @@ class M3U8_Segments:
         timer_thread.start()
 
         try:
-            with ThreadPoolExecutor(max_workers=MAX_WORKER) as executor:
+            with ThreadPoolExecutor(max_workers=get_settings().get("max_segment_workers", 16)) as executor:
                 futures = []
                 for index in range(len(self.segments)):
                     if timeout_occurred:
@@ -380,7 +381,7 @@ class M3U8_Segments:
             logger.warning("%d segments permanently missing from output: %s", len(still_failed), sorted(still_failed))
 
         logger.info("Joining %d / %d segments...", len(ts_files), len(self.segments))
-        if hasattr(self, '_bar') and hasattr(self._bar, 'emit_status'):
+        if self.emit_join_phase and hasattr(self, '_bar') and hasattr(self._bar, 'emit_status'):
             self._bar.emit_status("joining")
         os.makedirs(os.path.dirname(os.path.abspath(output_filename)), exist_ok=True)
         try:
@@ -389,8 +390,10 @@ class M3U8_Segments:
             ).run(capture_stdout=True, capture_stderr=True)
         except ffmpeg.Error as e:
             stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
+            if len(stderr) > 500:
+                stderr = f"...{stderr[-300:]}"
             logger.error("FFmpeg join stderr: %s", stderr)
-            raise RuntimeError(f"FFmpeg join error: {stderr[:400]}")
+            raise RuntimeError(f"FFmpeg join error: {stderr}")
 
         logger.info("Cleaning temp segments...")
         shutil.rmtree(self.temp_folder, ignore_errors=True)
@@ -398,7 +401,11 @@ class M3U8_Segments:
 
 class M3U8_Downloader:
     def __init__(self, m3u8_url, m3u8_audio=None, key=None, output_filename="output.mp4",
-                 temp_dir=None, progress_factory=None, referer=None, cancel_event=None):
+                 temp_dir=None, progress_factory=None, referer=None, cancel_event=None,
+                 audio_languages: list[str] = None,
+                 subtitle_languages: list[str] = None,
+                 audio_track_urls: list[dict] = None,
+                 subtitle_track_urls: list[dict] = None):
         self.m3u8_url = m3u8_url
         self.m3u8_audio = m3u8_audio
         self.key = key
@@ -407,8 +414,12 @@ class M3U8_Downloader:
         self.progress_factory = progress_factory
         self.referer = referer
         self.cancel_event = cancel_event
+        self.audio_languages = audio_languages or ["ita"]
+        self.subtitle_languages = subtitle_languages or []
+        self.audio_track_urls = audio_track_urls or []
+        self.subtitle_track_urls = subtitle_track_urls or []
 
-        self.audio_path = os.path.join(self.temp_dir, "_audio_tmp.mp4")
+        self.audio_paths: list[str] = []
 
     def start(self):
         video_temp = os.path.join(self.temp_dir, "video")
@@ -416,14 +427,46 @@ class M3U8_Downloader:
                                     temp_dir=video_temp,
                                     progress_factory=self.progress_factory,
                                     referer=self.referer,
-                                    cancel_event=self.cancel_event)
+                                    cancel_event=self.cancel_event,
+                                    phase="video")
         logger.info("Downloading video segments...")
         video_m3u8.get_info()
         video_m3u8.download_ts()
+        bar = getattr(video_m3u8, "_bar", None)
         video_m3u8.join(self.video_path)
 
-        if self.m3u8_audio is not None:
-            bar = getattr(video_m3u8, "_bar", None)
+        if self.audio_track_urls:
+            for i, track in enumerate(self.audio_track_urls):
+                lang = track.get("language", "und")
+                phase_label = f"audio_{lang}"
+                if bar and hasattr(bar, "emit_status"):
+                    bar.emit_status(phase_label)
+                audio_temp = os.path.join(self.temp_dir, f"audio_{i}")
+                audio_m3u8 = M3U8_Segments(track["url"], self.key,
+                                            temp_dir=audio_temp,
+                                            progress_factory=self.progress_factory,
+                                            referer=self.referer,
+                                            cancel_event=self.cancel_event,
+                                            phase=phase_label,
+                                            emit_join_phase=False)
+                logger.info("Downloading audio track %d (%s)...", i + 1, lang)
+                audio_m3u8.get_info()
+                audio_m3u8.download_ts()
+                audio_path = os.path.join(self.temp_dir, f"_audio_{i}.mp4")
+                audio_m3u8.join(audio_path)
+                self.audio_paths.append({"path": audio_path, "language": lang})
+
+            if bar and hasattr(bar, "emit_status"):
+                bar.emit_status("merging")
+
+        if self.audio_paths:
+            from app.core.format import remux_to_mkv
+            self.video_path = remux_to_mkv(
+                self.video_path,
+                audio_tracks=self.audio_paths,
+                subtitle_tracks=None,
+            )
+        elif self.m3u8_audio is not None:
             if bar and hasattr(bar, "emit_status"):
                 bar.emit_status("audio")
 
@@ -433,24 +476,26 @@ class M3U8_Downloader:
                                         progress_factory=self.progress_factory,
                                         referer=self.referer,
                                         cancel_event=self.cancel_event,
-                                        phase="audio")
-            logger.info("Downloading audio segments...")
+                                        phase="audio",
+                                        emit_join_phase=False)
+            logger.info("Downloading audio track...")
             audio_m3u8.get_info()
             audio_m3u8.download_ts()
-            audio_m3u8.join(self.audio_path)
-
+            audio_path = os.path.join(self.temp_dir, "_audio_tmp.mp4")
+            audio_m3u8.join(audio_path)
             if bar and hasattr(bar, "emit_status"):
                 bar.emit_status("merging")
             self.join_audio()
 
     def join_audio(self):
         merged_path = self.video_path.replace(".mp4", "_merged.mp4")
+        audio_path = os.path.join(self.temp_dir, "_audio_tmp.mp4")
         try:
             (
                 ffmpeg
                 .output(
                     ffmpeg.input(self.video_path),
-                    ffmpeg.input(self.audio_path),
+                    ffmpeg.input(audio_path),
                     merged_path,
                     vcodec="copy",
                     acodec="copy",
@@ -463,8 +508,8 @@ class M3U8_Downloader:
         except ffmpeg.Error as e:
             raise RuntimeError(f"FFmpeg audio merge error: {e}")
         finally:
-            if os.path.exists(self.audio_path):
-                os.remove(self.audio_path)
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
 
         os.replace(merged_path, self.video_path)
 
@@ -508,12 +553,25 @@ def download_m3u8(
     progress_factory=None,
     referer=None,
     cancel_event=None,
+    audio_languages: list[str] = None,
+    subtitle_languages: list[str] = None,
+    audio_track_urls: list[dict] = None,
+    subtitle_track_urls: list[dict] = None,
 ):
     key = bytes.fromhex(key) if key is not None else None
 
     # Jellyfin convention: subtitles live next to the video as {stem}.{lang}.vtt
     video_dir = os.path.dirname(output_filename) or "."
     video_stem = os.path.splitext(os.path.basename(output_filename))[0]
+
+    audio_languages = audio_languages or ["ita"]
+    subtitle_languages = subtitle_languages or []
+    audio_track_urls = audio_track_urls or []
+    subtitle_track_urls = subtitle_track_urls or []
+
+    # Track subtitle files created before the main download so they can be cleaned
+    # up if the download is cancelled or fails mid-way.
+    created_subtitle_files: list[str] = []
 
     if m3u8_playlist is not None:
         parse_class_m3u8 = M3U8_Parser()
@@ -531,18 +589,22 @@ def download_m3u8(
         langs = parse_class_m3u8.available_languages()
         logger.info("Available languages — audio: %s | subtitles: %s", langs["audio"], langs["subtitles"])
 
-        if DOWNLOAD_SUB:
-            parse_class_m3u8.download_subtitle(video_dir, video_stem)
+        if DOWNLOAD_SUB and subtitle_languages:
+            from app.core.format import download_subtitle_tracks
+            created = download_subtitle_tracks(parse_class_m3u8, subtitle_languages, video_dir, video_stem)
+            created_subtitle_files.extend(t["path"] for t in created)
 
-    elif m3u8_index is not None and DOWNLOAD_SUB:
+    elif m3u8_index is not None and DOWNLOAD_SUB and subtitle_languages:
         # m3u8_index is a master playlist URL — parse it to extract subtitles
         try:
+            from app.core.format import download_subtitle_tracks
             master_content = _fetch_text_with_b1_fallback(m3u8_index)
             parse_master = M3U8_Parser()
             parse_master.parse_data(master_content)
             langs = parse_master.available_languages()
             logger.info("Available languages — audio: %s | subtitles: %s", langs["audio"], langs["subtitles"])
-            parse_master.download_subtitle(video_dir, video_stem)
+            created = download_subtitle_tracks(parse_master, subtitle_languages, video_dir, video_stem)
+            created_subtitle_files.extend(t["path"] for t in created)
         except Exception as e:
             logger.warning("Could not parse subtitles from master playlist: %s", e)
 
@@ -550,18 +612,48 @@ def download_m3u8(
         parse_sub = M3U8_Parser()
         content_sub = m3u8_subtitle if "#EXTM3U" in m3u8_subtitle else _fetch_text(m3u8_subtitle)
         parse_sub.parse_data(content_sub)
-        if DOWNLOAD_SUB:
-            parse_sub.download_subtitle(video_dir, video_stem)
+        if DOWNLOAD_SUB and subtitle_languages:
+            from app.core.format import download_subtitle_tracks
+            created = download_subtitle_tracks(parse_sub, subtitle_languages, video_dir, video_stem)
+            created_subtitle_files.extend(t["path"] for t in created)
 
     os.makedirs(os.path.dirname(output_filename) or ".", exist_ok=True)
 
-    M3U8_Downloader(
-        m3u8_index,
-        m3u8_audio,
-        key=key,
-        output_filename=output_filename,
-        temp_dir=temp_dir,
-        progress_factory=progress_factory,
-        referer=referer,
-        cancel_event=cancel_event,
-    ).start()
+    try:
+        M3U8_Downloader(
+            m3u8_index,
+            m3u8_audio,
+            key=key,
+            output_filename=output_filename,
+            temp_dir=temp_dir,
+            progress_factory=progress_factory,
+            referer=referer,
+            cancel_event=cancel_event,
+            audio_languages=audio_languages,
+            subtitle_languages=subtitle_languages,
+            audio_track_urls=audio_track_urls,
+            subtitle_track_urls=subtitle_track_urls,
+        ).start()
+    except (DownloadCancelledError, Exception) as exc:
+        # Remove subtitle files already written to the output dir
+        for path in created_subtitle_files:
+            try:
+                os.remove(path)
+                logger.info("Removed partial subtitle: %s", path)
+            except OSError:
+                pass
+        # Remove partial video / remuxed MKV if they exist
+        stem = os.path.splitext(output_filename)[0]
+        for candidate in (output_filename, stem + ".mkv"):
+            try:
+                os.remove(candidate)
+                logger.info("Removed partial output: %s", candidate)
+            except OSError:
+                pass
+        # Remove the output directory if it's now empty
+        try:
+            if video_dir and video_dir != "." and not os.listdir(video_dir):
+                os.rmdir(video_dir)
+        except OSError:
+            pass
+        raise

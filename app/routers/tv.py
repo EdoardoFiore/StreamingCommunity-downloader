@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.core.tv import get_info_tv, get_info_season, get_token
+from app.core.tv import get_info_tv, get_info_season, get_token, get_tv_languages
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tv", tags=["tv"])
@@ -41,3 +41,17 @@ async def fetch_episodes(
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     return episodes
+
+
+@router.get("/{tv_id}/languages")
+async def fetch_tv_languages(
+    tv_id: int,
+    slug: str = Query(...),
+    domain: str = Query(...),
+    version: str = Query(...),
+):
+    try:
+        langs = await asyncio.to_thread(get_tv_languages, tv_id, slug, domain, version)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return langs

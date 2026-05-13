@@ -23,8 +23,9 @@ def get_domain_version(domain: str) -> str:
         app_div = soup.find("div", {"id": "app"})
         if app_div and app_div.get("data-page"):
             return json.loads(app_div.get("data-page")).get("version", "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Cannot extract version from %s: %s", domain, e)
+        return None
     return ""
 
 
