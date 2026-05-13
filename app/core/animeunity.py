@@ -6,6 +6,8 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
+from app.core.headers import sanitize_filename
+
 logger = logging.getLogger(__name__)
 
 ANIMEUNITY_HOST = os.getenv("ANIMEUNITY_HOST", "www.animeunity.so")
@@ -242,7 +244,7 @@ def download_anime_episode(
     m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_url)
     m3u8_audio = _get_m3u8_audio(json_win_video, json_win_param, embed_url)
 
-    clean_name = anime_name.replace("+", " ").replace(",", "")
+    clean_name = sanitize_filename(anime_name.replace("+", " ").replace(",", ""))
     
     # Determine if it's a TV series or a movie
     is_series = anime_type.lower() in ("tv", "serie", "series", "anime")

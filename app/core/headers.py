@@ -1,5 +1,15 @@
+import os
+import re
+
 from random_user_agent.user_agent import UserAgent
 from random_user_agent.params import SoftwareName, OperatingSystem
+
+
+def sanitize_filename(name: str) -> str:
+    if os.name == 'nt':
+        # Windows forbids: \ / : * ? " < > |
+        return re.sub(r'[\\/:*?"<>|]', '', name).strip()
+    return name
 
 
 def get_headers():

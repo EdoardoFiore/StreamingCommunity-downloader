@@ -7,7 +7,7 @@ from urllib.parse import unquote, quote
 import requests
 from bs4 import BeautifulSoup
 
-from app.core.headers import get_headers
+from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages
 
 logger = logging.getLogger(__name__)
@@ -208,8 +208,9 @@ def download_episode(
     if m3u8_audio:
         logger.info("Audio track found, will merge")
 
-    series_folder = f"{tv_name} ({year})" if year else tv_name
-    mp4_name = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
+    safe_name = sanitize_filename(tv_name)
+    series_folder = f"{safe_name} ({year})" if year else safe_name
+    mp4_name = f"{safe_name} S{season:02d}E{fmt_ep(ep['n'])}"
     mp4_path = os.path.join(output_dir, series_folder, f"Season {season:02d}", mp4_name + ".mp4")
 
     download_m3u8(

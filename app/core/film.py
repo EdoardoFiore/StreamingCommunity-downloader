@@ -6,7 +6,7 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-from app.core.headers import get_headers
+from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages
 
 logger = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ def download_film(id_film: int, title_name: str, domain: str,
     if m3u8_audio:
         logger.info("Audio track found, will merge")
 
-    mp4_name = title_name.replace("+", " ").replace(",", "")
+    mp4_name = sanitize_filename(title_name.replace("+", " ").replace(",", ""))
     folder_name = f"{mp4_name} ({year})" if year else mp4_name
     mp4_path = os.path.join(output_dir, folder_name, folder_name + ".mp4")
 
