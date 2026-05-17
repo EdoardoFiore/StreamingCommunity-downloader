@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: descrizione breve
+about: Segnala un problema in una delle funzioni dell'app
 title: "[BUG]"
 labels: bug
 assignees: EdoardoFiore
