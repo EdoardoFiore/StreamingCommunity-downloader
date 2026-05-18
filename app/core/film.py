@@ -54,8 +54,14 @@ def _get_audio_track_url(parser, lang_code: str) -> str | None:
 def _collect_audio_tracks(m3u8_url: str, referer: str, audio_languages: list[str]) -> list[dict]:
     tracks = []
     try:
-        req = requests.get(m3u8_url, headers={"user-agent": get_headers(), "referer": referer}, timeout=15)
+        headers = {"user-agent": get_headers(), "referer": referer}
+        req = requests.get(m3u8_url, headers=headers, timeout=15)
+        if req.status_code == 403:
+            b1_url = m3u8_url + ("&b=1" if "?" in m3u8_url else "?b=1")
+            logger.warning("Master M3U8 returned 403, retrying with ?b=1 for audio track collection")
+            req = requests.get(b1_url, headers=headers, timeout=15)
         if not req.ok:
+            logger.warning("Could not fetch master M3U8 for audio tracks: HTTP %d", req.status_code)
             return tracks
         parser = M3U8_Parser()
         parser.parse_data(req.text)
