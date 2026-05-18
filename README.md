@@ -91,7 +91,7 @@ The StreamingCommunity domain and Jellyfin library paths are configurable from t
 
 ```
 videos/
-├── SeriesTitle/
+├── MovieTitle/
 |    └── MovieTitle.mp4
 └── SeriesTitle/
     └── Season 01
