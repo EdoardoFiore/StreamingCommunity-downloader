@@ -385,8 +385,8 @@ class M3U8_Segments:
             self._bar.emit_status("joining")
         os.makedirs(os.path.dirname(os.path.abspath(output_filename)), exist_ok=True)
         try:
-            ffmpeg.input(combined_ts).output(
-                output_filename, **{"c:v": "copy", "c:a": "aac", "b:a": "192k"}
+            ffmpeg.input(combined_ts, fflags="+genpts", avoid_negative_ts="make_zero").output(
+                output_filename, **{"c:v": "copy", "c:a": "aac", "b:a": "192k", "af": "aresample=async=1000"}
             ).run(capture_stdout=True, capture_stderr=True)
         except ffmpeg.Error as e:
             stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
