@@ -917,16 +917,16 @@ function _stepLabel(phase) {
 }
 
 function _buildStepsHtml(jobId, phases, currentPhase, status) {
-  if (!phases || phases.length <= 2) return '';
+  if (!phases || phases.length < 2) return '';
   let activeIdx;
   if (status === 'done') {
     activeIdx = phases.length;
   } else if (status === 'queued' || status === 'scheduled') {
     activeIdx = -1;
   } else {
-    const lookup = (currentPhase === 'joining') ? 'video' : (currentPhase || 'video');
+    const lookup = currentPhase || 'video';
     activeIdx = phases.indexOf(lookup);
-    if (activeIdx < 0) activeIdx = 0;
+    if (activeIdx < 0) activeIdx = phases.indexOf('video') >= 0 ? 0 : -1;
   }
   const items = phases.map((p, i) => {
     let cls = 'jp';
@@ -939,13 +939,13 @@ function _buildStepsHtml(jobId, phases, currentPhase, status) {
 
 function _updateSteps(jobId, phase) {
   const job = _jobs.get(jobId);
-  if (!job || !job.phases || job.phases.length <= 2) return;
+  if (!job || !job.phases || job.phases.length < 2) return;
   const container = document.getElementById(`job-steps-${jobId}`);
   if (!container) return;
   const phases = job.phases;
   const isDone = job.status === 'done';
-  const lookup = isDone ? null : ((phase === 'joining') ? 'video' : phase);
-  const activeIdx = isDone ? phases.length : phases.indexOf(lookup || 'video');
+  const activeIdx = isDone ? phases.length : phases.indexOf(phase || 'video');
+  if (activeIdx < 0) return;
   container.querySelectorAll('.jp').forEach((el, i) => {
     el.className = 'jp';
     if (activeIdx === phases.length || i < activeIdx) el.className += ' complete';

@@ -58,10 +58,7 @@ class JobManager:
     @staticmethod
     def _compute_phases(audio_languages: list) -> list:
         """Return the ordered list of phase names that will be emitted for this job."""
-        if len(audio_languages) > 1:
-            steps = ["video"] + [f"audio_{l}" for l in audio_languages] + ["merging", "done"]
-        else:
-            steps = ["video", "done"]
+        steps = ["video", "joining"] + [f"audio_{l}" for l in (audio_languages or ["ita"])] + ["merging", "done"]
         return steps
 
     def update_max_concurrent(self, n: int):
