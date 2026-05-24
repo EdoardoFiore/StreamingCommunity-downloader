@@ -111,34 +111,6 @@ class M3U8_Parser:
         subtitles = [s.get("language") for s in self.subtitle_playlist if s.get("language") and s.get("language") != "auto"]
         return {"audio": audio, "subtitles": subtitles}
 
-    # ISO 639-2 (3-letter) → ISO 639-1 (2-letter) for Jellyfin-compatible filenames
-    _LANG_MAP = {
-        "ita": "it", "eng": "en", "fra": "fr", "spa": "es", "deu": "de",
-        "por": "pt", "jpn": "ja", "zho": "zh", "ara": "ar", "rus": "ru",
-        "kor": "ko", "nld": "nl", "pol": "pl", "swe": "sv", "nor": "no",
-        "dan": "da", "fin": "fi", "tur": "tr", "ell": "el", "ces": "cs",
-    }
-
-    def download_subtitle(self, video_dir: str, video_stem: str):
-        """Save subtitles alongside the video as {video_stem}.{lang}.vtt (Jellyfin convention)."""
-        if not self.subtitle_playlist:
-            logger.info("No subtitles found")
-            return
-
-        os.makedirs(video_dir, exist_ok=True)
-        for sub_info in self.subtitle_playlist:
-            lang_code = sub_info.get("language", "")
-            if lang_code not in ["ita", "eng"]:
-                continue
-            lang_short = self._LANG_MAP.get(lang_code, lang_code)
-            out_path = os.path.join(video_dir, f"{video_stem}.{lang_short}.vtt")
-            logger.info("Downloading subtitle: %s → %s", lang_code, out_path)
-            req_sub_content = requests.get(sub_info.get("uri"))
-            sub_parse = M3U8_Parser()
-            sub_parse.parse_data(req_sub_content.text)
-            if sub_parse.subtitle:
-                open(out_path, "wb").write(requests.get(sub_parse.subtitle[0]).content)
-
     def get_track_audio(self, language_name):
         if self.audio_ts:
             if language_name is not None:
@@ -268,15 +240,22 @@ class M3U8_Segments:
         ts_url = self.segments[index]
         ts_filename = os.path.join(self.temp_folder, f"{index}.ts")
 
+        downloaded_bytes = 0
         if not os.path.exists(ts_filename):
             ts_content = self.get_req_ts(ts_url)
             if ts_content is not None:
                 self._write_ts(index, ts_content)
+                downloaded_bytes = len(ts_content)
             else:
                 self._failed_segments.add(index)
                 logger.warning("Segment %d failed after all retries: ...%s", index, ts_url[-60:])
+        else:
+            try:
+                downloaded_bytes = os.path.getsize(ts_filename)
+            except OSError:
+                pass
 
-        progress_counter.update(1)
+        progress_counter.update(1, bytes=downloaded_bytes)
 
     def download_ts(self):
         self._failed_segments = set()
@@ -285,11 +264,11 @@ class M3U8_Segments:
         self._bar = progress_counter
 
         quit_event = threading.Event()
-        timeout_occurred = False
+        timeout_event = threading.Event()
         cancelled = False
 
         timer_thread = threading.Thread(
-            target=self.timer, args=(progress_counter, quit_event, lambda: timeout_occurred)
+            target=self.timer, args=(progress_counter, quit_event, timeout_event.set)
         )
         timer_thread.start()
 
@@ -297,7 +276,7 @@ class M3U8_Segments:
             with ThreadPoolExecutor(max_workers=get_settings().get("max_segment_workers", 16)) as executor:
                 futures = []
                 for index in range(len(self.segments)):
-                    if timeout_occurred:
+                    if timeout_event.is_set():
                         break
                     if self._cancel and self._cancel.is_set():
                         cancelled = True
@@ -305,6 +284,10 @@ class M3U8_Segments:
                     futures.append(executor.submit(self.save_ts, index, progress_counter, quit_event))
 
                 for future in as_completed(futures):
+                    if timeout_event.is_set():
+                        for f in futures:
+                            f.cancel()
+                        break
                     if self._cancel and self._cancel.is_set():
                         cancelled = True
                         for f in futures:

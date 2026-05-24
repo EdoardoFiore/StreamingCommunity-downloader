@@ -95,6 +95,45 @@ _DEFAULT_EXCLUDED = {"images", "snippets", "lost+found"}
 _TYPE_LABELS = {"film": "Film", "tv": "Serie TV", "anime": "Anime"}
 
 
+def _search_tree(directory: Path, base: Path, query: str, excluded: set) -> list[dict]:
+    results = []
+    try:
+        for item in sorted(directory.iterdir()):
+            if item.name in excluded:
+                continue
+            if query in item.name.lower():
+                if item.is_dir():
+                    results.append({
+                        "name": item.name,
+                        "type": "directory",
+                        "path": str(item.relative_to(base)),
+                    })
+                elif item.is_file():
+                    stat = item.stat()
+                    results.append({
+                        "name": item.name,
+                        "type": "file",
+                        "path": str(item.relative_to(base)),
+                        "size": stat.st_size,
+                        "mtime": stat.st_mtime,
+                    })
+            if item.is_dir():
+                results.extend(_search_tree(item, base, query, excluded))
+    except PermissionError:
+        pass
+    return results
+
+
+@router.get("/search")
+async def search_files(q: str):
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Query troppo corta (min 2 caratteri)")
+    if not VIDEOS_DIR.exists():
+        return []
+    excluded = _DEFAULT_EXCLUDED | set(_read_data().get("excluded_folders", []))
+    return await asyncio.to_thread(_search_tree, VIDEOS_DIR, VIDEOS_DIR, q.strip().lower(), excluded)
+
+
 @router.get("")
 async def list_files():
     if not VIDEOS_DIR.exists():

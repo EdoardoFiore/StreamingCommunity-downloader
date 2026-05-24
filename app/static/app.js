@@ -989,9 +989,11 @@ function _buildJobCard(j) {
   const borderColor = _phaseBorder(phase);
 
   const speed = j.progress?.speed;
+  const bytesSpeed = j.progress?.bytes_speed;
   const eta = j.progress?.eta;
-  const speedStr = (speed && speed>0 && isActive && j.status!=='queued')
-    ? `${speed} seg/s` : '';
+  const speedStr = (isActive && j.status!=='queued')
+    ? (bytesSpeed > 0 ? formatSize(bytesSpeed) + '/s' : (speed > 0 ? `${speed} seg/s` : ''))
+    : '';
   const etaStr = eta ? fmtEta(eta) : '';
   const infoStr = [speedStr, etaStr].filter(Boolean).join(' · ');
 
@@ -1144,7 +1146,7 @@ function updateActiveBadge() {
 function handleProgressEvent(msg) {
   const job = _jobs.get(msg.job_id);
   if (job) {
-    job.progress = { current:msg.current, total:msg.total, pct:msg.pct, speed:msg.speed||0, eta:msg.eta||null };
+    job.progress = { current:msg.current, total:msg.total, pct:msg.pct, speed:msg.speed||0, bytes_speed:msg.bytes_speed||0, eta:msg.eta||null };
     const phase = msg.phase || _jobPhases[msg.job_id] || 'running';
     const prevPhase = _jobPhases[msg.job_id];
     _jobPhases[msg.job_id] = phase;
@@ -1155,7 +1157,7 @@ function handleProgressEvent(msg) {
   if (bar) bar.style.width = msg.pct + '%';
   const info = document.getElementById(`job-info-${msg.job_id}`);
   if (info) {
-    const speedStr = msg.speed>0 ? `${msg.speed} seg/s` : '';
+    const speedStr = msg.bytes_speed > 0 ? formatSize(msg.bytes_speed) + '/s' : (msg.speed > 0 ? `${msg.speed} seg/s` : '');
     const etaStr = msg.eta ? fmtEta(msg.eta) : '';
     info.textContent = [speedStr, etaStr, `${msg.pct}%`].filter(Boolean).join(' · ');
   }
@@ -1276,6 +1278,8 @@ let _selectedPaths = new Set();
 let _draggedPaths = [];
 let _allVisiblePaths = [];  // flat list of visible paths for shift-click range
 let _lastSelectedIndex = -1;
+let _fmSearchActive = false;
+let _fmSearchTimeout = null;
 
 function setupFileManager() {
   // ── Drag & Drop (supports multi-drag) ──
@@ -1418,9 +1422,128 @@ function syncSelectionUI() {
   if (count) count.textContent = `${_selectedPaths.size} selezionat${_selectedPaths.size===1?'o':'i'}`;
 }
 
+function onFmSearchInput(value) {
+  const clearBtn = document.getElementById('fm-search-clear');
+  if (clearBtn) clearBtn.style.display = value ? '' : 'none';
+  clearTimeout(_fmSearchTimeout);
+  if (!value || value.trim().length < 2) {
+    if (_fmSearchActive) {
+      _fmSearchActive = false;
+      if (_cachedTree) renderFileTree(_cachedTree);
+      else loadFiles();
+    }
+    return;
+  }
+  _fmSearchTimeout = setTimeout(() => searchFiles(value.trim()), 300);
+}
+
+function clearFmSearch() {
+  const input = document.getElementById('fm-search-input');
+  if (input) input.value = '';
+  const clearBtn = document.getElementById('fm-search-clear');
+  if (clearBtn) clearBtn.style.display = 'none';
+  _fmSearchActive = false;
+  if (_cachedTree) renderFileTree(_cachedTree);
+  else loadFiles();
+}
+
+async function searchFiles(query) {
+  const pane = document.getElementById('files-left-pane');
+  if (!pane) return;
+  _fmSearchActive = true;
+  pane.innerHTML = '<div class="text-center py-4 text-muted" style="font-size:13px"><div class="spinner-border spinner-border-sm me-2"></div>Ricerca...</div>';
+  try {
+    const res = await fetch(`/api/files/search?q=${encodeURIComponent(query)}`);
+    const results = await safeJson(res);
+    if (!res.ok) {
+      pane.innerHTML = `<div class="text-danger text-center py-4 px-3">${escapeHtml(results.detail || 'Errore ricerca')}</div>`;
+      return;
+    }
+    renderSearchResults(results, query);
+  } catch(e) {
+    pane.innerHTML = `<div class="text-danger text-center py-4">Errore: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderSearchResults(results, query) {
+  const pane = document.getElementById('files-left-pane');
+  if (!pane) return;
+  _allVisiblePaths = [];
+
+  if (!results || !results.length) {
+    pane.innerHTML = `<div class="text-muted text-center py-5" style="font-size:13px">
+      <i class="ti ti-search-off" style="font-size:2em;display:block;margin-bottom:8px;opacity:.4"></i>
+      Nessun risultato per <strong>${escapeHtml(query)}</strong>
+    </div>`;
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  results.forEach(item => {
+    _allVisiblePaths.push(item.path);
+    const row = document.createElement('div');
+    row.className = 'fm-row';
+    if (_selectedPaths.has(item.path)) row.classList.add('fm-selected');
+    row.style.paddingLeft = '10px';
+    row.setAttribute('draggable', 'true');
+    row.dataset.dragPath = item.path;
+    const checked = _selectedPaths.has(item.path) ? 'checked' : '';
+    const parentPath = item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '';
+    const pathMeta = parentPath
+      ? `<span class="fm-meta" style="font-size:11px;opacity:.55;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(parentPath)}">${escapeHtml(parentPath)}</span>`
+      : '';
+    if (item.type === 'directory') {
+      row.classList.add('fm-drop-zone');
+      row.dataset.dropPath = item.path;
+      row.innerHTML = `
+        <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
+        <i class="ti ti-folder-filled text-yellow" style="flex-shrink:0"></i>
+        <span class="fm-name">${escapeHtml(item.name)}</span>
+        ${pathMeta}
+        <div class="fm-actions">
+          <button class="btn btn-sm btn-outline-secondary" data-rename-path="${escapeHtml(item.path)}" data-rename-name="${escapeHtml(item.name)}"><i class="ti ti-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-danger" data-delete-path="${escapeHtml(item.path)}" data-delete-name="${escapeHtml(item.name)}" data-delete-dir="1"><i class="ti ti-trash"></i></button>
+        </div>`;
+    } else {
+      const size = formatSize(item.size);
+      const isMp4 = item.name.toLowerCase().endsWith('.mp4');
+      row.innerHTML = `
+        <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
+        <i class="ti ${isMp4 ? 'ti-file-type-mp4 text-red' : 'ti-file text-muted'}" style="flex-shrink:0"></i>
+        <span class="fm-name">${escapeHtml(item.name)}</span>
+        ${pathMeta}
+        <span class="fm-meta">${size}</span>
+        <div class="fm-actions">
+          ${isMp4 ? `<button class="btn btn-sm btn-outline-primary" data-play-path="${escapeHtml(item.path)}" data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>` : ''}
+          <button class="btn btn-sm btn-outline-secondary" data-rename-path="${escapeHtml(item.path)}" data-rename-name="${escapeHtml(item.name)}"><i class="ti ti-pencil"></i></button>
+          <a class="btn btn-sm btn-outline-secondary" href="/api/files/download/${encodeURI(item.path)}"><i class="ti ti-download"></i></a>
+          <button class="btn btn-sm btn-outline-danger" data-delete-path="${escapeHtml(item.path)}" data-delete-name="${escapeHtml(item.name)}"><i class="ti ti-trash"></i></button>
+        </div>`;
+    }
+    frag.appendChild(row);
+  });
+
+  const header = document.createElement('div');
+  header.style.cssText = 'padding:6px 12px 5px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border)';
+  header.textContent = `${results.length} risultat${results.length === 1 ? 'o' : 'i'} per "${query}"`;
+  pane.innerHTML = '';
+  pane.appendChild(header);
+  pane.appendChild(frag);
+
+  for (const p of _selectedPaths) {
+    if (!_allVisiblePaths.includes(p)) _selectedPaths.delete(p);
+  }
+  syncSelectionUI();
+}
+
 async function loadFiles() {
   const pane = document.getElementById('files-left-pane');
   if (!pane) return;
+  // If search is active, refresh search results instead of reloading the tree
+  const searchInput = document.getElementById('fm-search-input');
+  if (_fmSearchActive && searchInput && searchInput.value.trim().length >= 2) {
+    return searchFiles(searchInput.value.trim());
+  }
   // Show skeleton while loading
   if (!_cachedTree) {
     let skeletonHtml = '';

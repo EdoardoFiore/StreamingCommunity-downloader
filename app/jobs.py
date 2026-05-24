@@ -144,6 +144,7 @@ class JobManager:
                     "total": ev["total"],
                     "pct": ev["pct"],
                     "speed": ev.get("speed", 0),
+                    "bytes_speed": ev.get("bytes_speed", 0),
                     "eta": ev.get("eta"),
                 }
             manager._broadcast({**ev, "job_id": job.job_id})
@@ -316,7 +317,7 @@ class JobManager:
             title=title,
             type=type_,
             status=status,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             scheduled_at=scheduled_at,
             schedule_id=schedule_id,
             phases=phases or [],

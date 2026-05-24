@@ -42,7 +42,7 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
 
     for i, track in enumerate(subtitle_tracks):
         streams.append(ffmpeg.input(track["path"]))
-        extra_args += ["-map", f"{len(audio_tracks) + (0 if audio_tracks else 1) + i}:0"]
+        extra_args += ["-map", f"{len(audio_tracks) + 1 + i}:0"]
         extra_args += [f"-metadata:s:s:{i}", f"language={track.get('language', 'und')}"]
 
     try:

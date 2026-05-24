@@ -1,8 +1,12 @@
 from urllib.parse import urlparse, parse_qs
 import re
 import json
+import time
+import logging
 import requests
 from .headers import get_headers
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_content(embed_content, url_embed):
@@ -31,14 +35,22 @@ def _parse_content(embed_content, url_embed):
 
 
 def _get_m3u8_key(json_win_video, json_win_param, referer):
-    """Fetch AES decryption key from vixcloud.co."""
-    req = requests.get(
-        "https://vixcloud.co/storage/enc.key",
-        headers={"user-agent": get_headers(), "referer": referer},
-    )
-    if req.ok:
-        return "".join([f"{c:02x}" for c in req.content])
-    raise RuntimeError(f"Cannot fetch encryption key: HTTP {req.status_code}")
+    """Fetch AES decryption key from vixcloud.co. Retries on transient 5xx errors."""
+    url = "https://vixcloud.co/storage/enc.key"
+    headers = {"user-agent": get_headers(), "referer": referer}
+    max_retries = 4
+    for attempt in range(max_retries):
+        req = requests.get(url, headers=headers, timeout=15)
+        if req.ok:
+            return "".join([f"{c:02x}" for c in req.content])
+        if req.status_code >= 500 and attempt < max_retries - 1:
+            delay = 2 ** attempt  # 1s, 2s, 4s
+            logger.warning("enc.key returned HTTP %d, retrying in %ds (attempt %d/%d)",
+                           req.status_code, delay, attempt + 1, max_retries)
+            time.sleep(delay)
+            continue
+        raise RuntimeError(f"Cannot fetch encryption key: HTTP {req.status_code}")
+    raise RuntimeError(f"Cannot fetch encryption key after {max_retries} attempts")
 
 
 def _get_m3u8_url(json_win_video, json_win_param, add_b1=False):
