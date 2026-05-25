@@ -613,6 +613,8 @@ async function loadSeason(season) {
   try {
     const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
     const eps = await safeJson(res);
+    if (!res.ok) { container.innerHTML=`<div class="alert alert-danger">${escapeHtml(eps.detail||'Errore caricamento episodi')}</div>`; return; }
+    if (!Array.isArray(eps)) { container.innerHTML=`<div class="alert alert-danger">Risposta non valida dal server</div>`; return; }
     _epCtx.episodes=eps; _epCtx.currentSeason=season;
 
     const rows = eps.map((ep, idx) => `
