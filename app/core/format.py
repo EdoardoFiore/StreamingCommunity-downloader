@@ -44,6 +44,10 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
         streams.append(ffmpeg.input(track["path"]))
         extra_args += ["-map", f"{len(audio_tracks) + 1 + i}:0"]
         extra_args += [f"-metadata:s:s:{i}", f"language={track.get('language', 'und')}"]
+        lang = track.get("language", "")
+        lang_name = {"ita": "Italian", "eng": "English", "fra": "French", "spa": "Spanish", "deu": "German"}.get(lang, lang.upper())
+        extra_args += [f"-metadata:s:s:{i}", f"title={lang_name}"]
+        extra_args += ["-disposition:s:" + str(i), "0"]
 
     try:
         output = (
@@ -70,13 +74,14 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
         raise RuntimeError(f"FFmpeg MKV remux error: {stderr}")
 
 
-def download_subtitle_tracks(parser, allowed_languages: list[str], video_dir: str, video_stem: str) -> list[dict]:
+def download_subtitle_tracks(parser, allowed_languages: list[str], output_dir: str, video_stem: str, temp_dir: str = None) -> list[dict]:
     downloaded = []
 
     if parser is None or not parser.subtitle_playlist:
         return downloaded
 
-    os.makedirs(video_dir, exist_ok=True)
+    save_dir = temp_dir if temp_dir else output_dir
+    os.makedirs(save_dir, exist_ok=True)
 
     for sub_info in parser.subtitle_playlist:
         lang_code = sub_info.get("language", "")
@@ -84,7 +89,7 @@ def download_subtitle_tracks(parser, allowed_languages: list[str], video_dir: st
             continue
 
         lang_short = LANG_MAP.get(lang_code, lang_code)
-        out_path = os.path.join(video_dir, f"{video_stem}.{lang_short}.vtt")
+        out_path = os.path.join(save_dir, f"{video_stem}.{lang_short}.vtt")
 
         logger.info("Downloading subtitle: %s -> %s", lang_code, out_path)
 
