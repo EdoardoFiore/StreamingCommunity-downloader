@@ -442,13 +442,27 @@ class M3U8_Downloader:
             if bar and hasattr(bar, "emit_status"):
                 bar.emit_status("merging")
 
-        if self.audio_paths:
-            from app.core.format import remux_to_mkv
+        if self.audio_paths or self.subtitle_track_urls:
+            from app.core.format import remux_to_mkv, LANG_MAP
+            video_stem = os.path.splitext(os.path.basename(self.video_path))[0]
+            subtitle_tracks = []
+            for sub in self.subtitle_track_urls:
+                lang_code = sub.get("language", "")
+                lang_short = LANG_MAP.get(lang_code, lang_code)
+                sub_path = os.path.join(self.temp_dir, f"{video_stem}.{lang_short}.vtt")
+                if os.path.exists(sub_path):
+                    subtitle_tracks.append({"path": sub_path, "language": lang_code})
             self.video_path = remux_to_mkv(
                 self.video_path,
                 audio_tracks=self.audio_paths,
-                subtitle_tracks=None,
+                subtitle_tracks=subtitle_tracks,
             )
+            for sub in subtitle_tracks:
+                try:
+                    os.remove(sub["path"])
+                    logger.info("Cleaned up subtitle: %s", sub["path"])
+                except OSError:
+                    pass
         elif self.m3u8_audio is not None:
             if bar and hasattr(bar, "emit_status"):
                 bar.emit_status("audio")
@@ -517,11 +531,9 @@ def _fetch_text_with_b1_fallback(url):
 
 def fetch_master_languages(m3u8_url: str, referer: str) -> dict:
     """Fetch a master M3U8 playlist and return available audio/subtitle language codes."""
-    req = requests.get(m3u8_url, headers={"user-agent": get_headers(), "referer": referer}, timeout=10)
-    if not req.ok:
-        raise RuntimeError(f"Master M3U8 returned HTTP {req.status_code}")
+    text = _fetch_text_with_b1_fallback(m3u8_url)
     parser = M3U8_Parser()
-    parser.parse_data(req.text)
+    parser.parse_data(text)
     return parser.available_languages()
 
 
@@ -574,7 +586,7 @@ def download_m3u8(
 
         if DOWNLOAD_SUB and subtitle_languages:
             from app.core.format import download_subtitle_tracks
-            created = download_subtitle_tracks(parse_class_m3u8, subtitle_languages, video_dir, video_stem)
+            created = download_subtitle_tracks(parse_class_m3u8, subtitle_languages, video_dir, video_stem, temp_dir=temp_dir)
             created_subtitle_files.extend(t["path"] for t in created)
 
     elif m3u8_index is not None and DOWNLOAD_SUB and subtitle_languages:
@@ -586,7 +598,7 @@ def download_m3u8(
             parse_master.parse_data(master_content)
             langs = parse_master.available_languages()
             logger.info("Available languages — audio: %s | subtitles: %s", langs["audio"], langs["subtitles"])
-            created = download_subtitle_tracks(parse_master, subtitle_languages, video_dir, video_stem)
+            created = download_subtitle_tracks(parse_master, subtitle_languages, video_dir, video_stem, temp_dir=temp_dir)
             created_subtitle_files.extend(t["path"] for t in created)
         except Exception as e:
             logger.warning("Could not parse subtitles from master playlist: %s", e)
@@ -597,7 +609,7 @@ def download_m3u8(
         parse_sub.parse_data(content_sub)
         if DOWNLOAD_SUB and subtitle_languages:
             from app.core.format import download_subtitle_tracks
-            created = download_subtitle_tracks(parse_sub, subtitle_languages, video_dir, video_stem)
+            created = download_subtitle_tracks(parse_sub, subtitle_languages, video_dir, video_stem, temp_dir=temp_dir)
             created_subtitle_files.extend(t["path"] for t in created)
 
     os.makedirs(os.path.dirname(output_filename) or ".", exist_ok=True)
