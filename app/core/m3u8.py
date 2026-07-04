@@ -443,15 +443,20 @@ class M3U8_Downloader:
             if bar and hasattr(bar, "emit_status"):
                 bar.emit_status("merging")
 
-        if self.audio_paths or self.subtitle_track_urls:
+        if self.audio_paths or self.subtitle_track_urls or self.subtitle_languages:
             from app.core.format import remux_to_mkv, LANG_MAP
             video_stem = os.path.splitext(os.path.basename(self.video_path))[0]
             subtitle_tracks = []
-            for sub in self.subtitle_track_urls:
-                lang_code = sub.get("language", "")
+            # Embed whatever subtitle vtts were actually downloaded to temp_dir by
+            # download_m3u8 (keyed on subtitle_languages), NOT subtitle_track_urls —
+            # the latter is collected via a 403-prone path and can be empty even when
+            # the vtts downloaded fine, silently dropping subs from the output.
+            seen_paths = set()
+            for lang_code in self.subtitle_languages:
                 lang_short = LANG_MAP.get(lang_code, lang_code)
                 sub_path = os.path.join(self.temp_dir, f"{video_stem}.{lang_short}.vtt")
-                if os.path.exists(sub_path):
+                if sub_path not in seen_paths and os.path.exists(sub_path):
+                    seen_paths.add(sub_path)
                     subtitle_tracks.append({"path": sub_path, "language": lang_code})
             self.video_path = remux_to_mkv(
                 self.video_path,

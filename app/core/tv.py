@@ -138,7 +138,12 @@ def _collect_audio_tracks(m3u8_url: str, referer: str, audio_languages: list[str
 def _collect_subtitle_tracks(m3u8_url: str, referer: str, subtitle_languages: list[str]) -> list[dict]:
     tracks = []
     try:
-        req = requests.get(m3u8_url, headers={"user-agent": get_headers(), "referer": referer}, timeout=15)
+        headers = {"user-agent": get_headers(), "referer": referer}
+        req = requests.get(m3u8_url, headers=headers, timeout=15)
+        if req.status_code == 403:
+            b1_url = m3u8_url + ("&b=1" if "?" in m3u8_url else "?b=1")
+            logger.warning("Master M3U8 returned 403, retrying with ?b=1 for subtitle track collection")
+            req = requests.get(b1_url, headers=headers, timeout=15)
         if not req.ok:
             return tracks
         parser = M3U8_Parser()
