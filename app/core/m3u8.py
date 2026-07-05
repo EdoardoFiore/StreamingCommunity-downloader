@@ -371,7 +371,7 @@ class M3U8_Segments:
             ffmpeg.input(combined_ts, fflags="+genpts", avoid_negative_ts="make_zero").output(
                 output_filename, **{"c:v": "copy", "c:a": "aac", "b:a": "192k",
                                     "af": "aresample=async=1000", "movflags": "+faststart"}
-            ).run(capture_stdout=True, capture_stderr=True)
+            ).overwrite_output().run(capture_stdout=True, capture_stderr=True)
         except ffmpeg.Error as e:
             stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
             if len(stderr) > 500:
@@ -490,6 +490,9 @@ class M3U8_Downloader:
                 bar.emit_status("merging")
             self.join_audio()
 
+        # remux_to_mkv may have changed the extension to .mkv — return the real path
+        return self.video_path
+
     def join_audio(self):
         merged_path = self.video_path.replace(".mp4", "_merged.mp4")
         audio_path = os.path.join(self.temp_dir, "_audio_tmp.mp4")
@@ -505,6 +508,7 @@ class M3U8_Downloader:
                     loglevel="quiet",
                 )
                 .global_args("-map", "0:v:0", "-map", "1:a:0", "-shortest", "-strict", "experimental")
+                .overwrite_output()
                 .run()
             )
             logger.info("Audio merge completed.")
@@ -621,7 +625,7 @@ def download_m3u8(
     os.makedirs(os.path.dirname(output_filename) or ".", exist_ok=True)
 
     try:
-        M3U8_Downloader(
+        return M3U8_Downloader(
             m3u8_index,
             m3u8_audio,
             key=key,

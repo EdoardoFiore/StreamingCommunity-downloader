@@ -222,7 +222,7 @@ def download_episode(
     mp4_name = f"{safe_name} S{season:02d}E{fmt_ep(ep['n'])}"
     mp4_path = os.path.join(output_dir, series_folder, f"Season {season:02d}", mp4_name + ".mp4")
 
-    download_m3u8(
+    final_path = download_m3u8(
         m3u8_index=m3u8_url,
         key=m3u8_key,
         output_filename=mp4_path,
@@ -236,4 +236,5 @@ def download_episode(
         subtitle_track_urls=subtitle_track_urls,
     )
 
-    return mp4_path
+    # download_m3u8 returns the real output path (e.g. .mkv after remux)
+    return final_path or mp4_path

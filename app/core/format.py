@@ -1,5 +1,6 @@
 import os
 import logging
+import subprocess
 
 import requests
 import ffmpeg
@@ -15,6 +16,28 @@ LANG_MAP = {
     "dan": "da", "fin": "fi", "tur": "tr", "ell": "el", "ces": "cs",
 }
 
+# Human-readable names for subtitle track titles, keyed on ISO 639-2 base code.
+_LANG_NAME = {
+    "ita": "Italian", "eng": "English", "fra": "French", "fre": "French",
+    "spa": "Spanish", "deu": "German", "ger": "German", "por": "Portuguese",
+    "jpn": "Japanese", "rus": "Russian", "ukr": "Ukrainian", "gre": "Greek",
+    "ell": "Greek", "nld": "Dutch", "pol": "Polish", "ara": "Arabic",
+    "zho": "Chinese", "kor": "Korean",
+}
+
+
+def _normalize_lang(raw: str) -> tuple[str, bool]:
+    """Return (iso_639_2_code, is_forced) from a vixcloud language token.
+
+    vixcloud uses ISO 639-2/B codes (eng, ita, ger, fre, gre, ukr...) plus a
+    'forced-<code>' variant. MKV needs a valid 3-letter code, so 'forced-ita'
+    must become language=ita + forced disposition, not a literal 'forced-ita'
+    (which players show as 'Undefined').
+    """
+    forced = raw.startswith("forced-")
+    code = raw[len("forced-"):] if forced else raw
+    return code or "und", forced
+
 
 def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_tracks: list[dict] = None) -> str:
     if audio_tracks is None:
@@ -27,51 +50,62 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
 
     output_path = os.path.splitext(video_path)[0] + ".mkv"
 
-    streams = [ffmpeg.input(video_path)]
-    # -map 0:v:0  (video from first input)
-    extra_args = ["-map", "0:v:0"]
+    # Build the ffmpeg command by hand: per-stream -map/-metadata/-disposition are
+    # OUTPUT options and MUST come after all -i inputs but before the output file.
+    # (ffmpeg-python's .global_args put them after the output filename, where ffmpeg
+    # silently ignores them — hence subtitle language tags never applied.)
+    cmd = ["ffmpeg", "-y", "-i", video_path]
+    for track in audio_tracks:
+        cmd += ["-i", track["path"]]
+    for track in subtitle_tracks:
+        cmd += ["-i", track["path"]]
 
+    # Stream mapping
+    cmd += ["-map", "0:v:0"]
+    if audio_tracks:
+        for i in range(len(audio_tracks)):
+            cmd += ["-map", f"{i + 1}:a:0"]
+    else:
+        cmd += ["-map", "0:a?"]  # keep original audio if no external tracks
+    for i in range(len(subtitle_tracks)):
+        cmd += ["-map", f"{len(audio_tracks) + 1 + i}:0"]
+
+    # Codecs (copy everything; mkv natively holds webvtt)
+    cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "copy"]
+
+    # Per-stream metadata (output options, correctly positioned)
     for i, track in enumerate(audio_tracks):
-        streams.append(ffmpeg.input(track["path"]))
-        extra_args += ["-map", f"{i + 1}:a:0"]
-        extra_args += [f"-metadata:s:a:{i}", f"language={track.get('language', 'und')}"]
-
-    if not audio_tracks:
-        # Keep original audio from video stream
-        extra_args += ["-map", "0:a"]
+        code, _ = _normalize_lang(track.get("language", "und"))
+        cmd += [f"-metadata:s:a:{i}", f"language={code}"]
 
     for i, track in enumerate(subtitle_tracks):
-        streams.append(ffmpeg.input(track["path"]))
-        extra_args += ["-map", f"{len(audio_tracks) + 1 + i}:0"]
-        extra_args += [f"-metadata:s:s:{i}", f"language={track.get('language', 'und')}"]
-        lang = track.get("language", "")
-        lang_name = {"ita": "Italian", "eng": "English", "fra": "French", "spa": "Spanish", "deu": "German"}.get(lang, lang.upper())
-        extra_args += [f"-metadata:s:s:{i}", f"title={lang_name}"]
-        extra_args += ["-disposition:s:" + str(i), "0"]
+        code, forced = _normalize_lang(track.get("language", "und"))
+        name = _LANG_NAME.get(code, code.upper())
+        if forced:
+            name += " (Forced)"
+        cmd += [f"-metadata:s:s:{i}", f"language={code}"]
+        cmd += [f"-metadata:s:s:{i}", f"title={name}"]
+        cmd += [f"-disposition:s:{i}", "forced" if forced else "0"]
 
-    try:
-        output = (
-            ffmpeg.output(*streams, output_path, vcodec="copy", acodec="copy", scodec="copy")
-            .global_args(*extra_args)
-        )
-        logger.info("Remuxing to MKV: video + %d audio + %d subtitle tracks",
-                    len(audio_tracks), len(subtitle_tracks))
-        output.run(capture_stdout=True, capture_stderr=True, quiet=True)
+    cmd += [output_path]
 
-        if os.path.exists(output_path) and video_path != output_path:
-            try:
-                os.remove(video_path)
-            except OSError:
-                pass
-
-        logger.info("MKV remux complete: %s", output_path)
-        return output_path
-
-    except ffmpeg.Error as e:
-        stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
+    logger.info("Remuxing to MKV: video + %d audio + %d subtitle tracks",
+                len(audio_tracks), len(subtitle_tracks))
+    proc = subprocess.run(cmd, capture_output=True)
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode(errors="replace") if proc.stderr else "(no stderr)"
         if len(stderr) > 500:
             stderr = f"...{stderr[-300:]}"
         raise RuntimeError(f"FFmpeg MKV remux error: {stderr}")
+
+    if os.path.exists(output_path) and video_path != output_path:
+        try:
+            os.remove(video_path)
+        except OSError:
+            pass
+
+    logger.info("MKV remux complete: %s", output_path)
+    return output_path
 
 
 def download_subtitle_tracks(parser, allowed_languages: list[str], output_dir: str, video_stem: str, temp_dir: str = None) -> list[dict]:
