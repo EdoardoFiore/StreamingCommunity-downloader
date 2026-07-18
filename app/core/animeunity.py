@@ -181,17 +181,14 @@ def _get_embed_content(episode_id) -> tuple[str, str]:
 
     logger.info("Episode %s embed URL: %s", episode_id, embed_url[:80])
 
-    # Fetch the vixcloud.co embed page (no Cloudflare on vixcloud.co)
-    req_embed = requests.get(
+    # Fetch the vixcloud.co embed page. vixcloud.co now serves this /embed/ HTML
+    # page behind Cloudflare, so plain requests.get returns a 403 challenge page.
+    # Use the cloudscraper session to clear the challenge. (The downstream
+    # /playlist, /storage/enc.key and CDN segment URLs are NOT Cloudflare-gated
+    # and still work with plain requests.)
+    req_embed = scraper.get(
         embed_url,
-        headers={
-            "User-agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Referer": f"https://{host}/",
-        },
+        headers={"Referer": f"https://{host}/"},
         timeout=15,
     )
     req_embed.raise_for_status()

@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 
 from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
-from app.core._shared import _parse_content, _get_m3u8_key, _get_m3u8_url
+from app.core._shared import _parse_content, _get_m3u8_key, _get_m3u8_url, _fetch_vixcloud_embed
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +21,10 @@ def _get_iframe(id_title, domain):
         raise RuntimeError(f"Cannot fetch iframe: HTTP {req.status_code}")
 
     url_embed = BeautifulSoup(req.text, "lxml").find("iframe").get("src")
-    req_embed = requests.get(url_embed, headers={"User-agent": get_headers()}).text
-
-    script = BeautifulSoup(req_embed, "lxml").find("body").find("script")
-    if script is None:
-        raise RuntimeError("Video not available (no script tag found in embed)")
-    logger.info("Embed script (first 800 chars): %s", script.text[:800])
-    return script.text, url_embed
+    # vixcloud.co /embed/ is behind Cloudflare — fetch via cloudscraper.
+    script_text = _fetch_vixcloud_embed(url_embed, referer=f"https://{domain}/")
+    logger.info("Embed script (first 800 chars): %s", script_text[:800])
+    return script_text, url_embed
 
 
 _AUDIO_LANG_ALIASES = {

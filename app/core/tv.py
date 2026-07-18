@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 
 from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
-from app.core._shared import _parse_content, _get_m3u8_key, _get_m3u8_url
+from app.core._shared import _parse_content, _get_m3u8_key, _get_m3u8_url, _fetch_vixcloud_embed
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +83,9 @@ def _get_iframe(tv_id, ep_id, domain, token):
         raise RuntimeError(f"Cannot fetch episode iframe: HTTP {req.status_code}")
 
     url_embed = BeautifulSoup(req.text, "lxml").find("iframe").get("src")
-    req_embed = requests.get(url_embed, headers={"User-agent": get_headers()}).text
-    return BeautifulSoup(req_embed, "lxml").find("body").find("script").text, url_embed
+    # vixcloud.co /embed/ is behind Cloudflare — fetch via cloudscraper.
+    script_text = _fetch_vixcloud_embed(url_embed, referer=f"https://{domain}/")
+    return script_text, url_embed
 
 
 _AUDIO_LANG_ALIASES = {

@@ -8,6 +8,49 @@ from .headers import get_headers
 
 logger = logging.getLogger(__name__)
 
+_scraper = None
+
+
+def _get_scraper():
+    """Shared cloudscraper session for vixcloud.co pages behind Cloudflare.
+
+    Falls back to a plain requests.Session if cloudscraper is unavailable.
+    """
+    global _scraper
+    if _scraper is None:
+        try:
+            import cloudscraper
+            _scraper = cloudscraper.create_scraper(
+                browser={"browser": "firefox", "platform": "darwin", "desktop": True}
+            )
+        except ImportError:
+            logger.warning("cloudscraper not installed, falling back to requests.Session")
+            _scraper = requests.Session()
+    return _scraper
+
+
+def _fetch_vixcloud_embed(url_embed, referer=None):
+    """Fetch a vixcloud.co /embed/ HTML page and return its <script> text.
+
+    vixcloud.co serves the /embed/ page behind Cloudflare, so a plain
+    requests.get intermittently returns a 403 challenge page. Route it through
+    the cloudscraper session, which clears the challenge. (Downstream /playlist,
+    /storage/enc.key and CDN segment URLs are NOT Cloudflare-gated.)
+    """
+    from bs4 import BeautifulSoup
+    headers = {"user-agent": get_headers()}
+    if referer:
+        headers["referer"] = referer
+    req = _get_scraper().get(url_embed, headers=headers, timeout=15)
+    req.raise_for_status()
+    body = BeautifulSoup(req.text, "lxml").find("body")
+    if body is None:
+        raise RuntimeError("Empty embed page body from vixcloud.co")
+    script = body.find("script")
+    if script is None:
+        raise RuntimeError("Video not available (no script tag found in embed)")
+    return script.text
+
 
 def _parse_content(embed_content, url_embed):
     """Parse video metadata from embed page HTML. Shared between film.py and tv.py."""
