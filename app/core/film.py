@@ -6,7 +6,14 @@ from bs4 import BeautifulSoup
 
 from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
-from app.core._shared import _parse_content, _get_m3u8_key, _get_m3u8_url, _fetch_vixcloud_embed
+from app.core.paths import film_path
+from app.core._shared import (
+    MissingAudioTrackError,
+    _fetch_vixcloud_embed,
+    _parse_content,
+    _get_m3u8_key,
+    _get_m3u8_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +55,14 @@ def _get_audio_track_url(parser, lang_code: str) -> str | None:
     return None
 
 
-def _collect_audio_tracks(m3u8_url: str, referer: str, audio_languages: list[str]) -> list[dict]:
+def _collect_audio_tracks(m3u8_url: str, referer: str, audio_languages: list[str],
+                          strict: bool = False) -> list[dict]:
+    """Resolve the audio playlists for the requested languages.
+
+    With ``strict`` set, a language that is not on offer raises instead of being
+    skipped. The request flow uses that: a user who asked for Italian audio must
+    not silently receive an English file.
+    """
     tracks = []
     try:
         headers = {"user-agent": get_headers(), "referer": referer}
@@ -59,6 +73,8 @@ def _collect_audio_tracks(m3u8_url: str, referer: str, audio_languages: list[str
             req = requests.get(b1_url, headers=headers, timeout=15)
         if not req.ok:
             logger.warning("Could not fetch master M3U8 for audio tracks: HTTP %d", req.status_code)
+            if strict:
+                raise RuntimeError(f"Master M3U8 non raggiungibile: HTTP {req.status_code}")
             return tracks
         parser = M3U8_Parser()
         parser.parse_data(req.text)
@@ -67,10 +83,16 @@ def _collect_audio_tracks(m3u8_url: str, referer: str, audio_languages: list[str
             if url:
                 tracks.append({"url": url, "language": lang})
                 logger.info("Audio track found for %s: %s", lang, url[:80])
-            else:
-                logger.warning("Audio track not found for language: %s (available: %s)",
-                               lang, [t.get("language") or t.get("name") for t in parser.audio_ts])
+                continue
+            available = [t.get("language") or t.get("name") for t in parser.audio_ts]
+            logger.warning("Audio track not found for language: %s (available: %s)", lang, available)
+            if strict:
+                raise MissingAudioTrackError(lang, [a for a in available if a])
+    except MissingAudioTrackError:
+        raise
     except Exception as e:
+        if strict:
+            raise
         logger.warning("Could not collect audio tracks: %s", e)
     return tracks
 
@@ -121,7 +143,8 @@ def download_film(id_film: int, title_name: str, domain: str,
                   year: str = None,
                   cancel_event=None,
                   audio_languages: list[str] = None,
-                  subtitle_languages: list[str] = None):
+                  subtitle_languages: list[str] = None,
+                  strict_audio: bool = False):
     audio_languages = audio_languages or ["ita"]
     subtitle_languages = subtitle_languages or []
 
@@ -133,12 +156,12 @@ def download_film(id_film: int, title_name: str, domain: str,
     m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
     m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_referer)
 
-    audio_track_urls = _collect_audio_tracks(m3u8_url, embed_referer, audio_languages)
+    audio_track_urls = _collect_audio_tracks(
+        m3u8_url, embed_referer, audio_languages, strict=strict_audio
+    )
     subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_referer, subtitle_languages)
 
-    mp4_name = sanitize_filename(title_name.replace("+", " ").replace(",", ""))
-    folder_name = f"{mp4_name} ({year})" if year else mp4_name
-    mp4_path = os.path.join(output_dir, folder_name, folder_name + ".mp4")
+    mp4_path = film_path(output_dir, title_name, year)
 
     final_path = download_m3u8(
         m3u8_index=m3u8_url,

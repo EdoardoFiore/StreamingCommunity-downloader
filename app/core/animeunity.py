@@ -205,6 +205,16 @@ def _get_embed_content(episode_id) -> tuple[str, str]:
     return script.text, embed_url
 
 
+def get_episode_languages(episode_id) -> dict:
+    """Audio and subtitle languages available on one anime episode."""
+    from app.core._shared import _parse_content, _get_m3u8_url
+    from app.core.m3u8 import fetch_master_languages
+
+    embed_content, embed_url = _get_embed_content(episode_id)
+    json_win_video, json_win_param = _parse_content(embed_content, embed_url)
+    return fetch_master_languages(_get_m3u8_url(json_win_video, json_win_param), embed_url)
+
+
 def download_anime_episode(
     anime_id: str,
     episode: dict,
@@ -217,6 +227,7 @@ def download_anime_episode(
     year: str = None,
     audio_languages: list[str] = None,
     subtitle_languages: list[str] = None,
+    strict_audio: bool = False,
 ) -> str:
     """
     Full download pipeline for a single anime episode.
@@ -229,6 +240,7 @@ def download_anime_episode(
     from app.core.film import _collect_audio_tracks, _collect_subtitle_tracks
     from app.core._shared import _parse_content, _get_m3u8_url, _get_m3u8_key
     from app.core.m3u8 import download_m3u8
+    from app.core.paths import anime_path
 
     episode_id = episode["id"]
     episode_number = str(episode.get("number", "0"))
@@ -244,24 +256,12 @@ def download_anime_episode(
     m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
     m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_url)
 
-    audio_track_urls = _collect_audio_tracks(m3u8_url, embed_url, audio_languages)
+    audio_track_urls = _collect_audio_tracks(
+        m3u8_url, embed_url, audio_languages, strict=strict_audio
+    )
     subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_url, subtitle_languages)
 
-    clean_name = sanitize_filename(anime_name.replace("+", " ").replace(",", ""))
-
-    is_series = anime_type.lower() in ("tv", "serie", "series", "anime")
-
-    if is_series:
-        from app.core.tv import fmt_ep
-        season = 1
-        ep_filename = f"{clean_name} S01E{fmt_ep(episode_number)}.mp4"
-        year_str = f" ({year})" if year else ""
-        folder_name = f"{clean_name}{year_str}"
-        mp4_path = os.path.join(output_dir, folder_name, f"Season {season:02d}", ep_filename)
-    else:
-        year_str = f" ({year})" if year else ""
-        folder_name = f"{clean_name}{year_str}"
-        mp4_path = os.path.join(output_dir, folder_name, f"{clean_name}.mp4")
+    mp4_path = anime_path(output_dir, anime_name, episode_number, anime_type, year)
 
     download_m3u8(
         m3u8_index=m3u8_url,

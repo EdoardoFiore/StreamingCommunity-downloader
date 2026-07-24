@@ -52,6 +52,23 @@ def _fetch_vixcloud_embed(url_embed, referer=None):
     return script.text
 
 
+class MissingAudioTrackError(RuntimeError):
+    """A requested audio language is not present in the source.
+
+    Raised only when the caller asked for strict behaviour. Downloading with a
+    different audio track than the one a user chose is worse than failing: the
+    file looks correct, plays in the wrong language, and nobody is told.
+    """
+
+    def __init__(self, language: str, available: list[str]):
+        self.language = language
+        self.available = available
+        super().__init__(
+            f"Traccia audio '{language}' non disponibile "
+            f"(presenti: {', '.join(available) or 'nessuna'})"
+        )
+
+
 def _parse_content(embed_content, url_embed):
     """Parse video metadata from embed page HTML. Shared between film.py and tv.py."""
     s = str(embed_content)

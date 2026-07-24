@@ -150,8 +150,73 @@ _V1_AUTH = [
 ]
 
 
+_V2_REQUESTS = [
+    """
+    CREATE TABLE jf_request (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_key        TEXT    NOT NULL,
+        source             TEXT    NOT NULL,   -- streamingcommunity | animeunity
+        media_type         TEXT    NOT NULL,   -- film | episode | anime
+        external_id        TEXT    NOT NULL,
+        slug               TEXT,
+        title              TEXT    NOT NULL,
+        year               TEXT,
+        poster             TEXT,
+        season             INTEGER,
+        episode_number     TEXT,
+        anime_type         TEXT,
+        audio_languages    TEXT    NOT NULL,   -- JSON array, sorted
+        subtitle_languages TEXT    NOT NULL,   -- JSON array, sorted
+        available_snapshot TEXT,               -- tracks on offer when it was asked for
+        status             TEXT    NOT NULL,
+        problem            TEXT,               -- why it needs attention
+        denial_reason      TEXT,
+        requested_by       INTEGER NOT NULL REFERENCES jf_user(id),
+        decided_by         INTEGER REFERENCES jf_user(id),
+        decided_at         TEXT,
+        job_id             TEXT,
+        output_path        TEXT,
+        created_at         TEXT    NOT NULL,
+        updated_at         TEXT    NOT NULL
+    )
+    """,
+    # One download per distinct piece of content, where "distinct" includes the
+    # chosen tracks: the same film in Italian and in English are two requests.
+    # Partial index, so a closed request never blocks asking for it again.
+    """
+    CREATE UNIQUE INDEX jf_request_open_key ON jf_request(content_key)
+        WHERE status IN ('pending', 'approved', 'downloading', 'needs_attention')
+    """,
+    "CREATE INDEX jf_request_status ON jf_request(status)",
+    "CREATE INDEX jf_request_job ON jf_request(job_id)",
+    # Everyone who asked for this content, so a deduplicated request still
+    # notifies each of them.
+    """
+    CREATE TABLE jf_request_subscriber (
+        request_id INTEGER NOT NULL REFERENCES jf_request(id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL REFERENCES jf_user(id) ON DELETE CASCADE,
+        created_at TEXT    NOT NULL,
+        PRIMARY KEY (request_id, user_id)
+    )
+    """,
+    """
+    CREATE TABLE jf_notification (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL REFERENCES jf_user(id) ON DELETE CASCADE,
+        request_id INTEGER REFERENCES jf_request(id) ON DELETE CASCADE,
+        event      TEXT    NOT NULL,
+        message    TEXT    NOT NULL,
+        read_at    TEXT,
+        created_at TEXT    NOT NULL
+    )
+    """,
+    "CREATE INDEX jf_notification_user ON jf_notification(user_id, read_at)",
+]
+
+
 MIGRATIONS: list[list[str]] = [
     _V1_AUTH,
+    _V2_REQUESTS,
 ]
 
 

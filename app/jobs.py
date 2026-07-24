@@ -54,6 +54,7 @@ class JobManager:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscribers: list[asyncio.Queue] = []
         self._schedule_store = None  # set via set_schedule_store()
+        self._listeners: list = []
 
     @staticmethod
     def _compute_phases(audio_languages: list) -> list:
@@ -117,6 +118,27 @@ class JobManager:
         """Thread-safe push to all global SSE subscribers."""
         if self._loop:
             asyncio.run_coroutine_threadsafe(self._fanout(event), self._loop)
+
+    def broadcast(self, event: dict):
+        """Public entry point for other modules pushing to the SSE stream."""
+        self._broadcast(event)
+
+    # ── Terminal-state listeners ───────────────────────────────────────────────
+
+    def add_listener(self, callback):
+        """Register a callback invoked when a job reaches a terminal state.
+
+        Used by the request system to move a request to completed or failed
+        without the job manager knowing that requests exist.
+        """
+        self._listeners.append(callback)
+
+    def _notify_listeners(self, job: "DownloadJob"):
+        for callback in list(self._listeners):
+            try:
+                callback(job)
+            except Exception:
+                logger.exception("Job listener failed for job %s", job.job_id)
 
     def _emit(self, job: "DownloadJob", event: dict):
         """Push a terminal/progress event to the job's own queue and to everyone.
@@ -299,6 +321,7 @@ class JobManager:
                 if tmp_path.exists():
                     shutil.rmtree(tmp_path, ignore_errors=True)
                     logger.info("Cleaned up temp dir: %s", tmp_path)
+                self._notify_listeners(job)
 
     def _submit_job(self, job: DownloadJob, fn, *args, **kwargs) -> str:
         with self._lock:

@@ -207,6 +207,74 @@ def stub_jobs(monkeypatch):
     return submitted
 
 
+class FakeSource:
+    """Stands in for StreamingCommunity / AnimeUnity during request tests."""
+
+    def __init__(self):
+        self.audio = ["ita", "eng"]
+        self.subtitles = ["ita", "eng"]
+        self.dead = False
+        self.episodes = [{"id": 900 + n, "n": str(n), "name": f"Episodio {n}"} for n in (1, 2, 3)]
+        self.anime_episodes = [{"id": 800 + n, "number": str(n)} for n in (1, 2, 3)]
+
+    @property
+    def languages(self) -> dict:
+        if self.dead:
+            raise RuntimeError("HTTP 404")
+        return {"audio": list(self.audio), "subtitles": list(self.subtitles)}
+
+
+class InlineExecutor:
+    """Runs approval work on the calling thread, so tests stay deterministic."""
+
+    def submit(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+
+
+@pytest.fixture
+def source(monkeypatch, tmp_path):
+    """Fake external source plus a temporary library and configured domain."""
+    from app.core import animeunity, film, page, tv
+    from app.requests import resolver, service
+
+    fake = FakeSource()
+
+    data_file = tmp_path / "data.json"
+    library = tmp_path / "library"
+    library.mkdir()
+    data_file.write_text(
+        json.dumps({
+            "domain": "example.test",
+            "libraries": [
+                {"type": "film", "path": str(library)},
+                {"type": "tv", "path": str(library)},
+                {"type": "anime", "path": str(library)},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(resolver, "DATA_FILE", data_file)
+    fake.library = library
+
+    monkeypatch.setattr(film, "get_film_languages", lambda *a, **k: fake.languages)
+    monkeypatch.setattr(page, "get_domain_version", lambda *a, **k: "v1")
+    monkeypatch.setattr(tv, "get_token", lambda *a, **k: "xsrf-token")
+    monkeypatch.setattr(
+        tv, "get_info_season",
+        lambda *a, **k: ([] if fake.dead else list(fake.episodes)),
+    )
+    monkeypatch.setattr(tv, "get_episode_languages", lambda *a, **k: fake.languages)
+    monkeypatch.setattr(
+        animeunity, "get_episodes",
+        lambda *a, **k: ([] if fake.dead else list(fake.anime_episodes)),
+    )
+    monkeypatch.setattr(animeunity, "get_episode_languages", lambda *a, **k: fake.languages)
+
+    # Approval resolution runs inline instead of on its worker pool.
+    monkeypatch.setattr(service, "_resolution_pool", InlineExecutor())
+    return fake
+
+
 @pytest.fixture
 def admin_credentials(jellyfin):
     jellyfin.add_user("admin", "adminpw", admin=True)

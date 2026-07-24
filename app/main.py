@@ -16,6 +16,7 @@ from app.auth import session as auth_session
 from app.auth import users_router
 from app.auth.deps import AuthMiddleware
 from app.jobs import job_manager
+from app.requests import router as requests_router, service as requests_service
 from app.schedule import ScheduleStore
 from app.config import SCHEDULE_FILE
 from app.routers import domain, search, tv, downloads, progress, files, images, anime
@@ -33,6 +34,7 @@ DOCS_DIR = Path(__file__).parent.parent / "docs"
 async def lifespan(app: FastAPI):
     db.run_migrations()
     auth_session.purge_expired()
+    requests_service.register_job_listener()
     store = ScheduleStore(SCHEDULE_FILE)
     job_manager.set_schedule_store(store)
     job_manager.load_scheduled_from_store()
@@ -52,6 +54,8 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 app.include_router(auth_router.router)
 app.include_router(users_router.router)
+app.include_router(requests_router.router)
+app.include_router(requests_router.notifications_router)
 app.include_router(domain.router)
 app.include_router(search.router)
 app.include_router(tv.router)
