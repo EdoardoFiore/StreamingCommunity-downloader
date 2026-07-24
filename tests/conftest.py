@@ -190,16 +190,25 @@ def client(tmp_path, monkeypatch):
 def stub_jobs(monkeypatch):
     """Stop download submissions from actually reaching the network.
 
-    Used by tests that only care whether a request was authorised.
+    The call is bound against the *real* signature before being recorded, so a
+    caller passing an argument JobManager does not accept fails here instead of
+    passing the tests and raising in production — which is exactly what happened
+    with strict_audio.
     """
+    import inspect
+
     from app.jobs import job_manager
 
     submitted: list[tuple] = []
 
     def fake_submit(name):
+        signature = inspect.signature(getattr(job_manager, name))
+
         def _submit(*args, **kwargs):
+            signature.bind(*args, **kwargs)  # raises TypeError on a bad call
             submitted.append((name, args, kwargs))
             return f"job-{len(submitted)}"
+
         return _submit
 
     for name in ("submit_film", "submit_episode", "submit_anime_episode"):

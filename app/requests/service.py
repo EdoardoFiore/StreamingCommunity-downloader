@@ -118,7 +118,22 @@ def approve(request_id: int, decided_by: int) -> models.Request:
 
 
 def _execute(request_id: int):
-    """Re-resolve, re-check the library, then start the download."""
+    """Re-resolve, re-check the library, then start the download.
+
+    Runs on a worker thread whose Future nobody reads, so *nothing* here may
+    raise out: an escaping exception would vanish without a log and leave the
+    request sitting in `approved` forever, looking approved but never starting.
+    """
+    try:
+        _execute_inner(request_id)
+    except Exception as exc:
+        logger.exception("Unhandled failure executing request %s", request_id)
+        request = models.get(request_id)
+        if request is not None and request.status == models.APPROVED:
+            _park(request, f"error: {exc}", exc)
+
+
+def _execute_inner(request_id: int):
     request = models.get(request_id)
     if request is None or request.status != models.APPROVED:
         return
@@ -128,7 +143,7 @@ def _execute(request_id: int):
     except resolver.ResolutionError as exc:
         _park(request, exc.problem, exc)
         return
-    except Exception as exc:  # defensive: _execute must never leave a stuck claim
+    except Exception as exc:
         logger.exception("Unexpected failure resolving request %s", request_id)
         _park(request, f"error: {exc}", exc)
         return
@@ -164,6 +179,14 @@ def _execute(request_id: int):
     notify.notify_subscribers(
         notify.REQUEST_DOWNLOADING, f"Download di «{_label(claimed)}» iniziato.", claimed
     )
+
+    # The job was handed to the executor before its id could be written above, so
+    # a fast failure could have fired the completion listener while
+    # get_by_job_id() still found nothing. Re-check now that the id is stored.
+    from app.jobs import job_manager
+    job = job_manager.get(job_id)
+    if job is not None and job.status in ("done", "error", "cancelled"):
+        on_job_finished(job)
 
 
 def _park(request: models.Request, problem: str, exc: Exception):

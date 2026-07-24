@@ -353,7 +353,8 @@ class JobManager:
     def submit_film(self, id_film: int, title: str, domain: str, year: str = None,
                     schedule_id: str = None,
                     audio_languages: list[str] = None,
-                    subtitle_languages: list[str] = None) -> str:
+                    subtitle_languages: list[str] = None,
+                    strict_audio: bool = False) -> str:
         from app.core.film import download_film
 
         job = self._make_job(title, "film", schedule_id=schedule_id,
@@ -368,13 +369,15 @@ class JobManager:
             cancel_event=job.cancel_event,
             audio_languages=audio_languages or ["ita"],
             subtitle_languages=subtitle_languages or ["ita", "eng"],
+            strict_audio=strict_audio,
         )
 
     def submit_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                        token: str, tv_name: str, season: int, year: str = None,
                        schedule_id: str = None,
                        audio_languages: list[str] = None,
-                       subtitle_languages: list[str] = None) -> str:
+                       subtitle_languages: list[str] = None,
+                       strict_audio: bool = False) -> str:
         from app.core.tv import download_episode, fmt_ep
 
         ep = eps[ep_index]
@@ -391,13 +394,15 @@ class JobManager:
             year=year,
             audio_languages=audio_languages or ["ita"],
             subtitle_languages=subtitle_languages or ["ita", "eng"],
+            strict_audio=strict_audio,
         )
 
     def submit_anime_episode(self, anime_id: str, episode: dict, anime_name: str,
                              anime_type: str = "tv", year: str = None,
                              schedule_id: str = None,
                              audio_languages: list[str] = None,
-                             subtitle_languages: list[str] = None) -> str:
+                             subtitle_languages: list[str] = None,
+                             strict_audio: bool = False) -> str:
         from app.core.animeunity import download_anime_episode
 
         ep_num = episode.get("number", "?")
@@ -414,6 +419,7 @@ class JobManager:
             year=year,
             audio_languages=audio_languages or ["ita"],
             subtitle_languages=subtitle_languages or ["ita", "eng"],
+            strict_audio=strict_audio,
         )
 
     # ── Schedule (future) ──────────────────────────────────────────────────────
