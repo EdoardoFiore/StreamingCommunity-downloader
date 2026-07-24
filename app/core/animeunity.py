@@ -263,7 +263,7 @@ def download_anime_episode(
 
     mp4_path = anime_path(output_dir, anime_name, episode_number, anime_type, year)
 
-    download_m3u8(
+    final_path = download_m3u8(
         m3u8_index=m3u8_url,
         key=m3u8_key,
         output_filename=mp4_path,
@@ -277,4 +277,5 @@ def download_anime_episode(
         subtitle_track_urls=subtitle_track_urls,
     )
 
-    return mp4_path
+    # download_m3u8 returns the real output path (e.g. .mkv after remux)
+    return final_path or mp4_path
