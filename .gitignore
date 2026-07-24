@@ -13,3 +13,8 @@ debug.log
 *.pyo
 .venv/
 venv/
+# Panel database (users, sessions, requests)
+panel.db
+panel.db-wal
+panel.db-shm
+.pytest_cache/

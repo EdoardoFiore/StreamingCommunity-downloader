@@ -1,0 +1,61 @@
+# SC Panel with Jellyfin SSO, roles and the request system.
+#
+# Published as a separate GHCR package from the main panel, so pulling this does
+# not replace a running production deployment:
+#   ghcr.io/edoardofiore/streamingcommunity-downloader-jellyfin
+#
+#   docker compose -f docker-compose.jellyfin.yml up -d
+#
+# On first start open http://localhost:8000 — the panel asks for the Jellyfin
+# URL and the credentials of a Jellyfin administrator, who becomes the panel
+# administrator. No API key to paste, no credentials in this file.
+
+services:
+  web:
+    image: ghcr.io/edoardofiore/streamingcommunity-downloader-jellyfin:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - media_storage:/app/videos
+      # Users, sessions, requests, notifications, the source domain and the
+      # schedule all live here. Losing this volume means redoing the setup
+      # wizard and losing the request history.
+      - panel_config:/app/config
+    environment:
+      - VIDEOS_DIR=/app/videos
+      - DB_FILE=/app/config/panel.db
+      - DATA_FILE=/app/config/data.json
+      - SCHEDULE_FILE=/app/config/schedule.json
+      - HOST=0.0.0.0
+      - PORT=8000
+      # Set to 1 when the panel is served over HTTPS, so the session cookie is
+      # only ever sent over TLS.
+      - COOKIE_SECURE=0
+      # Set to 1 ONLY behind a reverse proxy you control. It makes the panel
+      # trust X-Forwarded-For for the client address it reports to Jellyfin;
+      # exposed directly, that header is attacker-controlled.
+      - TRUST_PROXY_HEADERS=0
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: unless-stopped
+
+    # Do not scale this service or add uvicorn --workers: download job state is
+    # held in memory by a single process, so a second replica would neither see
+    # nor be able to report on the other's downloads.
+    deploy:
+      replicas: 1
+
+volumes:
+  media_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/nfs/storage  # ← change to the local path where videos are stored
+  panel_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/scpanel/config  # ← change to a local path; create it first

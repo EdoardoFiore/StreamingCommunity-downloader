@@ -7,8 +7,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app import db
+from app.auth import models as auth_models
+from app.auth import router as auth_router
+from app.auth import session as auth_session
+from app.auth.deps import AuthMiddleware
 from app.jobs import job_manager
 from app.schedule import ScheduleStore
 from app.config import SCHEDULE_FILE
@@ -25,6 +30,8 @@ DOCS_DIR = Path(__file__).parent.parent / "docs"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    db.run_migrations()
+    auth_session.purge_expired()
     store = ScheduleStore(SCHEDULE_FILE)
     job_manager.set_schedule_store(store)
     job_manager.load_scheduled_from_store()
@@ -34,10 +41,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="StreamingCommunity Web Panel", lifespan=lifespan)
 
+# Authentication is enforced here, once, for every request. Endpoints are closed
+# by default; app/auth/deps.py holds the explicit public allowlist.
+app.add_middleware(AuthMiddleware)
+
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.mount("/docs", StaticFiles(directory=str(DOCS_DIR)), name="docs")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+app.include_router(auth_router.router)
 app.include_router(domain.router)
 app.include_router(search.router)
 app.include_router(tv.router)
@@ -51,3 +63,11 @@ app.include_router(anime.router)
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    """Login and first-run setup. Public; redirects away once signed in."""
+    if getattr(request.state, "user", None) is not None and auth_models.setup_done():
+        return RedirectResponse("/", status_code=302)
+    return templates.TemplateResponse(request=request, name="login.html")

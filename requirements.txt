@@ -12,3 +12,5 @@ fastapi
 uvicorn[standard]
 jinja2
 cloudscraper
+httpx        # required by fastapi.testclient
+pytest

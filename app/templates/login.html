@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>Accedi — SC Panel</title>
+  <link rel="icon" type="image/x-icon" href="/docs/favicon.ico"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Karla:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css"/>
+  <style>
+    :root {
+      --bg-base:       #1a1a24;
+      --bg-surface:    #242433;
+      --bg-raised:     #2d2d3f;
+      --bg-input:      #1f1f2b;
+      --border:        rgba(255,255,255,.08);
+      --border-mid:    rgba(255,255,255,.12);
+      --accent:        #e02444;
+      --accent-glow:   rgba(224,36,68,.25);
+      --green:         #0ec47c;
+      --text:          #e0e0e8;
+      --text-sub:      #b0b0b8;
+      --text-muted:    #808088;
+      --radius:        10px;
+      --radius-sm:     7px;
+      --font-brand:    'Bebas Neue', sans-serif;
+      --font-ui:       'Karla', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body, body.antialiased {
+      background: var(--bg-base) !important;
+      color: var(--text) !important;
+      font-family: var(--font-ui) !important;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Soft accent wash behind the card, same red as the panel */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: radial-gradient(60% 50% at 50% 0%, var(--accent-glow), transparent 70%);
+      pointer-events: none;
+    }
+
+    .auth-card {
+      position: relative;
+      width: 100%;
+      max-width: 400px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px 28px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    }
+
+    .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
+    .brand-icon {
+      width: 40px; height: 40px; flex-shrink: 0;
+      background: var(--accent); color: #fff;
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-brand); font-size: 21px; letter-spacing: .5px;
+    }
+    .brand-text { font-family: var(--font-brand); font-size: 25px; letter-spacing: .6px; line-height: 1; }
+    .brand-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    h1.auth-title { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+    p.auth-hint { font-size: 13px; color: var(--text-muted); margin: 0 0 20px; line-height: 1.5; }
+
+    .form-label { font-size: 12px; color: var(--text-sub); margin-bottom: 5px; font-weight: 500; }
+    .form-control {
+      background: var(--bg-input) !important;
+      border: 1px solid var(--border-mid) !important;
+      color: var(--text) !important;
+      border-radius: var(--radius-sm) !important;
+      padding: 9px 12px !important;
+      font-size: 14px !important;
+    }
+    .form-control:focus {
+      border-color: var(--accent) !important;
+      box-shadow: 0 0 0 3px var(--accent-glow) !important;
+    }
+    .form-control::placeholder { color: var(--text-muted) !important; }
+
+    .btn-auth {
+      width: 100%;
+      background: var(--accent); border: none; color: #fff;
+      border-radius: var(--radius-sm);
+      padding: 10px 16px; font-size: 14px; font-weight: 600;
+      transition: filter .15s ease;
+    }
+    .btn-auth:hover:not(:disabled) { filter: brightness(1.1); color: #fff; }
+    .btn-auth:disabled { opacity: .6; }
+
+    .auth-alert {
+      display: none;
+      background: rgba(224,36,68,.12);
+      border: 1px solid rgba(224,36,68,.35);
+      color: #ff8fa3;
+      border-radius: var(--radius-sm);
+      padding: 9px 12px; font-size: 13px; margin-bottom: 16px; line-height: 1.45;
+    }
+    .auth-alert.info {
+      background: rgba(14,196,124,.10);
+      border-color: rgba(14,196,124,.3);
+      color: #6ee7b7;
+    }
+
+    .setup-note {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 12px; color: var(--text-muted); line-height: 1.5;
+      margin-bottom: 18px;
+    }
+
+    .auth-footer { margin-top: 18px; font-size: 12px; color: var(--text-muted); text-align: center; }
+    .spinner-border-sm { width: 1rem; height: 1rem; border-width: .15em; }
+  </style>
+</head>
+<body class="antialiased">
+
+<div class="auth-card">
+  <div class="brand">
+    <div class="brand-icon">SC</div>
+    <div>
+      <div class="brand-text">SC Panel</div>
+      <div class="brand-sub">Accesso tramite Jellyfin</div>
+    </div>
+  </div>
+
+  <div id="auth-alert" class="auth-alert"></div>
+
+  <div id="auth-loading" class="text-center py-4">
+    <span class="spinner-border spinner-border-sm"></span>
+  </div>
+
+  <!-- ── Setup (primo avvio) ─────────────────────────────────────────── -->
+  <form id="setup-form" style="display:none" autocomplete="off">
+    <h1 class="auth-title">Configurazione iniziale</h1>
+    <p class="auth-hint">Collega il pannello al tuo server Jellyfin.</p>
+
+    <div class="setup-note">
+      <i class="ti ti-shield-lock me-1"></i>
+      Serve un account <strong>amministratore Jellyfin</strong>: diventerà l'amministratore
+      del pannello. La password non viene salvata.
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label" for="setup-url">URL del server Jellyfin</label>
+      <input type="text" class="form-control" id="setup-url" placeholder="http://192.168.1.10:8096" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="setup-username">Utente amministratore</label>
+      <input type="text" class="form-control" id="setup-username" autocomplete="username" required>
+    </div>
+    <div class="mb-4">
+      <label class="form-label" for="setup-password">Password</label>
+      <input type="password" class="form-control" id="setup-password" autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn-auth" id="setup-btn">
+      <i class="ti ti-plug-connected me-1"></i>Configura e accedi
+    </button>
+  </form>
+
+  <!-- ── Login ───────────────────────────────────────────────────────── -->
+  <form id="login-form" style="display:none" autocomplete="on">
+    <h1 class="auth-title">Accedi</h1>
+    <p class="auth-hint">Usa le credenziali del tuo account Jellyfin.</p>
+
+    <div class="mb-3">
+      <label class="form-label" for="login-username">Utente</label>
+      <input type="text" class="form-control" id="login-username" autocomplete="username" required>
+    </div>
+    <div class="mb-4">
+      <label class="form-label" for="login-password">Password</label>
+      <input type="password" class="form-control" id="login-password" autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn-auth" id="login-btn">
+      <i class="ti ti-login me-1"></i>Accedi
+    </button>
+    <div class="auth-footer" id="login-server"></div>
+  </form>
+</div>
+
+<script src="/static/login.js"></script>
+</body>
+</html>
