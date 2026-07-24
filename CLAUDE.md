@@ -4,88 +4,102 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-StreamingCommunity_api is a Python 3.11+ CLI tool that downloads films and TV series from the StreamingCommunity platform. It handles M3U8 stream parsing, AES-CBC segment decryption, parallel downloading, and FFmpeg-based media merging.
+A self-hosted FastAPI web panel that searches and downloads films, TV series and anime from
+StreamingCommunity and AnimeUnity into a Jellyfin library. It handles M3U8 parsing, AES-CBC segment
+decryption, parallel downloading and FFmpeg merging.
+
+Access is authenticated against a Jellyfin server; there is no local password store.
 
 ## Running the Project
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Run the downloader (main entry point)
-python run.py
-
-# Run the auto-updater
-python update.py
+python main.py            # http://127.0.0.1:8000
+pytest -q                 # test suite
 ```
 
-**Prerequisites:** FFmpeg is required — auto-installed on first run if missing (downloaded from gyan.dev).
+**Prerequisites:** FFmpeg on PATH (the Docker image installs it).
 
-There is no test suite, linter configuration, or build system.
+**Single process only.** Download job state lives in memory in `JobManager`, so running uvicorn with
+`--workers > 1` or scaling the container would leave each worker blind to the others' downloads.
 
 ## Architecture
 
-### Entry Flow
+### Entry flow
 
-`run.py` → `initialize()` (Python version check, FFmpeg verify, banner) → `main()` loop:
-1. Load domain from `data.json` (or prompt user)
-2. Search via `Src/Api/page.py:search()` → `GET /api/search`
-3. User selects result → route to `Src/Api/film.py` (movie) or `Src/Api/tv.py` (TV series)
-4. Both converge on `Src/Lib/FFmpeg/my_m3u8.py:M3U8_Downloader`
+`main.py` → `app.main:app`. The lifespan runs database migrations, registers the request→job
+listener and starts the schedule loop. `AuthMiddleware` resolves the session cookie for every
+request before any route runs.
 
-### Key Modules
+### Layout
 
-**`Src/Api/`** — Platform interaction
-- `page.py` — Domain management (`data.json`), search API
-- `film.py` — Movie download: extracts iframe → parses JS metadata → builds M3U8 URL
-- `tv.py` — TV series: fetches seasons/episodes, loops `dw_single_ep()` per episode
+**`app/core/`** — source interaction and the download engine
+- `page.py` — domain check, search
+- `film.py` — movie resolve + download; also owns `_collect_audio_tracks` / `_collect_subtitle_tracks`, which `tv.py` and `animeunity.py` import
+- `tv.py` — seasons, episodes, per-episode languages, episode download
+- `animeunity.py` — AnimeUnity search, episodes, download
+- `m3u8.py` — `M3U8_Parser`, `M3U8_Segments`, `M3U8_Downloader`, `Decryption`, `download_m3u8()`
+- `paths.py` — destination paths (`film_path`, `episode_path`, `anime_path`). The request system's library check goes through these, so a change here changes both.
+- `headers.py` — user-agent rotation, `sanitize_filename`
+- `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`
 
-**`Src/Lib/FFmpeg/`** — Core download engine
-- `my_m3u8.py` — The main download pipeline:
-  - `M3U8_Parser`: Parses playlists (segments, subtitles, alternate audio)
-  - `M3U8_Segments`: Downloads `.ts` segments in parallel (up to 150 `ThreadPoolExecutor` workers) with AES-CBC decryption
-  - `M3U8_Downloader`: Orchestrates parse → download → FFmpeg concat → optional audio merge
-  - `Decryption`: AES-CBC with IV extracted from M3U8 `#EXT-X-KEY`
-- `installer.py` — FFmpeg check/auto-install
-- `util.py` — Video duration queries via FFmpeg
+**`app/auth/`** — Jellyfin SSO, permissions, users
+- `jellyfin.py` — HTTP client (MediaBrowser header, stable DeviceId, X-Forwarded-For with retry)
+- `session.py` — server-side sessions (opaque token, SHA-256 stored)
+- `permissions.py` — independent `IntFlag` permissions
+- `deps.py` — `AuthMiddleware`, public allowlist, `require(...)`
+- `router.py` / `users_router.py` — setup, login, user import and management
 
-**`Src/Util/`** — Shared utilities
-- `console.py` — Rich console singleton + optional debug logger (`SAVE_DEBUG` flag)
-- `headers.py` — Random user-agent rotation (Chrome on Windows/Linux)
+**`app/requests/`** — the request queue
+- `models.py` — records, content key, allowed transitions
+- `resolver.py` — re-resolution at approval, track verification, library check
+- `service.py` — lifecycle and job wiring
+- `notify.py` — in-app notifications
+- `router.py` — endpoints
 
-**`Src/Upload/`** — Version management
-- `update.py` — Fetches GitHub releases, displays changelog
-- `__version__.py` — Version constants
+**`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `schedule.py`, `db.py`, `config.py`,
+`progress.py`, `routers/`, `templates/`, `static/`
 
-### Configuration
+### Persistence
 
-`data.json` stores the site domain (e.g. `{"domain": "report"}`). The full domain becomes `streamingcommunity.{domain}`. Video CDN is always `vixcloud.co`.
+- `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications. Migrations are
+  the ordered `MIGRATIONS` list in `app/db.py`, applied against `PRAGMA user_version`. Never edit an
+  applied migration; append a new one.
+- `data.json` — source domain, library paths, performance settings
+- `schedule.json` — scheduled downloads
 
-### Output Structure
+Point `DB_FILE`, `DATA_FILE` and `SCHEDULE_FILE` at a persistent volume in Docker; see
+`docker-compose.jellyfin.yml`.
+
+### Rules that are easy to break
+
+- **The source domain never comes from the client.** Use `app.config.configured_domain()`. Same for
+  the requester's identity, which comes from the session, never from a request body.
+- **Every `/api` route needs a decision**: public allowlist, `SESSION_ONLY_PATHS`, or a
+  `require(...)` dependency. `tests/test_permissions.py` fails otherwise.
+- **No ADMIN super-permission.** Flags are independent, so an administrator can exist who never sees
+  the request queue.
+- **Never substitute an audio track.** `strict_audio=True` on the request path turns a missing
+  language into an error and parks the request for a human.
+- Blocking work goes through `asyncio.to_thread` (routers) or the job pool.
+
+### Output layout
 
 ```
-videos/
-├── MovieTitle.mp4
-└── SeriesTitle/
-    └── S01E01.mp4
+<library>/
+├── Movie (2020)/Movie (2020).mp4
+└── Series (2019)/Season 01/Series S01E01.mp4
 ```
 
-Temp segments are written to `tmp/segments/` and cleaned up after merging.
+Subtitles land beside the video as `{stem}.{lang}.vtt` (Jellyfin convention). Temp segments go to
+`tmp/<job_id>/` and are cleaned up afterwards.
 
-### Selection Syntax
+### Quality and languages
 
-The CLI supports range/list selection for seasons and episodes:
-- Single: `0`
-- Range: `[1-5]`
-- Discontinuous: `[1,3,5]`
+Highest available resolution is chosen automatically (1080p → 720p → 480p → 360p). Audio and
+subtitle languages are chosen per download or per request.
 
-### Quality Selection
+### vixcloud.co quirk
 
-Auto-selects highest available resolution: 1080p → 720p → 480p → 360p. Subtitles for all non-Italian non-auto languages are downloaded as `.vtt` files alongside the video.
-
-### Web Panel Layer
-
-`app/core/` mirrors `Src/Api/` for the FastAPI web panel: `film.py`, `tv.py`, `m3u8.py`, `page.py`, `headers.py`.
-Edits to download logic often need to be applied in **both** `Src/` and `app/core/`.
-
-**vixcloud.co 403 quirk:** TV episode M3U8 URLs sometimes return 403 — appending `?b=1` (or `&b=1`) to the playlist URL resolves it.
+TV episode M3U8 URLs sometimes return 403; appending `?b=1` (or `&b=1`) resolves it. Handled in
+`_fetch_text_with_b1_fallback` and `_collect_audio_tracks`.

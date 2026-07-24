@@ -30,6 +30,24 @@ SETTINGS_DEFAULTS = {
 }
 
 
+def read_data() -> dict:
+    try:
+        with open(DATA_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def configured_domain() -> str:
+    """The source domain, as configured by an administrator.
+
+    Every outbound request to the source resolves its host through here. The
+    endpoints used to accept a `domain` from the client, which let any signed-in
+    user make the server issue HTTP requests to a host of their choosing.
+    """
+    return (read_data().get("domain") or "").strip()
+
+
 def get_settings() -> dict:
     try:
         with open(DATA_FILE) as f:

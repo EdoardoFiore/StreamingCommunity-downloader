@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from app.auth.deps import require
 from app.auth.permissions import Permission
+from app.config import configured_domain
 from app.jobs import job_manager
 
 logger = logging.getLogger(__name__)
@@ -23,10 +24,17 @@ CAN_CONTROL_JOBS = [
 ]
 
 
+def _domain() -> str:
+    """The configured source host, never one supplied by the caller."""
+    domain = configured_domain()
+    if not domain:
+        raise HTTPException(status_code=409, detail="Nessun dominio configurato")
+    return domain
+
+
 class FilmDownloadRequest(BaseModel):
     id: int
     title: str
-    domain: str
     year: str | None = None
     audio_languages: list[str] = ["ita"]
     subtitle_languages: list[str] = ["ita", "eng"]
@@ -36,7 +44,6 @@ class EpisodeDownloadRequest(BaseModel):
     tv_id: int
     eps: list[dict]
     ep_index: int
-    domain: str
     token: str
     tv_name: str
     season: int
@@ -77,7 +84,7 @@ class AnimeScheduleRequest(AnimeDownloadRequest):
 @router.post("/film", status_code=202, dependencies=CAN_DOWNLOAD)
 def download_film(body: FilmDownloadRequest):
     job_id = job_manager.submit_film(
-        body.id, body.title, body.domain, year=body.year,
+        body.id, body.title, _domain(), year=body.year,
         audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,
     )
@@ -90,7 +97,7 @@ def download_episode(body: EpisodeDownloadRequest):
         raise HTTPException(status_code=400, detail="ep_index out of range")
     job_id = job_manager.submit_episode(
         body.tv_id, body.eps, body.ep_index,
-        body.domain, body.token, body.tv_name, body.season,
+        _domain(), body.token, body.tv_name, body.season,
         year=body.year,
         audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,
@@ -113,7 +120,7 @@ def download_anime(body: AnimeDownloadRequest):
 @router.post("/schedule/film", status_code=202, dependencies=CAN_DOWNLOAD)
 def schedule_film(body: FilmScheduleRequest):
     job_id = job_manager.schedule_film(
-        body.id, body.title, body.domain, body.scheduled_at, year=body.year,
+        body.id, body.title, _domain(), body.scheduled_at, year=body.year,
         audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,
     )
@@ -126,7 +133,7 @@ def schedule_episode(body: EpisodeScheduleRequest):
         raise HTTPException(status_code=400, detail="ep_index out of range")
     job_id = job_manager.schedule_episode(
         body.tv_id, body.eps, body.ep_index,
-        body.domain, body.token, body.tv_name, body.season,
+        _domain(), body.token, body.tv_name, body.season,
         body.scheduled_at, year=body.year,
         audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,

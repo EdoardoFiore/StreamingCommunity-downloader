@@ -449,7 +449,6 @@ async function doSearch() {
   _showSearchSkeletons();
   try {
     const searchParams = new URLSearchParams({ q, source: currentSource });
-    if (currentSource !== 'animeunity') searchParams.set('domain', currentDomain);
     const res = await fetch(`/api/search?${searchParams}`, {signal: _searchAbort.signal});
     const container = document.getElementById('search-results');
     const results = await safeJson(res);
@@ -461,7 +460,7 @@ async function doSearch() {
       const year = itemYear(item);
       const score = item.score ? parseFloat(item.score).toFixed(1) : null;
       const posterUrl = item.poster
-        ? (item.poster.startsWith('http') ? item.poster : `/api/image/${currentDomain}/${item.poster}`)
+        ? (item.poster.startsWith('http') ? item.poster : `/api/image/${item.poster}`)
         : '';
       const card = document.createElement('div');
       card.className = 'col-6 col-sm-4 col-md-3 col-lg-2';
@@ -565,7 +564,7 @@ function openDetailModal(idx) {
   const year = itemYear(item);
   const score = item.score ? parseFloat(item.score).toFixed(1) : null;
   const posterUrl = item.poster
-    ? (item.poster.startsWith('http') ? item.poster : `/api/image/${currentDomain}/${item.poster}`)
+    ? (item.poster.startsWith('http') ? item.poster : `/api/image/${item.poster}`)
     : '';
 
   const poster = document.getElementById('detail-poster');
@@ -636,7 +635,7 @@ function openDetailModal(idx) {
   langsEl.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Caricamento lingue...';
   showModal('detail-modal');
 
-  const p = new URLSearchParams({ type:isMovie?'movie':'tv', domain:currentDomain, slug:item.slug||'', version:currentVersion||'' });
+  const p = new URLSearchParams({ type:isMovie?'movie':'tv', slug:item.slug||'', version:currentVersion||'' });
   fetch(`/api/search/languages/${item.id}?${p}`)
     .then(r => r.ok ? r.json() : null)
     .then(info => {
@@ -704,7 +703,7 @@ async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLa
   try {
     const endpoint = scheduledAt ? '/api/download/schedule/film' : '/api/download/film';
     const body = {
-      id, title, year, domain: currentDomain,
+      id, title, year,
       audio_languages: audioLangs || ['ita'],
       subtitle_languages: subLangs || ['ita', 'eng'],
     };
@@ -740,8 +739,8 @@ async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=nul
 
   try {
     const [tokenData, seasonsData] = await Promise.all([
-      fetch(`/api/tv/${tvId}/token?domain=${currentDomain}`).then(r=>r.json()),
-      fetch(`/api/tv/${tvId}/seasons?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}`).then(r=>r.json()),
+      fetch(`/api/tv/${tvId}/token`).then(r=>r.json()),
+      fetch(`/api/tv/${tvId}/seasons?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}`).then(r=>r.json()),
     ]);
     _epCtx.token = tokenData.token;
     _epCtx.seasonsCount = seasonsData.seasons_count;
@@ -778,7 +777,7 @@ async function loadSeason(season) {
   const container = document.getElementById('episode-modal-body');
   container.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';
   try {
-    const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
+    const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
     const eps = await safeJson(res);
     if (!res.ok) { container.innerHTML=`<div class="alert alert-danger">${escapeHtml(eps.detail||'Errore caricamento episodi')}</div>`; return; }
     if (!Array.isArray(eps)) { container.innerHTML=`<div class="alert alert-danger">Risposta non valida dal server</div>`; return; }
@@ -830,7 +829,7 @@ async function startEpisodeDownload(epIndex) {
 
   const endpoint = scheduledAt ? '/api/download/schedule/episode' : '/api/download/episode';
   const body = {
-    tv_id: tvId, eps: episodes, ep_index: epIndex, domain: currentDomain, token,
+    tv_id: tvId, eps: episodes, ep_index: epIndex, token,
     tv_name: tvName, season: currentSeason, year,
     audio_languages: audioLangs || ['ita'],
     subtitle_languages: subLangs || ['ita', 'eng'],
@@ -866,7 +865,7 @@ async function downloadWholeSeries() {
   showPage('downloads');
   for (let s = 1; s <= seasonsCount; s++) {
     try {
-      const res = await fetch(`/api/tv/${tvId}/seasons/${s}/episodes?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
+      const res = await fetch(`/api/tv/${tvId}/seasons/${s}/episodes?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
       const eps = await safeJson(res);
       _epCtx.episodes = eps;
       _epCtx.currentSeason = s;

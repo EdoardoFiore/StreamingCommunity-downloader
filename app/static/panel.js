@@ -60,7 +60,7 @@ function requestPoster(request) {
   if (!request.poster) return '<div class="req-poster req-poster-empty">🎬</div>';
   const url = request.poster.startsWith('http')
     ? request.poster
-    : `/api/image/${currentDomain}/${request.poster}`;
+    : `/api/image/${request.poster}`;
   return `<img class="req-poster" src="${escapeHtml(url)}" alt=""
             onerror="this.outerHTML='<div class=&quot;req-poster req-poster-empty&quot;>🎬</div>'">`;
 }
