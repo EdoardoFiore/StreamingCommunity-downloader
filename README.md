@@ -122,10 +122,27 @@ Disabling a user takes effect on their next request and keeps their history.
 | `SCHEDULE_FILE` | `schedule.json` | scheduled downloads |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | bind address |
 | `COOKIE_SECURE` | `0` | set to `1` when serving over HTTPS |
+| `COOKIE_SAMESITE` | `lax` | set to `none` (with `COOKIE_SECURE=1`) only to embed the panel in an iframe on another site/scheme — see below |
 | `TRUST_PROXY_HEADERS` | `0` | set to `1` only behind a reverse proxy you control |
 
 `panel.db` holds the Jellyfin service API key: keep it out of any web-served directory and off
 world-readable storage.
+
+### Embedding the panel in an iframe (e.g. a Jellyfin custom tab)
+
+A `SameSite=Lax` session cookie — the default, correct for every normal deployment — is not sent on
+requests made from inside a cross-site iframe. Framed on a different domain, port-with-different-scheme,
+or behind a different reverse proxy than the panel's own origin, every request inside the frame looks
+logged out, and login bounces straight back to itself: an apparent infinite loop.
+
+Two ways to fix it:
+
+- **Reverse-proxy the panel under the same site and scheme as the embedding page** (e.g. as a subpath of
+  your Jellyfin domain). No configuration change needed — the iframe stops being cross-site.
+- **Set `COOKIE_SAMESITE=none`**, together with `COOKIE_SECURE=1` — the panel must be served over HTTPS,
+  since browsers reject a `SameSite=None` cookie that isn't also `Secure`. This is safe to relax: CSRF
+  protection here does not depend on `SameSite` — every state-changing request already carries a
+  double-submit token no outside origin can read.
 
 **Run one process.** Download state is held in memory by a single process, so do not add
 `--workers` or scale the service — a second replica would neither see nor report on the first's

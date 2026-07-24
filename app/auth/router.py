@@ -20,7 +20,7 @@ from app.auth.jellyfin import (
     normalize_base_url,
 )
 from app.auth.permissions import ALL_PERMISSIONS
-from app.config import COOKIE_SECURE
+from app.config import COOKIE_SAMESITE, COOKIE_SECURE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -56,7 +56,7 @@ def _set_session_cookie(response: Response, raw_token: str):
         raw_token,
         max_age=int(sessions.SESSION_TTL.total_seconds()),
         httponly=True,
-        samesite="lax",
+        samesite=COOKIE_SAMESITE,
         secure=COOKIE_SECURE,
         path="/",
     )

@@ -1,8 +1,11 @@
 import json
+import logging
 import os
 from pathlib import Path
 
 from filelock import FileLock
+
+logger = logging.getLogger(__name__)
 
 VIDEOS_DIR = Path(os.getenv("VIDEOS_DIR", "videos"))
 HOST = os.getenv("HOST", "127.0.0.1")
@@ -18,6 +21,43 @@ DB_FILE = Path(os.getenv("DB_FILE", "panel.db"))
 
 # Set COOKIE_SECURE=1 when the panel is served over HTTPS.
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
+
+_SAMESITE_VALUES = {"lax", "strict", "none"}
+
+
+def _resolve_samesite(raw_value: str, secure: bool) -> str:
+    """Validate COOKIE_SAMESITE and warn about the one way it can misfire.
+
+    "lax" (default) is the safe choice for every normal deployment. Embedding
+    the panel in an iframe on a different site or scheme — e.g. a Jellyfin
+    custom tab — needs "none": browsers do not send a Lax cookie from within a
+    cross-site frame at all, which looks like an infinite login loop (each
+    request inside the frame arrives with no session, so it bounces straight
+    back to the login page). CSRF protection does not depend on SameSite here
+    — every state-changing request is already checked against a double-submit
+    token an outside origin cannot read — so relaxing this is safe once the
+    prerequisite below is met.
+
+    A pure function so the validation and warning logic can be tested without
+    reimporting or reloading this module.
+    """
+    value = (raw_value or "").strip().lower()
+    if value not in _SAMESITE_VALUES:
+        logger.warning("Invalid COOKIE_SAMESITE=%r, falling back to 'lax'", raw_value)
+        value = "lax"
+    if value == "none" and not secure:
+        # Mandatory per spec: browsers silently drop a SameSite=None cookie
+        # that isn't also Secure, which would make login look broken in a
+        # different, more confusing way than the problem this setting exists
+        # to fix.
+        logger.warning(
+            "COOKIE_SAMESITE=none requires COOKIE_SECURE=1 (HTTPS) or browsers "
+            "will reject the session cookie outright — set COOKIE_SECURE=1 as well."
+        )
+    return value
+
+
+COOKIE_SAMESITE = _resolve_samesite(os.getenv("COOKIE_SAMESITE", "lax"), COOKIE_SECURE)
 
 # Trust X-Forwarded-For / X-Real-IP for the client address. Only enable when the
 # panel sits behind a reverse proxy you control — otherwise the header is
