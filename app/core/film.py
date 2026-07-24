@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def _get_iframe(id_title, domain):
     ua = get_headers()
     for path in (f"/iframe/{id_title}", f"/it/iframe/{id_title}"):
-        req = requests.get(f"https://{domain}{path}", headers={"User-agent": ua})
+        req = requests.get(f"https://{domain}{path}", headers={"User-agent": ua}, timeout=15)
         if req.ok:
             break
     else:

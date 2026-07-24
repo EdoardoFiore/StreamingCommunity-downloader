@@ -292,3 +292,79 @@ def register_job_listener():
     from app.jobs import job_manager
     job_manager.add_listener(on_job_finished)
     _listener_registered = True
+
+
+# ── Startup reconciliation ──────────────────────────────────────────────────────
+
+def reconcile_orphaned_requests() -> int:
+    """Recover requests an in-memory worker was still handling when the
+    process last stopped — a crash, a deploy, a plain restart.
+
+    Both the resolution pool and the job manager start empty on every launch:
+    nothing is or ever will be working on a row still sitting in `approved` or
+    `downloading`. Without this, such a row stays open forever — it still
+    holds the content key, so the same film or episode can never be requested
+    again, and no amount of restarting fixes it on its own, because nothing
+    ever looks at these rows to notice they are orphaned.
+
+    `approved` (resolution never finished) goes back to `needs_attention`, so
+    a human re-approves or corrects it — the state machine allows that path.
+    `downloading` cannot reach `needs_attention` (there is no "resume" state
+    for a job that no longer exists in memory), so it goes to `failed`, the
+    same outcome a job that errored out reaches via on_job_finished(); the
+    partially-downloaded temp files were already cleaned up on the previous
+    process's own shutdown path, so there is nothing left to resume anyway.
+
+    Called once from the app lifespan, before the app starts accepting
+    requests, so nothing can approve or complete one of these rows out from
+    under this pass.
+    """
+    recovered = 0
+
+    for request in models.list_all((models.APPROVED,)):
+        parked = models.transition(
+            request.id, models.NEEDS_ATTENTION,
+            problem="interrotta: il pannello è stato riavviato durante la risoluzione",
+        )
+        if parked is None:
+            continue
+        recovered += 1
+        logger.warning(
+            "Recovered request %s from an interrupted approval (restart)", request.id
+        )
+        notify.notify_approvers(
+            notify.REQUEST_NEEDS_ATTENTION,
+            f"«{_label(parked)}» è da verificare: un riavvio del pannello ha interrotto l'elaborazione.",
+            parked,
+        )
+        notify.notify_subscribers(
+            notify.REQUEST_NEEDS_ATTENTION,
+            f"«{_label(parked)}» è in attesa di una verifica: un riavvio del pannello ha interrotto l'elaborazione.",
+            parked,
+        )
+
+    for request in models.list_all((models.DOWNLOADING,)):
+        failed = models.transition(
+            request.id, models.FAILED,
+            problem="interrotta: il pannello è stato riavviato durante il download",
+        )
+        if failed is None:
+            continue
+        recovered += 1
+        logger.warning(
+            "Recovered request %s from an interrupted download (restart)", request.id
+        )
+        notify.notify_subscribers(
+            notify.REQUEST_FAILED,
+            f"Il download di «{_label(failed)}» è stato interrotto da un riavvio del pannello.",
+            failed,
+        )
+        notify.notify_approvers(
+            notify.REQUEST_FAILED,
+            f"Download interrotto per «{_label(failed)}»: il pannello si è riavviato durante il download.",
+            failed,
+        )
+
+    if recovered:
+        logger.warning("Startup reconciliation recovered %d orphaned request(s)", recovered)
+    return recovered

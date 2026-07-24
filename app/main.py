@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI):
     db.run_migrations()
     auth_session.purge_expired()
     requests_service.register_job_listener()
+    # Before anything can approve or complete a request: any row still
+    # "approved" or "downloading" from a previous run has no in-memory worker
+    # left, and never will — it needs recovering before the app is reachable.
+    requests_service.reconcile_orphaned_requests()
     store = ScheduleStore(SCHEDULE_FILE)
     job_manager.set_schedule_store(store)
     job_manager.load_scheduled_from_store()

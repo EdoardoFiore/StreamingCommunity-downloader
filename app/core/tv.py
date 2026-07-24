@@ -37,6 +37,7 @@ def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -
             "X-Inertia-Version": site_version,
             "User-Agent": get_headers(),
         },
+        timeout=15,
     )
     if req.ok:
         return req.json()["props"]["title"]["seasons_count"]
@@ -54,6 +55,7 @@ def get_info_season(tv_id: int, tv_name: str, domain: str, version: str, token: 
             "x-inertia-version": version,
             "x-xsrf-token": token,
         },
+        timeout=15,
     )
     if req.ok:
         return [
@@ -76,6 +78,7 @@ def _get_iframe(tv_id, ep_id, domain, token):
                 "referer": f"https://{domain}/it/watch/{tv_id}?e={ep_id}",
                 "user-agent": ua,
             },
+            timeout=15,
         )
         if req.ok:
             break
