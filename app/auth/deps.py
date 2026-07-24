@@ -50,6 +50,7 @@ PUBLIC_PATHS = {
     "/api/auth/status",
     "/api/auth/setup",
     "/api/auth/jellyfin",
+    "/api/auth/jellyfin-token",
 }
 PUBLIC_PREFIXES = ("/static/", "/docs/")
 

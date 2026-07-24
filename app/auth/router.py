@@ -11,6 +11,7 @@ from app import db
 from app.auth import models, ratelimit, session as sessions
 from app.auth.deps import client_ip, current_user
 from app.auth.jellyfin import (
+    TOKEN_CHECK_DEVICE_ID,
     JellyfinAuthError,
     JellyfinClient,
     JellyfinError,
@@ -50,6 +51,10 @@ class LoginRequest(BaseModel):
     password: str = ""
 
 
+class TokenLoginRequest(BaseModel):
+    token: str = Field(min_length=1)
+
+
 def _set_session_cookie(response: Response, raw_token: str):
     response.set_cookie(
         sessions.SESSION_COOKIE,
@@ -70,6 +75,17 @@ def _authenticate(base_url: str, username: str, password: str, ip: str | None) -
     """Blocking Jellyfin authentication. Runs in a worker thread."""
     client = JellyfinClient(base_url, device_id=device_id_for(username), client_ip=ip)
     return client.authenticate(username, password)
+
+
+def _whoami(base_url: str, token: str, ip: str | None) -> dict:
+    """Blocking Jellyfin lookup for an already-issued token. Runs in a worker
+    thread. Unlike ``_authenticate``, this never calls ``_drop_token``
+    afterwards: the token belongs to the caller's own already-open Jellyfin
+    session (e.g. the parent frame of the panel embedded as a Jellyfin custom
+    tab), and invalidating it here would sign them out of Jellyfin too.
+    """
+    client = JellyfinClient(base_url, token=token, device_id=TOKEN_CHECK_DEVICE_ID, client_ip=ip)
+    return client.me()
 
 
 def _drop_token(base_url: str, username: str, token: str, ip: str | None):
@@ -204,8 +220,16 @@ async def login(body: LoginRequest, request: Request, response: Response):
         _drop_token, base_url, body.username, account["AccessToken"], ip
     )
 
-    # Matched on the Jellyfin user id, never the username: usernames are
-    # renameable and would silently re-link an account after a rename.
+    return _complete_login(jellyfin_user, response)
+
+
+def _complete_login(jellyfin_user: dict, response: Response) -> dict:
+    """Shared tail of both sign-in paths: match/auto-import the user, refuse
+    a disabled account, open the panel session.
+
+    Matched on the Jellyfin user id, never the username: usernames are
+    renameable and would silently re-link an account after a rename.
+    """
     user = models.get_user_by_jellyfin_id(jellyfin_user["Id"])
 
     if user is None:
@@ -220,7 +244,7 @@ async def login(body: LoginRequest, request: Request, response: Response):
             )
         user = models.create_user(
             jellyfin_user_id=jellyfin_user["Id"],
-            username=jellyfin_user.get("Name", body.username),
+            username=jellyfin_user.get("Name", "?"),
             permissions=models.default_permissions(),
             is_jellyfin_admin=is_administrator(jellyfin_user),
         )
@@ -236,6 +260,35 @@ async def login(body: LoginRequest, request: Request, response: Response):
     raw_token, csrf_token = sessions.create_session(user.id)
     _set_session_cookie(response, raw_token)
     return _session_payload(models.get_user(user.id), csrf_token)
+
+
+@router.post("/jellyfin-token")
+async def login_with_token(body: TokenLoginRequest, request: Request, response: Response):
+    """Trade an already-issued Jellyfin access token for a panel session.
+
+    For the panel embedded as a Jellyfin custom tab: the parent page already
+    holds a valid token (``window.ApiClient``), so the visitor should not
+    have to log in a second time. The token is never trusted on its own — it
+    is checked live against the configured Jellyfin server on every call,
+    exactly like a password would be. Not rate-limited like /jellyfin: an
+    opaque Jellyfin token is not guessable, so this is not a credential
+    brute-force surface the way a username/password pair is.
+    """
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=404, detail="Autenticazione disabilitata su questa installazione")
+    base_url, _ = models.jellyfin_config()
+    if not base_url or not models.setup_done():
+        raise HTTPException(status_code=409, detail="Pannello non ancora configurato")
+
+    ip = client_ip(request)
+    try:
+        jellyfin_user = await asyncio.to_thread(_whoami, base_url, body.token, ip)
+    except JellyfinAuthError:
+        raise HTTPException(status_code=401, detail="Sessione Jellyfin non valida o scaduta")
+    except JellyfinUnreachable as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return _complete_login(jellyfin_user, response)
 
 
 @router.post("/logout")

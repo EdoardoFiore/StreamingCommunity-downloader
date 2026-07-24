@@ -21,6 +21,12 @@ TIMEOUT = 15
 # info with the service API key). Fixed, so those never show up as new devices.
 SERVICE_DEVICE_ID = base64.urlsafe_b64encode(b"SCPanel_service").decode().rstrip("=")
 
+# Used only to check whether a token handed to us by someone else (the
+# jellyfin-token exchange, not a login this client performed) is still valid.
+# Kept distinct from SERVICE_DEVICE_ID so it never shows up conflated with the
+# panel's own service identity in Jellyfin's device list.
+TOKEN_CHECK_DEVICE_ID = base64.urlsafe_b64encode(b"SCPanel_token_check").decode().rstrip("=")
+
 
 class JellyfinError(Exception):
     """Base error. ``status`` is the HTTP status when there was a response."""
@@ -183,6 +189,16 @@ class JellyfinClient:
         if not data.get("AccessToken") or not data.get("User", {}).get("Id"):
             raise JellyfinAuthError("Risposta di autenticazione Jellyfin incompleta")
         return data
+
+    def me(self) -> dict:
+        """GET /Users/Me — identifies whoever ``self.token`` belongs to.
+
+        Used to trade an already-issued token for a panel session (the
+        Jellyfin custom-tab embed) without knowing a username up front. A
+        401/403 here means the token is invalid or expired, exactly like a
+        wrong password would during ``authenticate()``.
+        """
+        return self._json(self._request("GET", "/Users/Me"))
 
     def logout(self):
         """POST /Sessions/Logout — invalidates ``self.token``.

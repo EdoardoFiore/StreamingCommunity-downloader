@@ -27,6 +27,29 @@ async function safeJson(res) {
   try { return await res.json(); } catch { return {}; }
 }
 
+// Embedded as a Jellyfin custom tab, the parent frame already holds a valid
+// Jellyfin access token (window.ApiClient). Announce readiness — no secret in
+// this message, so targetOrigin '*' is fine — and if the parent replies with
+// a token, trade it for a panel session instead of showing the login form.
+// Standalone visits never get a reply, so the form loaded by init() below is
+// the fallback in every case: misconfigured embed, expired token, or no
+// embed at all.
+function listenForJellyfinToken() {
+  if (window.top === window.self) return;
+  window.addEventListener('message', async (event) => {
+    if (!event.data || event.data.type !== 'sc-panel-jellyfin-token' || !event.data.token) return;
+    try {
+      const res = await fetch('/api/auth/jellyfin-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: event.data.token }),
+      });
+      if (res.ok) window.location.href = '/';
+    } catch { /* fall back to the visible login form */ }
+  });
+  window.parent.postMessage({ type: 'sc-panel-ready' }, '*');
+}
+
 async function init() {
   try {
     const res = await fetch('/api/auth/status');
@@ -101,4 +124,5 @@ $('login-form').addEventListener('submit', async e => {
   }
 });
 
+listenForJellyfinToken();
 init();

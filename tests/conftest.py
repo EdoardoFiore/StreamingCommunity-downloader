@@ -56,6 +56,7 @@ class FakeJellyfin:
         self.calls: list[dict] = []
         self.issued_tokens: set[str] = set()
         self.revoked_tokens: set[str] = set()
+        self.token_owner: dict[str, str] = {}  # token → username
         # When True the server rejects any request carrying X-Forwarded-For,
         # which is what Jellyfin does when the panel is not a known proxy.
         self.reject_forwarded_ip = False
@@ -130,11 +131,21 @@ class FakeJellyfin:
             self._token_seq += 1
             access = f"token-{self._token_seq}"
             self.issued_tokens.add(access)
+            self.token_owner[access] = name
             return FakeResponse(200, {"User": user, "AccessToken": access, "ServerId": "server-1"})
 
         if path == "/Sessions/Logout" and method == "POST":
             self.revoked_tokens.add(token)
             return FakeResponse(204)
+
+        if path == "/Users/Me":
+            if not self._valid(token):
+                return FakeResponse(401, {"Error": "bad token"})
+            owner = self.token_owner.get(token)
+            user = self.users.get(owner) if owner else None
+            if user is None:
+                return FakeResponse(401, {"Error": "bad token"})
+            return FakeResponse(200, user)
 
         if path == "/System/Info":
             if not self._valid(token):

@@ -197,6 +197,7 @@ def test_public_allowlist_stays_small():
         "/favicon.ico",
         "/api/auth/status",
         "/api/auth/setup",
+        "/api/auth/jellyfin-token",
         "/api/auth/jellyfin",
     }
     assert SESSION_ONLY_PATHS == {"/api/auth/me", "/api/auth/logout"}
