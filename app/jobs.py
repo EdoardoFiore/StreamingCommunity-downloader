@@ -118,6 +118,19 @@ class JobManager:
         if self._loop:
             asyncio.run_coroutine_threadsafe(self._fanout(event), self._loop)
 
+    def _emit(self, job: "DownloadJob", event: dict):
+        """Push a terminal/progress event to the job's own queue and to everyone.
+
+        The loop is only set once the app has started; a job finishing before
+        that (or in a test) must not leave an un-awaited coroutine behind.
+        """
+        if self._loop is not None:
+            asyncio.run_coroutine_threadsafe(job.progress_queue.put(event), self._loop)
+        else:
+            logger.debug("No event loop bound; dropping %s for job %s",
+                         event.get("type"), job.job_id)
+        self._broadcast({**event, "job_id": job.job_id})
+
     async def _fanout(self, event: dict):
         dead = []
         for q in list(self._subscribers):
@@ -243,9 +256,7 @@ class JobManager:
                 return False
             job.cancel_event.set()
             job.status = "cancelled"
-        event = {"type": "error", "message": "Annullato"}
-        asyncio.run_coroutine_threadsafe(job.progress_queue.put(event), self._loop)
-        self._broadcast({**event, "job_id": job_id})
+        self._emit(job, {"type": "error", "message": "Annullato"})
         return True
 
     def dismiss(self, job_id: str) -> bool:
@@ -264,9 +275,7 @@ class JobManager:
         with self._semaphore:
             if job.cancel_event.is_set():
                 job.status = "cancelled"
-                ev = {"type": "error", "message": "Annullato"}
-                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-                self._broadcast({**ev, "job_id": job.job_id})
+                self._emit(job, {"type": "error", "message": "Annullato"})
                 return
 
             job.status = "running"
@@ -276,21 +285,15 @@ class JobManager:
                 result = fn(*args, **kwargs)
                 job.status = "done"
                 job.output_path = result
-                ev = {"type": "done", "output_path": result}
-                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-                self._broadcast({**ev, "job_id": job.job_id})
+                self._emit(job, {"type": "done", "output_path": result})
             except DownloadCancelledError:
                 job.status = "cancelled"
-                ev = {"type": "error", "message": "Annullato"}
-                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-                self._broadcast({**ev, "job_id": job.job_id})
+                self._emit(job, {"type": "error", "message": "Annullato"})
             except Exception as e:
                 logger.exception(f"Job {job.job_id} failed: {e}")
                 job.status = "error"
                 job.error = str(e)
-                ev = {"type": "error", "message": str(e)}
-                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-                self._broadcast({**ev, "job_id": job.job_id})
+                self._emit(job, {"type": "error", "message": str(e)})
             finally:
                 tmp_path = TMP_DIR / job.job_id
                 if tmp_path.exists():
@@ -314,7 +317,9 @@ class JobManager:
             title=title,
             type=type_,
             status=status,
-            created_at=datetime.now(timezone.utc),
+            # Same instant `status` was decided against, and timezone-aware like
+            # scheduled_at so the two stay comparable.
+            created_at=now,
             scheduled_at=scheduled_at,
             schedule_id=schedule_id,
             phases=phases or [],

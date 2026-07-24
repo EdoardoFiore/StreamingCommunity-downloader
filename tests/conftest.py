@@ -187,6 +187,27 @@ def client(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def stub_jobs(monkeypatch):
+    """Stop download submissions from actually reaching the network.
+
+    Used by tests that only care whether a request was authorised.
+    """
+    from app.jobs import job_manager
+
+    submitted: list[tuple] = []
+
+    def fake_submit(name):
+        def _submit(*args, **kwargs):
+            submitted.append((name, args, kwargs))
+            return f"job-{len(submitted)}"
+        return _submit
+
+    for name in ("submit_film", "submit_episode", "submit_anime_episode"):
+        monkeypatch.setattr(job_manager, name, fake_submit(name))
+    return submitted
+
+
+@pytest.fixture
 def admin_credentials(jellyfin):
     jellyfin.add_user("admin", "adminpw", admin=True)
     return {"url": "http://jellyfin.local:8096", "username": "admin", "password": "adminpw"}

@@ -1,12 +1,18 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.auth.deps import require
+from app.auth.permissions import Permission
 from app.core import animeunity
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/anime", tags=["anime"])
+router = APIRouter(
+    prefix="/api/anime",
+    tags=["anime"],
+    dependencies=[Depends(require(Permission.REQUEST, Permission.DOWNLOAD, mode="or"))],
+)
 
 
 @router.get("/{anime_id}/episodes")

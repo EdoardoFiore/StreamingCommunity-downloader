@@ -1,15 +1,25 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth.deps import require
+from app.auth.permissions import Permission
 from app.core.page import search as core_search
 from app.core.film import get_film_languages
 from app.core.tv import get_tv_languages
 from app.core import animeunity
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/search", tags=["search"])
+
+# Searching is the entry point to both flows, so either privilege grants it.
+# The language endpoint is part of the same flow: a requester has to see the
+# real audio and subtitle tracks before choosing them.
+router = APIRouter(
+    prefix="/api/search",
+    tags=["search"],
+    dependencies=[Depends(require(Permission.REQUEST, Permission.DOWNLOAD, mode="or"))],
+)
 
 
 @router.get("")

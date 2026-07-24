@@ -29,6 +29,15 @@ PUBLIC_PATHS = {
 }
 PUBLIC_PREFIXES = ("/static/", "/docs/")
 
+# API routes that need a session but no particular permission — they only ever
+# expose the caller's own identity. Listed explicitly so that a new endpoint
+# without a permission guard fails tests/test_permissions.py instead of quietly
+# being reachable by everyone. Nothing may be added here casually.
+SESSION_ONLY_PATHS = {
+    "/api/auth/me",
+    "/api/auth/logout",
+}
+
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 

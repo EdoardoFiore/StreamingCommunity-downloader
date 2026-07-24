@@ -2,13 +2,29 @@ import asyncio
 import logging
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
+from app.auth.deps import require
+from app.auth.permissions import Permission
 from app.core.headers import get_headers
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+
+# Posters accompany search results and the request queue, so approvers need
+# them too even when they cannot search.
+router = APIRouter(
+    dependencies=[
+        Depends(
+            require(
+                Permission.REQUEST,
+                Permission.DOWNLOAD,
+                Permission.MANAGE_REQUESTS,
+                mode="or",
+            )
+        )
+    ]
+)
 
 
 def _fetch_image(domain: str, filename: str) -> tuple[bytes, str]:

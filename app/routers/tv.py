@@ -1,12 +1,20 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth.deps import require
+from app.auth.permissions import Permission
 from app.core.tv import get_info_tv, get_info_season, get_token, get_tv_languages
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/tv", tags=["tv"])
+
+# Browsing seasons and episodes precedes both downloading and requesting.
+router = APIRouter(
+    prefix="/api/tv",
+    tags=["tv"],
+    dependencies=[Depends(require(Permission.REQUEST, Permission.DOWNLOAD, mode="or"))],
+)
 
 
 @router.get("/{tv_id}/token")
