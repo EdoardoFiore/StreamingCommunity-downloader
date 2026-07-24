@@ -1503,6 +1503,9 @@
       flex-shrink: 0; align-self: center;
       width: 17px; height: 17px; margin-top: 0; cursor: pointer;
     }
+    /* Keeps rows aligned when a row has nothing selectable (closed requests
+       cannot be withdrawn, so they render no checkbox). */
+    .req-check-spacer { display: inline-block; width: 17px; flex-shrink: 0; }
 
     /* ── Collapsible series/season groups ─────────────────────── */
     .req-group { margin-bottom: 10px; }
@@ -1822,10 +1825,10 @@
 
         <!-- ── My requests ─────────────────────────────────────── -->
         <div id="page-my-requests" style="display:none">
-          <div class="queue-filters">
-            <span class="text-muted" style="font-size:12px">
-              Lo stato si aggiorna quando un amministratore approva o rifiuta.
-            </span>
+          <div class="queue-filters" id="mine-filters">
+            <button class="queue-filter active" data-filter="active" onclick="setMineFilter('active')">In corso</button>
+            <button class="queue-filter" data-filter="closed" onclick="setMineFilter('closed')">Concluse</button>
+            <button class="queue-filter" data-filter="all" onclick="setMineFilter('all')">Tutte</button>
             <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadMyRequests()">
               <i class="ti ti-refresh"></i>
             </button>

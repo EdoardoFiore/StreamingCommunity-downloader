@@ -16,6 +16,12 @@ const REQUEST_STATUS_LABELS = {
   needs_attention: { label: 'Da verificare', cls: 'bg-orange-lt' },
 };
 
+// Same set as the server's OPEN_STATUSES: unresolved, and — not coincidentally
+// — exactly the statuses a request can still be withdrawn from. A closed
+// request (completed/available/denied/failed/cancelled) has no way back into
+// "cancelled" in the state machine, so there is nothing to offer there.
+const MINE_ACTIVE_STATUSES = ['pending', 'approved', 'downloading', 'needs_attention'];
+
 const NOTIFICATION_ICONS = {
   request_created: 'ti-inbox',
   request_joined: 'ti-users',
@@ -99,11 +105,8 @@ function groupRequests(list) {
 }
 
 function groupIsExpanded(g) {
-  if (!g.grouped || g.items.length <= 1) return true;
-  if (_expandedGroups.has(g.key)) return true;
-  // A group nobody has touched yet starts open only if something in it needs a
-  // decision — an all-settled series stays out of the way by default.
-  return g.items.some(r => r.status === 'pending' || r.status === 'needs_attention');
+  if (!g.grouped || g.items.length <= 1) return true; // singles render flat, no header to collapse
+  return _expandedGroups.has(g.key);
 }
 
 function toggleGroup(key) {
@@ -460,13 +463,33 @@ async function loadMyRequests() {
   }
 }
 
+function mineFilter() {
+  const active = document.querySelector('#mine-filters .queue-filter.active');
+  return active ? active.dataset.filter : 'active';
+}
+
+function setMineFilter(filter) {
+  document.querySelectorAll('#mine-filters .queue-filter').forEach(el =>
+    el.classList.toggle('active', el.dataset.filter === filter));
+  renderMyRequests();
+}
+
+function _matchesMineFilter(status, filter) {
+  if (filter === 'all') return true;
+  const isActive = MINE_ACTIVE_STATUSES.includes(status);
+  return filter === 'active' ? isActive : !isActive;
+}
+
 function renderMineRow(r, compact = false) {
-  const checked = _selected.mine.has(r.id) ? 'checked' : '';
+  const cancellable = MINE_ACTIVE_STATUSES.includes(r.status);
+  const checkboxHtml = cancellable
+    ? `<input type="checkbox" class="req-check" ${_selected.mine.has(r.id) ? 'checked' : ''}
+             onclick="event.stopPropagation(); toggleSelected('mine', ${r.id})">`
+    : '<span class="req-check-spacer"></span>';
   const title = compact ? episodeLabel(r) : requestTitle(r);
   return `
     <div class="req-row">
-      <input type="checkbox" class="req-check" ${checked}
-             onclick="event.stopPropagation(); toggleSelected('mine', ${r.id})">
+      ${checkboxHtml}
       ${compact ? '' : requestPoster(r)}
       <div class="req-main">
         <div class="req-title">${escapeHtml(title)}${!compact && r.year ? ` <span class="text-muted">(${escapeHtml(r.year)})</span>` : ''}</div>
@@ -478,7 +501,7 @@ function renderMineRow(r, compact = false) {
       <div class="req-side">
         ${statusBadge(r.status)}
         <div class="req-actions">
-          ${r.status === 'pending' ? `<button class="btn btn-sm btn-outline-secondary" onclick="withdrawRequest(${r.id})">
+          ${cancellable ? `<button class="btn btn-sm btn-outline-secondary" onclick="withdrawRequest(${r.id})">
             <i class="ti ti-trash me-1"></i>Annulla</button>` : ''}
         </div>
       </div>
@@ -489,16 +512,19 @@ function renderMineGroup(g) {
   if (!g.grouped) return renderMineRow(g.items[0]);
 
   const expanded = groupIsExpanded(g);
-  const ids = g.items.map(r => r.id);
-  const allSelected = ids.every(id => _selected.mine.has(id));
-  const someSelected = !allSelected && ids.some(id => _selected.mine.has(id));
+  const cancellableIds = g.items.filter(r => MINE_ACTIVE_STATUSES.includes(r.status)).map(r => r.id);
+  const allSelected = cancellableIds.length > 0 && cancellableIds.every(id => _selected.mine.has(id));
+  const someSelected = !allSelected && cancellableIds.some(id => _selected.mine.has(id));
+  const headerCheckbox = cancellableIds.length
+    ? `<input type="checkbox" class="req-check" ${allSelected ? 'checked' : ''}
+             ${someSelected ? 'data-indeterminate="1"' : ''}
+             onclick="event.stopPropagation(); toggleGroupSelected('mine', ${JSON.stringify(cancellableIds)})">`
+    : '<span class="req-check-spacer"></span>';
 
   return `
     <div class="req-group ${expanded ? 'expanded' : ''}" data-group-key="${escapeHtml(g.key)}">
       <div class="req-group-header" onclick="toggleGroup(this.closest('.req-group').dataset.groupKey)">
-        <input type="checkbox" class="req-check" ${allSelected ? 'checked' : ''}
-               ${someSelected ? 'data-indeterminate="1"' : ''}
-               onclick="event.stopPropagation(); toggleGroupSelected('mine', ${JSON.stringify(ids)})">
+        ${headerCheckbox}
         <i class="ti ti-chevron-right req-group-chevron"></i>
         ${requestPoster(g)}
         <div>
@@ -521,7 +547,20 @@ function renderMyRequests() {
     syncSelectionBar('mine');
     return;
   }
-  container.innerHTML = groupRequests(_myRequests).map(g => renderMineGroup(g)).join('');
+
+  const filter = mineFilter();
+  const groups = groupRequests(_myRequests)
+    .map(g => ({ ...g, items: g.items.filter(r => _matchesMineFilter(r.status, filter)) }))
+    .filter(g => g.items.length);
+
+  if (!groups.length) {
+    container.innerHTML = `<div class="empty-panel">
+      <i class="ti ti-filter-off"></i><p>Nessuna richiesta in questa categoria.</p></div>`;
+    syncSelectionBar('mine');
+    return;
+  }
+
+  container.innerHTML = groups.map(g => renderMineGroup(g)).join('');
   syncSelectionBar('mine');
 }
 

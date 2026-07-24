@@ -514,9 +514,11 @@ def test_requester_can_withdraw_their_own_pending_request(
     assert models.get(request_id).status == models.CANCELLED
 
 
-def test_requester_cannot_withdraw_a_request_already_downloading(
+def test_requester_can_withdraw_their_own_request_once_it_is_downloading(
     client, admin_credentials, source, stub_jobs
 ):
+    """It is still their request even after an admin has picked it up — and
+    withdrawing it also stops the running job (see service.cancel)."""
     do_setup(client, admin_credentials)
     bob = _user(client, "bob", Permission.REQUEST)
     bob_csrf = _login(client, bob)
@@ -524,8 +526,34 @@ def test_requester_cannot_withdraw_a_request_already_downloading(
     boss = _user(client, "boss", ALL_PERMISSIONS)
     csrf = _login(client, boss)
     client.post(f"/api/requests/{request_id}/approve", headers={"X-CSRF-Token": csrf})
+    assert models.get(request_id).status == models.DOWNLOADING
+
+    bob_csrf = _login(client, bob)
+    response = client.delete(f"/api/requests/{request_id}", headers={"X-CSRF-Token": bob_csrf})
+
+    assert response.status_code == 200
+    assert models.get(request_id).status == models.CANCELLED
+
+
+def test_requester_still_cannot_withdraw_a_terminal_request(
+    client, admin_credentials, source, stub_jobs
+):
+    """The state machine, not a permission check, is what stops this: CANCELLED
+    has no transition in from a closed status."""
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    bob_csrf = _login(client, bob)
+    request_id = _create(client, bob_csrf, FILM_BODY).json()["request"]["id"]
+    boss = _user(client, "boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    client.post(
+        f"/api/requests/{request_id}/deny",
+        json={"reason": "no"},
+        headers={"X-CSRF-Token": csrf},
+    )
 
     bob_csrf = _login(client, bob)
     response = client.delete(f"/api/requests/{request_id}", headers={"X-CSRF-Token": bob_csrf})
 
     assert response.status_code == 409
+    assert models.get(request_id).status == models.DENIED

@@ -274,8 +274,16 @@ def _deny_one(
 
 
 def _cancel_one(request_id: int, user) -> tuple[bool, models.Request | None, str | None, int]:
-    """Withdraw a request. The requester may cancel their own pending one; an
-    approver may cancel any request in a cancellable state."""
+    """Withdraw a request.
+
+    Any subscriber may withdraw it — pending, already approved, actively
+    downloading, or parked in needs_attention — not just while it is still
+    pending: it is their request, and cancelling one that is downloading also
+    stops the job (see service.cancel). An approver may do the same for any
+    request. The state machine is what actually stops a withdrawal once the
+    request is closed — CANCELLED has no path in from a terminal status — so
+    there is nothing left to check here beyond who may touch the row at all.
+    """
     request = models.get(request_id)
     if request is None:
         return False, None, "Richiesta non trovata", 404
@@ -283,11 +291,6 @@ def _cancel_one(request_id: int, user) -> tuple[bool, models.Request | None, str
     is_subscriber = user.id in models.subscribers(request_id)
     if not user.has(Permission.MANAGE_REQUESTS) and not is_subscriber:
         return False, None, "Richiesta non trovata", 404
-    if not user.has(Permission.MANAGE_REQUESTS) and request.status != models.PENDING:
-        return (
-            False, None,
-            "Solo una richiesta ancora in attesa può essere annullata", 409,
-        )
 
     try:
         return True, service.cancel(request_id, user.id), None, 200

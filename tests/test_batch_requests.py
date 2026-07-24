@@ -163,9 +163,10 @@ def test_approver_can_batch_cancel_anyones_request(client, approver, source):
     assert models.get(request_id).status == "cancelled"
 
 
-def test_batch_cancel_does_not_touch_a_downloading_request_for_a_plain_requester(
+def test_batch_cancel_lets_a_plain_requester_withdraw_a_downloading_request(
     client, approver, source, stub_jobs
 ):
+    """Not just pending: it is still their own request once it is running."""
     bob = _user(client, "bob", Permission.REQUEST)
     csrf = _login(client, bob)
     request_id = _episode(client, csrf)
@@ -177,8 +178,28 @@ def test_batch_cancel_does_not_touch_a_downloading_request_for_a_plain_requester
         "/api/requests/cancel-batch", json={"ids": [request_id]}, headers={"X-CSRF-Token": csrf}
     )
 
+    assert response.json()["results"][0]["ok"] is True
+    assert models.get(request_id).status == "cancelled"
+
+
+def test_batch_cancel_still_refuses_a_terminal_request(client, approver, source, stub_jobs):
+    bob = _user(client, "bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    request_id = _episode(client, csrf)
+    csrf = _login(client, approver)
+    client.post(
+        f"/api/requests/{request_id}/deny",
+        json={"reason": "no"},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    csrf = _login(client, bob)
+    response = client.post(
+        "/api/requests/cancel-batch", json={"ids": [request_id]}, headers={"X-CSRF-Token": csrf}
+    )
+
     assert response.json()["results"][0]["ok"] is False
-    assert models.get(request_id).status == "downloading"
+    assert models.get(request_id).status == "denied"
 
 
 # ── Counts badge ───────────────────────────────────────────────────────────────
