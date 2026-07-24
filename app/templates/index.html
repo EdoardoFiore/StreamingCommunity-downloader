@@ -1321,6 +1321,221 @@
     @media (hover: none) {
       .fm-actions { opacity: 1 !important; }
     }
+
+    /* ═══════════════════════════════════════════════════════
+       HEADER — current user and notifications
+       ═══════════════════════════════════════════════════════ */
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+
+    .header-icon-btn {
+      background: transparent; border: none; color: var(--text-sub);
+      width: 32px; height: 32px; border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; cursor: pointer; transition: background .15s ease, color .15s ease;
+    }
+    .header-icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+    .notif-wrap { position: relative; }
+
+    .notif-badge {
+      position: absolute; top: 1px; right: 1px;
+      min-width: 15px; height: 15px; padding: 0 4px;
+      background: var(--accent); color: #fff;
+      border-radius: 8px; font-size: 9px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .notif-panel {
+      position: absolute; right: 0; top: 38px; z-index: 1050;
+      width: 330px; max-height: 400px; overflow-y: auto;
+      background: var(--bg-raised);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 34px rgba(0,0,0,.45);
+    }
+    .notif-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 13px; border-bottom: 1px solid var(--border);
+      font-size: 12px; font-weight: 600; color: var(--text-sub);
+      position: sticky; top: 0; background: var(--bg-raised);
+    }
+    .btn-link-sm {
+      background: none; border: none; color: var(--blue);
+      font-size: 11px; cursor: pointer; padding: 0;
+    }
+    .notif-item {
+      display: flex; gap: 9px; padding: 10px 13px;
+      border-bottom: 1px solid var(--border); font-size: 12.5px;
+    }
+    .notif-item i { color: var(--text-muted); font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+    .notif-unread { background: rgba(224,36,68,.06); }
+    .notif-unread i { color: var(--accent); }
+    .notif-text { line-height: 1.4; }
+    .notif-time { color: var(--text-dim); font-size: 10.5px; margin-top: 2px; }
+    .notif-empty { padding: 22px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+    .user-chip {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 4px 6px 4px 8px;
+    }
+    .user-chip-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+    }
+    .user-chip-name { font-size: 12.5px; font-weight: 600; line-height: 1.1; }
+    .user-chip-role { font-size: 10px; color: var(--text-muted); line-height: 1.2; }
+    @media (max-width: 575px) { .user-chip-text { display: none; } }
+
+    /* ═══════════════════════════════════════════════════════
+       STATUS RIBBON on result cards
+       ═══════════════════════════════════════════════════════ */
+    .status-ribbon {
+      position: absolute; top: 6px; right: 6px; z-index: 3;
+      display: none; align-items: center; gap: 3px;
+      padding: 3px 7px; border-radius: 20px;
+      font-size: 9.5px; font-weight: 700; letter-spacing: .2px;
+      text-transform: uppercase; color: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,.4);
+      backdrop-filter: blur(4px);
+    }
+    .status-ribbon i { font-size: 11px; }
+    .status-ribbon.ribbon-pending,
+    .status-ribbon.ribbon-approved,
+    .status-ribbon.ribbon-download,
+    .status-ribbon.ribbon-available,
+    .status-ribbon.ribbon-denied,
+    .status-ribbon.ribbon-attention { display: flex; }
+
+    .ribbon-pending   { background: var(--yellow); color: #1a1a24; }
+    .ribbon-approved  { background: var(--blue); }
+    .ribbon-download  { background: var(--teal); color: #1a1a24; }
+    .ribbon-available { background: var(--green); color: #08231a; }
+    .ribbon-denied    { background: var(--accent); }
+    .ribbon-attention { background: #f5731f; }
+
+    /* ═══════════════════════════════════════════════════════
+       REQUEST ROWS — queue and my requests
+       ═══════════════════════════════════════════════════════ */
+    .queue-filters {
+      display: flex; align-items: center; gap: 7px;
+      margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .queue-filter {
+      background: var(--bg-surface); border: 1px solid var(--border);
+      color: var(--text-sub); border-radius: 20px;
+      padding: 5px 13px; font-size: 12px; cursor: pointer;
+      transition: all .15s ease;
+    }
+    .queue-filter:hover { background: var(--bg-hover); color: var(--text); }
+    .queue-filter.active {
+      background: var(--accent-dim); border-color: var(--accent);
+      color: #ff8fa3; font-weight: 600;
+    }
+
+    .req-row {
+      display: flex; gap: 13px; align-items: flex-start;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 13px; margin-bottom: 10px;
+      transition: border-color .15s ease;
+    }
+    .req-row:hover { border-color: var(--border-mid); }
+    .req-row-attention { border-left: 3px solid #f5731f; }
+
+    .req-poster {
+      width: 52px; height: 78px; flex-shrink: 0;
+      object-fit: cover; border-radius: var(--radius-xs);
+      background: var(--bg-input);
+    }
+    .req-poster-empty {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 21px; opacity: .35;
+    }
+
+    .req-main { flex: 1; min-width: 0; }
+    .req-title { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+    .req-meta {
+      font-size: 11.5px; color: var(--text-muted);
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    }
+    .req-meta i { font-size: 13px; }
+    .req-dot { color: var(--text-dim); }
+
+    .track-badges {
+      display: flex; align-items: center; gap: 4px;
+      flex-wrap: wrap; margin-top: 7px;
+    }
+    .track-label { color: var(--text-muted); font-size: 12px; }
+
+    .req-problem {
+      margin-top: 8px; padding: 6px 9px;
+      background: rgba(245,115,31,.10); border: 1px solid rgba(245,115,31,.3);
+      border-radius: var(--radius-xs); color: #ffb079; font-size: 11.5px;
+    }
+    .req-denied {
+      margin-top: 8px; padding: 6px 9px;
+      background: var(--accent-dim); border: 1px solid rgba(224,36,68,.3);
+      border-radius: var(--radius-xs); color: #ff8fa3; font-size: 11.5px;
+    }
+
+    .req-side {
+      display: flex; flex-direction: column; align-items: flex-end;
+      gap: 8px; flex-shrink: 0;
+    }
+    .req-actions { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+
+    @media (max-width: 575px) {
+      .req-row { flex-wrap: wrap; }
+      .req-side { width: 100%; align-items: flex-start; flex-direction: row;
+                  justify-content: space-between; }
+    }
+
+    .empty-panel {
+      text-align: center; padding: 48px 20px; color: var(--text-muted);
+    }
+    .empty-panel i { font-size: 34px; opacity: .3; display: block; margin-bottom: 10px; }
+    .empty-panel p { font-size: 13px; margin: 0; }
+
+    /* ═══════════════════════════════════════════════════════
+       USER ROWS
+       ═══════════════════════════════════════════════════════ */
+    .user-row {
+      display: flex; gap: 13px; align-items: flex-start;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 13px; margin-bottom: 9px;
+    }
+    .user-row-disabled { opacity: .55; }
+
+    .user-avatar {
+      width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+      background: var(--bg-raised); color: var(--text-sub);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700;
+    }
+    .user-main { flex: 1; min-width: 0; }
+    .user-name { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .user-actions { display: flex; gap: 5px; flex-shrink: 0; }
+
+    .perm-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+    .perm-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 20px; padding: 3px 10px 3px 8px;
+      font-size: 11px; color: var(--text-sub); cursor: pointer;
+      transition: all .15s ease;
+    }
+    .perm-chip:hover { border-color: var(--border-strong); color: var(--text); }
+    .perm-chip:has(input:checked) {
+      background: var(--blue-dim); border-color: rgba(79,128,255,.45); color: #a9c2ff;
+    }
+    .perm-chip input { margin: 0; }
+
+    @media (max-width: 575px) {
+      .user-row { flex-wrap: wrap; }
+      .user-actions { width: 100%; }
+    }
   </style>
 </head>
 <body class="antialiased">
@@ -1344,23 +1559,42 @@
       </div>
       <div class="collapse navbar-collapse" id="sidebar-menu">
         <ul class="navbar-nav pt-lg-3">
-          <li class="nav-item">
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
             <a class="nav-link active" href="#" data-page="search" onclick="showPage('search');return false">
               <span class="nav-link-icon"><i class="ti ti-search"></i></span>
               <span class="nav-link-title">Cerca</span>
             </a>
           </li>
-          <li class="nav-item">
+          <li class="nav-item" data-perm="DOWNLOAD|MANAGE_REQUESTS">
             <a class="nav-link" href="#" data-page="downloads" onclick="showPage('downloads');return false">
               <span class="nav-link-icon"><i class="ti ti-download"></i></span>
               <span class="nav-link-title">Download</span>
               <span class="badge bg-red ms-auto" id="active-jobs-badge" style="display:none"></span>
             </a>
           </li>
-          <li class="nav-item">
+          <li class="nav-item" data-perm="MANAGE_REQUESTS">
+            <a class="nav-link" href="#" data-page="requests" onclick="showPage('requests');return false">
+              <span class="nav-link-icon"><i class="ti ti-inbox"></i></span>
+              <span class="nav-link-title">Richieste</span>
+              <span class="badge bg-yellow ms-auto" id="queue-pending-count"></span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
+            <a class="nav-link" href="#" data-page="my-requests" onclick="showPage('my-requests');return false">
+              <span class="nav-link-icon"><i class="ti ti-send"></i></span>
+              <span class="nav-link-title">Le mie richieste</span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="VIEW_LIBRARY">
             <a class="nav-link" href="#" data-page="files" onclick="showPage('files');return false">
               <span class="nav-link-icon"><i class="ti ti-folder-filled"></i></span>
               <span class="nav-link-title">File</span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="MANAGE_USERS">
+            <a class="nav-link" href="#" data-page="users" onclick="showPage('users');return false">
+              <span class="nav-link-icon"><i class="ti ti-users"></i></span>
+              <span class="nav-link-title">Utenti</span>
             </a>
           </li>
         </ul>
@@ -1370,7 +1604,7 @@
             <span id="stream-label">Connessione...</span>
           </div>
           <span id="domain-badge" class="badge bg-secondary">caricamento...</span>
-          <button class="btn-sidebar-settings" onclick="openSettings()">
+          <button class="btn-sidebar-settings" data-perm="MANAGE_SETTINGS" onclick="openSettings()">
             <i class="ti ti-settings" style="font-size:15px;flex-shrink:0"></i>
             Impostazioni
           </button>
@@ -1386,6 +1620,38 @@
         <div class="row align-items-center">
           <div class="col">
             <h2 class="page-title" id="page-title">Cerca</h2>
+          </div>
+          <div class="col-auto">
+            <div class="header-actions">
+
+              <!-- Notification bell -->
+              <div class="notif-wrap">
+                <button class="header-icon-btn" id="notif-button" onclick="toggleNotifications()" title="Notifiche">
+                  <i class="ti ti-bell"></i>
+                  <span class="notif-badge" id="notif-badge" style="display:none"></span>
+                </button>
+                <div class="notif-panel" id="notif-panel" style="display:none">
+                  <div class="notif-header">
+                    <span>Notifiche</span>
+                    <button class="btn-link-sm" onclick="markAllNotificationsRead()">Segna lette</button>
+                  </div>
+                  <div id="notif-list"></div>
+                </div>
+              </div>
+
+              <!-- Current user -->
+              <div class="user-chip">
+                <div class="user-chip-avatar" id="user-initials">?</div>
+                <div class="user-chip-text">
+                  <div class="user-chip-name" id="user-name">—</div>
+                  <div class="user-chip-role" id="user-role"></div>
+                </div>
+                <button class="header-icon-btn" onclick="logout()" title="Esci">
+                  <i class="ti ti-logout"></i>
+                </button>
+              </div>
+
+            </div>
           </div>
         </div>
       </div>
@@ -1483,6 +1749,120 @@
           </div>
         </div>
 
+        <!-- ── Request queue (approvers) ────────────────────────── -->
+        <div id="page-requests" style="display:none">
+          <div class="queue-filters" id="queue-filters">
+            <button class="queue-filter active" data-filter="open" onclick="setQueueFilter('open')">Aperte</button>
+            <button class="queue-filter" data-filter="pending" onclick="setQueueFilter('pending')">In attesa</button>
+            <button class="queue-filter" data-filter="needs_attention" onclick="setQueueFilter('needs_attention')">Da verificare</button>
+            <button class="queue-filter" data-filter="all" onclick="setQueueFilter('all')">Tutte</button>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadRequestQueue()">
+              <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+          <div id="requests-list"></div>
+        </div>
+
+        <!-- ── My requests ─────────────────────────────────────── -->
+        <div id="page-my-requests" style="display:none">
+          <div class="queue-filters">
+            <span class="text-muted" style="font-size:12px">
+              Lo stato si aggiorna quando un amministratore approva o rifiuta.
+            </span>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadMyRequests()">
+              <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+          <div id="my-requests-list"></div>
+        </div>
+
+        <!-- ── Users ───────────────────────────────────────────── -->
+        <div id="page-users" style="display:none">
+          <div class="card mb-3">
+            <div class="card-body py-3">
+              <label class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="open-signin" onchange="saveOpenSignin()">
+                <span class="form-check-label">
+                  Consenti l'accesso a qualsiasi account Jellyfin
+                  <span class="d-block text-muted" style="font-size:11px">
+                    Disattivato: gli utenti vanno importati esplicitamente qui sotto.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div id="users-list"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Deny Request Modal ───────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="deny-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="ti ti-circle-x me-2 text-danger"></i>Rifiuta richiesta</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2" id="deny-title" style="font-weight:600"></p>
+        <label class="form-label">Motivo (visibile al richiedente)</label>
+        <textarea class="form-control" id="deny-reason" rows="3"
+                  placeholder="Es. contenuto già presente in libreria"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Annulla</button>
+        <button class="btn btn-danger" onclick="confirmDeny()">Rifiuta</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Fix Request Modal ────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="fix-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="ti ti-tool me-2 text-warning"></i>Correggi richiesta</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-1" id="fix-title" style="font-weight:600"></p>
+        <div class="req-problem mb-3" id="fix-problem"></div>
+
+        <label class="form-label">Tracce audio disponibili all'ultimo tentativo</label>
+        <div id="fix-audio" class="mb-3"></div>
+
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">ID sulla fonte</label>
+            <input class="form-control" id="fix-external-id">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Slug</label>
+            <input class="form-control" id="fix-slug">
+          </div>
+        </div>
+        <div class="row g-2 mt-1" id="fix-season-row">
+          <div class="col-6">
+            <label class="form-label">Stagione</label>
+            <input class="form-control" id="fix-season" type="number" min="0">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Episodio</label>
+            <input class="form-control" id="fix-episode">
+          </div>
+        </div>
+        <p class="text-muted mt-3 mb-0" style="font-size:11px">
+          Dopo la correzione, approva di nuovo la richiesta per riprovare.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Annulla</button>
+        <button class="btn btn-warning" onclick="confirmFix()">Salva correzione</button>
       </div>
     </div>
   </div>
@@ -1696,5 +2076,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
 <script src="/static/app.js"></script>
+<script src="/static/panel.js"></script>
 </body>
 </html>

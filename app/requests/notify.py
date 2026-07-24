@@ -42,14 +42,11 @@ class InAppChannel:
                     (user_id, request_id, event, message, timestamp),
                 )
 
+        # The SSE stream is shared by everyone connected to it, so the payload is
+        # only a signal to re-fetch: the message text and the recipient list stay
+        # behind GET /api/notifications, which is scoped to the caller.
         from app.jobs import job_manager
-        job_manager.broadcast({
-            "type": "notification",
-            "event": event,
-            "message": message,
-            "request_id": request_id,
-            "user_ids": user_ids,
-        })
+        job_manager.broadcast({"type": "notification"})
 
 
 CHANNELS = [InAppChannel()]
