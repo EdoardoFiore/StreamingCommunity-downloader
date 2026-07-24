@@ -83,6 +83,38 @@ def test_state_changing_request_rejects_a_foreign_csrf_token(client, admin_crede
     assert response.status_code == 403
 
 
+def test_csrf_rejection_carries_a_retry_marker_a_client_can_act_on(client, admin_credentials):
+    """A stale token — e.g. a tab left open across a newer login elsewhere,
+    which rotates the shared session cookie but not that tab's own in-memory
+    token — is something a client can recover from by refreshing and retrying
+    once. The marker header is what lets it tell that case apart from a real
+    permission denial, which a refresh would never fix."""
+    do_setup(client, admin_credentials)
+    bob = make_user("bob", "jf-bob-id", ALL)
+    session_for(client, bob.id)
+
+    response = client.post("/api/auth/logout")
+
+    assert response.status_code == 403
+    assert response.headers.get("x-csrf-retry") == "1"
+
+
+def test_permission_denied_carries_no_retry_marker(client, admin_credentials):
+    """Refreshing the CSRF token cannot fix a missing permission — the
+    frontend must not loop retrying this the way it does a stale token."""
+    from app.auth.permissions import Permission
+
+    do_setup(client, admin_credentials)
+    bob = make_user("bob", "jf-bob-id", int(Permission.REQUEST))
+    csrf = session_for(client, bob.id)
+
+    response = client.post("/api/users/import", json={"jellyfin_user_ids": ["x"]},
+                            headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 403
+    assert "x-csrf-retry" not in {k.lower() for k in response.headers.keys()}
+
+
 def test_state_changing_request_passes_with_the_matching_token(client, admin_credentials):
     do_setup(client, admin_credentials)
     bob = make_user("bob", "jf-bob-id", ALL)

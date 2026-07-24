@@ -25,24 +25,50 @@ function can(permission) {
 // fetch once covers every call site, including the ones written before auth
 // existed.
 const _nativeFetch = window.fetch.bind(window);
+
+function _withCsrfHeader(opts, method) {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && _csrf) {
+    opts.headers = { ...(opts.headers || {}), 'X-CSRF-Token': _csrf };
+  }
+  return opts;
+}
+
+/** Re-fetch identity and CSRF token without the page-load side effects
+ * (nav visibility, header). Returns false if the session itself is gone. */
+async function _refreshIdentity() {
+  const res = await _nativeFetch('/api/auth/me');
+  if (!res.ok) return false;
+  _me = await res.json();
+  _csrf = _me.csrf_token;
+  return true;
+}
+
 window.fetch = async (input, init) => {
   init = init || {};
   const method = (init.method || 'GET').toUpperCase();
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && _csrf) {
-    init.headers = { ...(init.headers || {}), 'X-CSRF-Token': _csrf };
+  const isAuthCall = String(input).startsWith('/api/auth/');
+
+  let res = await _nativeFetch(input, _withCsrfHeader(init, method));
+
+  // A stale token — typically a tab left open across a newer login elsewhere,
+  // which rotates the (browser-wide) session cookie but leaves this tab's own
+  // in-memory token behind — is safe to recover from: refresh it once and
+  // retry. A real permission-denied 403 carries no such header and falls
+  // through untouched, since refreshing a token would never fix that.
+  if (res.status === 403 && res.headers.get('X-CSRF-Retry') && !isAuthCall) {
+    if (await _refreshIdentity()) {
+      res = await _nativeFetch(input, _withCsrfHeader(init, method));
+    }
   }
-  const res = await _nativeFetch(input, init);
-  if (res.status === 401 && !String(input).startsWith('/api/auth/')) {
+
+  if (res.status === 401 && !isAuthCall) {
     window.location.href = '/login';
   }
   return res;
 };
 
 async function initAuth() {
-  const res = await _nativeFetch('/api/auth/me');
-  if (!res.ok) { window.location.href = '/login'; return false; }
-  _me = await res.json();
-  _csrf = _me.csrf_token;
+  if (!await _refreshIdentity()) { window.location.href = '/login'; return false; }
 
   const initials = (_me.user.username || '?').slice(0, 2).toUpperCase();
   document.getElementById('user-initials').textContent = initials;

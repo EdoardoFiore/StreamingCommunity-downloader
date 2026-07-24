@@ -40,6 +40,14 @@ SESSION_ONLY_PATHS = {
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
+# Set on a CSRF-rejection response so the frontend can tell it apart from an
+# ordinary 403 (permission denied) without parsing the message text. A stale
+# token — a tab left open across a newer login elsewhere, which rotates the
+# session cookie every tab shares but leaves each tab's own in-memory token
+# behind — is safe to recover from automatically; a real permission denial is
+# not something a token refresh would ever fix, and must not be retried.
+CSRF_RETRY_HEADER = "X-CSRF-Retry"
+
 
 def is_public(path: str) -> bool:
     return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
@@ -98,7 +106,9 @@ class AuthMiddleware:
             if not supplied or supplied != scope["state"]["csrf_token"]:
                 logger.warning("CSRF token mismatch on %s %s", request.method, path)
                 await JSONResponse(
-                    {"detail": "Token CSRF mancante o non valido"}, status_code=403
+                    {"detail": "Token CSRF mancante o non valido"},
+                    status_code=403,
+                    headers={CSRF_RETRY_HEADER: "1"},
                 )(scope, receive, send)
                 return
 
