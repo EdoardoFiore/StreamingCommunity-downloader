@@ -207,6 +207,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (can('VIEW_LIBRARY')) setupFileManager();
   setupSearchDebounce();
   refreshNotifications();
+  refreshQueueBadge();
   showPage(defaultPage());
 });
 
@@ -467,13 +468,20 @@ async function doSearch() {
       const posterHtml = posterUrl
         ? `<img src="${posterUrl}" alt="" onerror="this.closest('.poster-wrap').querySelector('.poster-noimg').style.display='flex';this.style.display='none'">`
         : '';
+      // Movie cards carry no status ribbon: a movie can be requested again
+      // freely (denied/failed/cancelled never block it), so a "richiesto" chip
+      // would just read as blocked when it is not. TV and anime keep it — their
+      // status is read from the grouped request rows anyway, not per-title.
+      const ribbonHtml = isMovie
+        ? ''
+        : `<div class="status-ribbon" data-ribbon-for="${escapeHtml(String(item.id))}"></div>`;
       card.innerHTML = `
         <div class="result-card" onclick="openDetailModal(${idx})">
           <div class="poster-wrap">
             ${posterHtml}
             <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
             <div class="poster-overlay"></div>
-            <div class="status-ribbon" data-ribbon-for="${escapeHtml(String(item.id))}"></div>
+            ${ribbonHtml}
             <div class="poster-play"><i class="ti ti-player-play-filled" style="font-size:16px"></i></div>
           </div>
           <div class="card-meta">
@@ -488,7 +496,7 @@ async function doSearch() {
       container.appendChild(card);
     });
     _searchResults = results;
-    loadRequestStatuses(results.map(r => String(r.id)));
+    loadRequestStatuses(results.filter(r => r.type !== 'movie').map(r => String(r.id)));
   } catch(e) {
     if (e.name === 'AbortError') return; // cancelled by new search
     const container = document.getElementById('search-results');
@@ -1072,6 +1080,7 @@ function connectGlobalStream() {
         // A bare signal: the payload lives behind /api/notifications, which is
         // scoped to the caller, so a shared stream leaks nothing.
         refreshNotifications();
+        refreshQueueBadge();
         if (can('MANAGE_REQUESTS') &&
             document.getElementById('page-requests').style.display !== 'none') {
           loadRequestQueue();

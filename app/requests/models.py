@@ -196,6 +196,15 @@ def get_by_job_id(job_id: str) -> Request | None:
     return _row_to_request(row) if row else None
 
 
+def count_by_status(*statuses: str) -> int:
+    """Cheap count for badges — no need to materialise full rows."""
+    placeholders = ",".join("?" * len(statuses))
+    row = db.query_one(
+        f"SELECT COUNT(*) AS n FROM jf_request WHERE status IN ({placeholders})", statuses
+    )
+    return row["n"]
+
+
 def find_open_by_key(key: str) -> Request | None:
     placeholders = ",".join("?" * len(OPEN_STATUSES))
     row = db.query_one(

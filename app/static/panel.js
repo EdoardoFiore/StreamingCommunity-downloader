@@ -31,6 +31,13 @@ const NOTIFICATION_ICONS = {
 let _queue = [];
 let _myRequests = [];
 
+// Selection state, kept separate per page so switching pages doesn't leak one
+// selection into the other.
+const _selected = { queue: new Set(), mine: new Set() };
+// Which series/season groups the user has toggled open, keyed by group key.
+// Persists across re-renders (SSE refresh, filter change) within the session.
+const _expandedGroups = new Set();
+
 function statusBadge(status) {
   const meta = REQUEST_STATUS_LABELS[status] || { label: status, cls: 'bg-secondary' };
   return `<span class="badge ${meta.cls}">${meta.label}</span>`;
@@ -43,6 +50,84 @@ function requestTitle(request) {
   }
   if (request.media_type === 'anime') return `${request.title} E${request.episode_number}`;
   return request.title;
+}
+
+function episodeLabel(request) {
+  if (request.media_type === 'episode') {
+    return `S${String(request.season).padStart(2, '0')}E${String(request.episode_number).padStart(2, '0')}`;
+  }
+  if (request.media_type === 'anime') return `E${request.episode_number}`;
+  return request.title;
+}
+
+// ── Grouping: episodes/anime of the same show, collapsible ─────────────────────
+//
+// Films are never grouped — each is already a single request. TV episodes and
+// anime episodes that share a source + external id are the same show, whatever
+// season or episode: bundling them is what makes approving 40 episodes at once
+// readable instead of a wall of identical-looking rows.
+
+function groupKey(r) {
+  if (r.media_type === 'film') return `film-${r.id}`;
+  return `${r.source}:${r.media_type}:${r.external_id}`;
+}
+
+function groupRequests(list) {
+  const groups = new Map();
+  for (const r of list) {
+    const key = groupKey(r);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key, grouped: r.media_type !== 'film',
+        title: r.title, year: r.year, poster: r.poster, source: r.source,
+        items: [],
+      });
+    }
+    groups.get(key).items.push(r);
+  }
+  const all = [...groups.values()];
+  for (const g of all) {
+    g.items.sort((a, b) => {
+      const seasonDiff = (a.season ?? 0) - (b.season ?? 0);
+      if (seasonDiff !== 0) return seasonDiff;
+      return parseFloat(a.episode_number ?? 0) - parseFloat(b.episode_number ?? 0);
+    });
+    g.latest = g.items.reduce((m, r) => (r.created_at > m ? r.created_at : m), '');
+  }
+  all.sort((a, b) => b.latest.localeCompare(a.latest));
+  return all;
+}
+
+function groupIsExpanded(g) {
+  if (!g.grouped || g.items.length <= 1) return true;
+  if (_expandedGroups.has(g.key)) return true;
+  // A group nobody has touched yet starts open only if something in it needs a
+  // decision — an all-settled series stays out of the way by default.
+  return g.items.some(r => r.status === 'pending' || r.status === 'needs_attention');
+}
+
+function toggleGroup(key) {
+  if (_expandedGroups.has(key)) _expandedGroups.delete(key);
+  else _expandedGroups.add(key);
+  // Re-render whichever page is showing.
+  if (document.getElementById('page-requests').style.display !== 'none') renderRequestQueue();
+  else renderMyRequests();
+}
+
+function groupStatusCounts(items) {
+  const counts = {};
+  for (const r of items) counts[r.status] = (counts[r.status] || 0) + 1;
+  return counts;
+}
+
+function groupStatusPills(items) {
+  const counts = groupStatusCounts(items);
+  return Object.entries(counts)
+    .map(([status, n]) => {
+      const meta = REQUEST_STATUS_LABELS[status] || { label: status, cls: 'bg-secondary' };
+      return `<span class="badge ${meta.cls}">${n} ${meta.label.toLowerCase()}</span>`;
+    })
+    .join('');
 }
 
 function trackBadges(request) {
@@ -81,6 +166,7 @@ async function loadRequestQueue() {
     if (!res.ok) throw new Error((await safeJson(res)).detail || 'Errore');
     _queue = await res.json();
     renderRequestQueue();
+    refreshQueueBadge();
   } catch (e) {
     container.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
   }
@@ -88,7 +174,7 @@ async function loadRequestQueue() {
 
 function queueFilter() {
   const active = document.querySelector('#queue-filters .queue-filter.active');
-  return active ? active.dataset.filter : 'open';
+  return active ? active.dataset.filter : 'action';
 }
 
 function setQueueFilter(filter) {
@@ -97,36 +183,48 @@ function setQueueFilter(filter) {
   renderRequestQueue();
 }
 
+function _matchesQueueFilter(status, filter) {
+  if (filter === 'all') return true;
+  // Default view: only what actually needs a decision. "approved" is a
+  // transient claim state (resolution is running), not something to act on.
+  if (filter === 'action') return status === 'pending' || status === 'needs_attention';
+  if (filter === 'in_progress') return status === 'approved' || status === 'downloading';
+  return status === filter;
+}
+
 function renderRequestQueue() {
   const container = document.getElementById('requests-list');
   const filter = queueFilter();
-  const open = ['pending', 'approved', 'downloading', 'needs_attention'];
-  const rows = _queue.filter(r =>
-    filter === 'all' ? true :
-    filter === 'open' ? open.includes(r.status) :
-    r.status === filter);
+  const groups = groupRequests(_queue)
+    .map(g => ({ ...g, items: g.items.filter(r => _matchesQueueFilter(r.status, filter)) }))
+    .filter(g => g.items.length);
 
-  document.getElementById('queue-pending-count').textContent =
-    _queue.filter(r => r.status === 'pending').length || '';
-
-  if (!rows.length) {
+  if (!groups.length) {
     container.innerHTML = `<div class="empty-panel">
       <i class="ti ti-inbox"></i><p>Nessuna richiesta da mostrare.</p></div>`;
-    return;
+  } else {
+    container.innerHTML = groups.map(g => renderQueueGroup(g)).join('');
   }
+  syncSelectionBar('queue');
+}
 
-  container.innerHTML = rows.map(r => `
+function renderQueueRow(r, compact = false) {
+  const checked = _selected.queue.has(r.id) ? 'checked' : '';
+  const title = compact ? episodeLabel(r) : requestTitle(r);
+  return `
     <div class="req-row ${r.status === 'needs_attention' ? 'req-row-attention' : ''}">
-      ${requestPoster(r)}
+      <input type="checkbox" class="req-check" ${checked}
+             onclick="event.stopPropagation(); toggleSelected('queue', ${r.id})">
+      ${compact ? '' : requestPoster(r)}
       <div class="req-main">
-        <div class="req-title">${escapeHtml(requestTitle(r))}${r.year ? ` <span class="text-muted">(${escapeHtml(r.year)})</span>` : ''}</div>
+        <div class="req-title">${escapeHtml(title)}${!compact && r.year ? ` <span class="text-muted">(${escapeHtml(r.year)})</span>` : ''}</div>
         <div class="req-meta">
           <i class="ti ti-user"></i> ${escapeHtml(r.requested_by_username || '?')}
           ${r.subscribers.length > 1 ? `<span class="badge bg-purple-lt ms-1">+${r.subscribers.length - 1} altri</span>` : ''}
           <span class="req-dot">·</span>
           <i class="ti ti-calendar"></i> ${fmtDate(r.created_at)}
-          <span class="req-dot">·</span>
-          <span class="text-muted">${escapeHtml(r.source === 'animeunity' ? 'AnimeUnity' : 'StreamingCommunity')}</span>
+          ${compact ? '' : `<span class="req-dot">·</span>
+          <span class="text-muted">${escapeHtml(r.source === 'animeunity' ? 'AnimeUnity' : 'StreamingCommunity')}</span>`}
         </div>
         ${trackBadges(r)}
         ${r.problem ? `<div class="req-problem"><i class="ti ti-alert-circle me-1"></i>${escapeHtml(r.problem)}</div>` : ''}
@@ -136,50 +234,161 @@ function renderRequestQueue() {
         ${statusBadge(r.status)}
         <div class="req-actions">
           ${['pending', 'needs_attention'].includes(r.status) ? `
-            <button class="btn btn-sm btn-success" onclick="approveRequest(${r.id})">
+            <button class="btn btn-sm btn-success" onclick="approveRequests([${r.id}])">
               <i class="ti ti-check me-1"></i>${r.status === 'needs_attention' ? 'Riprova' : 'Approva'}</button>
-            <button class="btn btn-sm btn-outline-danger" onclick="openDenyModal(${r.id})">
+            <button class="btn btn-sm btn-outline-danger" onclick="openDenyModal([${r.id}])">
               <i class="ti ti-x"></i></button>` : ''}
           ${r.status === 'needs_attention' ? `
             <button class="btn btn-sm btn-outline-warning" onclick="openFixModal(${r.id})">
               <i class="ti ti-tool me-1"></i>Correggi</button>` : ''}
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
 }
 
-async function approveRequest(id) {
-  const res = await fetch(`/api/requests/${id}/approve`, { method: 'POST' });
+function renderQueueGroup(g) {
+  if (!g.grouped) return renderQueueRow(g.items[0]);
+
+  const expanded = groupIsExpanded(g);
+  const ids = g.items.map(r => r.id);
+  const allSelected = ids.every(id => _selected.queue.has(id));
+  const someSelected = !allSelected && ids.some(id => _selected.queue.has(id));
+
+  return `
+    <div class="req-group ${expanded ? 'expanded' : ''}" data-group-key="${escapeHtml(g.key)}">
+      <div class="req-group-header" onclick="toggleGroup(this.closest('.req-group').dataset.groupKey)">
+        <input type="checkbox" class="req-check" ${allSelected ? 'checked' : ''}
+               ${someSelected ? 'data-indeterminate="1"' : ''}
+               onclick="event.stopPropagation(); toggleGroupSelected('queue', ${JSON.stringify(ids)})">
+        <i class="ti ti-chevron-right req-group-chevron"></i>
+        ${requestPoster(g)}
+        <div>
+          <div class="req-group-title">${escapeHtml(g.title)}${g.year ? ` <span class="text-muted">(${escapeHtml(g.year)})</span>` : ''}</div>
+          <div class="req-group-count">${g.items.length} episodi richiesti</div>
+        </div>
+        <div class="req-group-statuses">${groupStatusPills(g.items)}</div>
+      </div>
+      <div class="req-group-body">
+        ${g.items.map(r => renderQueueRow(r, true)).join('')}
+      </div>
+    </div>`;
+}
+
+// ── Bulk selection ──────────────────────────────────────────────────────────────
+
+function toggleSelected(page, id) {
+  const set = _selected[page];
+  if (set.has(id)) set.delete(id); else set.add(id);
+  syncSelectionBar(page);
+}
+
+function toggleGroupSelected(page, ids) {
+  const set = _selected[page];
+  const allIn = ids.every(id => set.has(id));
+  ids.forEach(id => allIn ? set.delete(id) : set.add(id));
+  if (page === 'queue') renderRequestQueue(); else renderMyRequests();
+}
+
+function clearSelection(page) {
+  _selected[page].clear();
+  if (page === 'queue') renderRequestQueue(); else renderMyRequests();
+}
+
+function syncSelectionBar(page) {
+  const set = _selected[page];
+  const bar = document.getElementById(page === 'queue' ? 'queue-selection-bar' : 'mine-selection-bar');
+  const count = document.getElementById(page === 'queue' ? 'queue-selection-count' : 'mine-selection-count');
+  bar.style.visibility = set.size ? 'visible' : 'hidden';
+  count.textContent = `${set.size} selezionat${set.size === 1 ? 'a' : 'e'}`;
+  // Reflect selection on checkboxes already in the DOM without a full re-render
+  // (checkboxes are re-synced on every render anyway, this just keeps clicks snappy).
+  document.querySelectorAll('.req-check[data-indeterminate]').forEach(cb => {
+    cb.indeterminate = true;
+  });
+}
+
+async function approveRequests(ids) {
+  const res = await fetch('/api/requests/approve-batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
   const data = await safeJson(res);
   if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
-  showToast('Richiesta approvata', 'success');
+  const failed = (data.results || []).filter(r => !r.ok);
+  showToast(
+    failed.length
+      ? `${ids.length - failed.length}/${ids.length} approvate, ${failed.length} fallite`
+      : ids.length > 1 ? `${ids.length} richieste approvate` : 'Richiesta approvata',
+    failed.length ? 'warning' : 'success',
+  );
+  ids.forEach(id => _selected.queue.delete(id));
   await loadRequestQueue();
   refreshNotifications();
 }
 
-let _denyId = null;
+function approveSelected() {
+  const ids = [..._selected.queue];
+  if (ids.length) approveRequests(ids);
+}
 
-function openDenyModal(id) {
-  _denyId = id;
-  const request = _queue.find(r => r.id === id);
-  document.getElementById('deny-title').textContent = request ? requestTitle(request) : '';
+let _denyIds = [];
+
+function openDenyModal(ids) {
+  _denyIds = ids;
+  const single = ids.length === 1 ? _queue.find(r => r.id === ids[0]) : null;
+  document.getElementById('deny-title').textContent = single
+    ? requestTitle(single)
+    : `${ids.length} richieste selezionate`;
   document.getElementById('deny-reason').value = '';
   showModal('deny-modal');
   setTimeout(() => document.getElementById('deny-reason').focus(), 150);
 }
 
+function denySelected() {
+  const ids = [..._selected.queue];
+  if (ids.length) openDenyModal(ids);
+}
+
 async function confirmDeny() {
   const reason = document.getElementById('deny-reason').value.trim();
   if (!reason) { showToast('Indica un motivo', 'warning'); return; }
-  const res = await fetch(`/api/requests/${_denyId}/deny`, {
+  const res = await fetch('/api/requests/deny-batch', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason }),
+    body: JSON.stringify({ ids: _denyIds, reason }),
   });
   const data = await safeJson(res);
   if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
   hideModal('deny-modal');
-  showToast('Richiesta rifiutata', 'info');
+  const failed = (data.results || []).filter(r => !r.ok);
+  showToast(
+    failed.length ? `${failed.length} richieste non rifiutabili` : 'Richieste rifiutate',
+    failed.length ? 'warning' : 'info',
+  );
+  _denyIds.forEach(id => _selected.queue.delete(id));
   loadRequestQueue();
+}
+
+async function _cancelIds(ids, page) {
+  if (!ids.length) return;
+  if (!await scConfirm(`Annullare ${ids.length} richiest${ids.length === 1 ? 'a' : 'e'}?`)) return;
+  const res = await fetch('/api/requests/cancel-batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  const data = await safeJson(res);
+  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
+  const failed = (data.results || []).filter(r => !r.ok);
+  showToast(
+    failed.length ? `${failed.length} richieste non annullabili` : 'Richieste annullate',
+    failed.length ? 'warning' : 'info',
+  );
+  ids.forEach(id => _selected[page].delete(id));
+  if (page === 'queue') { await loadRequestQueue(); refreshNotifications(); }
+  else await loadMyRequests();
+}
+
+function cancelSelected(page) {
+  return _cancelIds([..._selected[page]], page);
 }
 
 // ── Fixing a parked request ────────────────────────────────────────────────────
@@ -245,22 +454,22 @@ async function loadMyRequests() {
     const res = await fetch('/api/requests/mine');
     if (!res.ok) throw new Error((await safeJson(res)).detail || 'Errore');
     _myRequests = await res.json();
+    renderMyRequests();
   } catch (e) {
     container.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
-    return;
   }
+}
 
-  if (!_myRequests.length) {
-    container.innerHTML = `<div class="empty-panel">
-      <i class="ti ti-send"></i><p>Non hai ancora richiesto niente.</p></div>`;
-    return;
-  }
-
-  container.innerHTML = _myRequests.map(r => `
+function renderMineRow(r, compact = false) {
+  const checked = _selected.mine.has(r.id) ? 'checked' : '';
+  const title = compact ? episodeLabel(r) : requestTitle(r);
+  return `
     <div class="req-row">
-      ${requestPoster(r)}
+      <input type="checkbox" class="req-check" ${checked}
+             onclick="event.stopPropagation(); toggleSelected('mine', ${r.id})">
+      ${compact ? '' : requestPoster(r)}
       <div class="req-main">
-        <div class="req-title">${escapeHtml(requestTitle(r))}${r.year ? ` <span class="text-muted">(${escapeHtml(r.year)})</span>` : ''}</div>
+        <div class="req-title">${escapeHtml(title)}${!compact && r.year ? ` <span class="text-muted">(${escapeHtml(r.year)})</span>` : ''}</div>
         <div class="req-meta"><i class="ti ti-calendar"></i> ${fmtDate(r.created_at)}</div>
         ${trackBadges(r)}
         ${r.denial_reason ? `<div class="req-denied"><i class="ti ti-x me-1"></i>Motivo: ${escapeHtml(r.denial_reason)}</div>` : ''}
@@ -273,16 +482,73 @@ async function loadMyRequests() {
             <i class="ti ti-trash me-1"></i>Annulla</button>` : ''}
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
 }
 
+function renderMineGroup(g) {
+  if (!g.grouped) return renderMineRow(g.items[0]);
+
+  const expanded = groupIsExpanded(g);
+  const ids = g.items.map(r => r.id);
+  const allSelected = ids.every(id => _selected.mine.has(id));
+  const someSelected = !allSelected && ids.some(id => _selected.mine.has(id));
+
+  return `
+    <div class="req-group ${expanded ? 'expanded' : ''}" data-group-key="${escapeHtml(g.key)}">
+      <div class="req-group-header" onclick="toggleGroup(this.closest('.req-group').dataset.groupKey)">
+        <input type="checkbox" class="req-check" ${allSelected ? 'checked' : ''}
+               ${someSelected ? 'data-indeterminate="1"' : ''}
+               onclick="event.stopPropagation(); toggleGroupSelected('mine', ${JSON.stringify(ids)})">
+        <i class="ti ti-chevron-right req-group-chevron"></i>
+        ${requestPoster(g)}
+        <div>
+          <div class="req-group-title">${escapeHtml(g.title)}${g.year ? ` <span class="text-muted">(${escapeHtml(g.year)})</span>` : ''}</div>
+          <div class="req-group-count">${g.items.length} episodi richiesti</div>
+        </div>
+        <div class="req-group-statuses">${groupStatusPills(g.items)}</div>
+      </div>
+      <div class="req-group-body">
+        ${g.items.map(r => renderMineRow(r, true)).join('')}
+      </div>
+    </div>`;
+}
+
+function renderMyRequests() {
+  const container = document.getElementById('my-requests-list');
+  if (!_myRequests.length) {
+    container.innerHTML = `<div class="empty-panel">
+      <i class="ti ti-send"></i><p>Non hai ancora richiesto niente.</p></div>`;
+    syncSelectionBar('mine');
+    return;
+  }
+  container.innerHTML = groupRequests(_myRequests).map(g => renderMineGroup(g)).join('');
+  syncSelectionBar('mine');
+}
+
+/** Withdraw a single request via the batch endpoint, independent of any
+ * bulk selection the user might currently have (must not sweep up other
+ * checked rows just because one row's own button was clicked). */
 async function withdrawRequest(id) {
-  if (!await scConfirm('Annullare questa richiesta?')) return;
-  const res = await fetch(`/api/requests/${id}`, { method: 'DELETE' });
-  const data = await safeJson(res);
-  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
-  showToast('Richiesta annullata', 'info');
-  loadMyRequests();
+  await _cancelIds([id], 'mine');
+}
+
+// ── Sidebar "Richieste" badge ───────────────────────────────────────────────────
+//
+// Hidden entirely at zero, shown with the real count from the moment the app
+// loads — not just after the user happens to open the queue page.
+
+async function refreshQueueBadge() {
+  if (!can('MANAGE_REQUESTS')) return;
+  const badge = document.getElementById('queue-pending-count');
+  if (!badge) return;
+  try {
+    const res = await fetch('/api/requests/counts');
+    if (!res.ok) return;
+    const counts = await res.json();
+    const n = counts.action_required || 0;
+    badge.textContent = n || '';
+    badge.style.display = n ? '' : 'none';
+  } catch (e) { /* leave the badge as it was */ }
 }
 
 // ── Users ──────────────────────────────────────────────────────────────────────

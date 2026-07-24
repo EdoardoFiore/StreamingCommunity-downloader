@@ -92,6 +92,18 @@ class MarkReadRequest(BaseModel):
     ids: list[int] | None = None
 
 
+MAX_BATCH = 200
+
+
+class BatchIdsRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=MAX_BATCH)
+
+
+class BatchDenyRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=MAX_BATCH)
+    reason: str = Field(min_length=1, max_length=500)
+
+
 def _public(request: models.Request) -> dict:
     return request.to_public(
         requester=models.username(request.requested_by),
@@ -176,6 +188,13 @@ def list_my_requests(http_request: HttpRequest):
     return [_public(r) for r in models.list_for_user(user.id)]
 
 
+# Denied, failed and cancelled requests are deliberately absent from card
+# status: they must not read as "you can't ask for this again" when you can.
+# A closed request never blocks a fresh one — see models.OPEN_STATUSES — so the
+# card should not look blocked either.
+VISIBLE_ON_CARD = models.OPEN_STATUSES + (models.AVAILABLE, models.COMPLETED)
+
+
 @router.post("/status", dependencies=CAN_SEE_OWN)
 def request_status(body: StatusQuery, http_request: HttpRequest):
     """Status per external id, for the badges on the search result cards."""
@@ -186,6 +205,8 @@ def request_status(body: StatusQuery, http_request: HttpRequest):
     result: dict[str, dict] = {}
     for request in models.list_all():
         if request.source != body.source or request.external_id not in wanted:
+            continue
+        if request.status not in VISIBLE_ON_CARD:
             continue
         if not can_see_all and user.id not in models.subscribers(request.id):
             continue
@@ -202,6 +223,18 @@ def request_status(body: StatusQuery, http_request: HttpRequest):
     return result
 
 
+@router.get("/counts", dependencies=CAN_MANAGE)
+def request_counts():
+    """Cheap counts for the sidebar badge — no need to fetch the whole queue."""
+    pending = models.count_by_status(models.PENDING)
+    needs_attention = models.count_by_status(models.NEEDS_ATTENTION)
+    return {
+        "pending": pending,
+        "needs_attention": needs_attention,
+        "action_required": pending + needs_attention,
+    }
+
+
 @router.get("/{request_id}", dependencies=CAN_SEE_OWN)
 def get_request(request_id: int, http_request: HttpRequest):
     user = current_user(http_request)
@@ -214,30 +247,118 @@ def get_request(request_id: int, http_request: HttpRequest):
 
 
 # ── Deciding ───────────────────────────────────────────────────────────────────
+#
+# Each single-item endpoint below delegates to a helper that returns a result
+# instead of raising, so the same helper drives both the HTTP-facing single
+# endpoint (translate to an exception) and the batch endpoint (collect one
+# result per id and keep going after a failure).
+
+def _approve_one(request_id: int, user_id: int) -> tuple[bool, models.Request | None, str | None, int]:
+    try:
+        return True, service.approve(request_id, user_id), None, 202
+    except LookupError:
+        return False, None, "Richiesta non trovata", 404
+    except models.InvalidTransition as exc:
+        return False, None, str(exc), 409
+
+
+def _deny_one(
+    request_id: int, user_id: int, reason: str
+) -> tuple[bool, models.Request | None, str | None, int]:
+    try:
+        return True, service.deny(request_id, user_id, reason), None, 200
+    except LookupError:
+        return False, None, "Richiesta non trovata", 404
+    except models.InvalidTransition as exc:
+        return False, None, str(exc), 409
+
+
+def _cancel_one(request_id: int, user) -> tuple[bool, models.Request | None, str | None, int]:
+    """Withdraw a request. The requester may cancel their own pending one; an
+    approver may cancel any request in a cancellable state."""
+    request = models.get(request_id)
+    if request is None:
+        return False, None, "Richiesta non trovata", 404
+
+    is_subscriber = user.id in models.subscribers(request_id)
+    if not user.has(Permission.MANAGE_REQUESTS) and not is_subscriber:
+        return False, None, "Richiesta non trovata", 404
+    if not user.has(Permission.MANAGE_REQUESTS) and request.status != models.PENDING:
+        return (
+            False, None,
+            "Solo una richiesta ancora in attesa può essere annullata", 409,
+        )
+
+    try:
+        return True, service.cancel(request_id, user.id), None, 200
+    except models.InvalidTransition as exc:
+        return False, None, str(exc), 409
+
+
+def _batch_row(request_id: int, ok: bool, request: models.Request | None, error: str | None) -> dict:
+    return {
+        "id": request_id,
+        "ok": ok,
+        **({"status": request.status} if ok and request else {}),
+        **({"error": error} if not ok else {}),
+    }
+
 
 @router.post("/{request_id}/approve", status_code=202, dependencies=CAN_MANAGE)
 def approve_request(request_id: int, http_request: HttpRequest):
     """Approve and return at once — resolution and download run in the background."""
     user = current_user(http_request)
-    try:
-        request = service.approve(request_id, user.id)
-    except LookupError:
-        raise HTTPException(status_code=404, detail="Richiesta non trovata")
-    except models.InvalidTransition as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    ok, request, error, status_code = _approve_one(request_id, user.id)
+    if not ok:
+        raise HTTPException(status_code=status_code, detail=error)
     return _public(request)
 
 
 @router.post("/{request_id}/deny", dependencies=CAN_MANAGE)
 def deny_request(request_id: int, body: DenyRequest, http_request: HttpRequest):
     user = current_user(http_request)
-    try:
-        request = service.deny(request_id, user.id, body.reason)
-    except LookupError:
-        raise HTTPException(status_code=404, detail="Richiesta non trovata")
-    except models.InvalidTransition as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    ok, request, error, status_code = _deny_one(request_id, user.id, body.reason)
+    if not ok:
+        raise HTTPException(status_code=status_code, detail=error)
     return _public(request)
+
+
+# ── Batch deciding ──────────────────────────────────────────────────────────────
+#
+# Approving or denying more episodes than fit in the download slots at once is
+# expected, not an error case: each approval only claims the request and hands
+# it to the resolution pool (4 workers) and, from there, the download thread
+# pool's semaphore — both already queue work that does not fit. Selecting 40
+# episodes and approving them together is exactly the "just queue them" case.
+
+@router.post("/approve-batch", status_code=202, dependencies=CAN_MANAGE)
+def approve_batch(body: BatchIdsRequest, http_request: HttpRequest):
+    user = current_user(http_request)
+    results = []
+    for request_id in body.ids:
+        ok, request, error, _ = _approve_one(request_id, user.id)
+        results.append(_batch_row(request_id, ok, request, error))
+    return {"results": results}
+
+
+@router.post("/deny-batch", dependencies=CAN_MANAGE)
+def deny_batch(body: BatchDenyRequest, http_request: HttpRequest):
+    user = current_user(http_request)
+    results = []
+    for request_id in body.ids:
+        ok, request, error, _ = _deny_one(request_id, user.id, body.reason)
+        results.append(_batch_row(request_id, ok, request, error))
+    return {"results": results}
+
+
+@router.post("/cancel-batch", dependencies=CAN_SEE_OWN)
+def cancel_batch(body: BatchIdsRequest, http_request: HttpRequest):
+    user = current_user(http_request)
+    results = []
+    for request_id in body.ids:
+        ok, request, error, _ = _cancel_one(request_id, user)
+        results.append(_batch_row(request_id, ok, request, error))
+    return {"results": results}
 
 
 @router.patch("/{request_id}", dependencies=CAN_MANAGE)
@@ -277,22 +398,10 @@ def edit_request(request_id: int, body: EditRequest):
 def cancel_request(request_id: int, http_request: HttpRequest):
     """Withdraw a request. The requester may cancel their own; approvers, any."""
     user = current_user(http_request)
-    request = models.get(request_id)
-    if request is None:
-        raise HTTPException(status_code=404, detail="Richiesta non trovata")
-
-    is_subscriber = user.id in models.subscribers(request_id)
-    if not user.has(Permission.MANAGE_REQUESTS) and not is_subscriber:
-        raise HTTPException(status_code=404, detail="Richiesta non trovata")
-    if not user.has(Permission.MANAGE_REQUESTS) and request.status != models.PENDING:
-        raise HTTPException(
-            status_code=409, detail="Solo una richiesta ancora in attesa può essere annullata"
-        )
-
-    try:
-        return _public(service.cancel(request_id, user.id))
-    except models.InvalidTransition as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    ok, request, error, status_code = _cancel_one(request_id, user)
+    if not ok:
+        raise HTTPException(status_code=status_code, detail=error)
+    return _public(request)
 
 
 # ── Notifications ──────────────────────────────────────────────────────────────

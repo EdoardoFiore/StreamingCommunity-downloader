@@ -1498,6 +1498,49 @@
     .empty-panel i { font-size: 34px; opacity: .3; display: block; margin-bottom: 10px; }
     .empty-panel p { font-size: 13px; margin: 0; }
 
+    /* ── Request row checkbox ─────────────────────────────────── */
+    .req-check {
+      flex-shrink: 0; align-self: center;
+      width: 17px; height: 17px; margin-top: 0; cursor: pointer;
+    }
+
+    /* ── Collapsible series/season groups ─────────────────────── */
+    .req-group { margin-bottom: 10px; }
+
+    .req-group-header {
+      display: flex; gap: 13px; align-items: center;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 10px 13px;
+      cursor: pointer; transition: border-color .15s ease;
+    }
+    .req-group-header:hover { border-color: var(--border-mid); }
+    .req-group.expanded .req-group-header {
+      border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+      border-bottom-color: transparent;
+    }
+    .req-group-header .req-poster { width: 40px; height: 58px; }
+
+    .req-group-chevron {
+      color: var(--text-muted); font-size: 15px; flex-shrink: 0;
+      transition: transform .15s ease;
+    }
+    .req-group.expanded .req-group-chevron { transform: rotate(90deg); }
+
+    .req-group-title { font-size: 14px; font-weight: 600; }
+    .req-group-count { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+    .req-group-statuses { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+
+    .req-group-body {
+      display: none;
+      border: 1px solid var(--border); border-top: none;
+      border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius);
+      padding: 6px 10px 10px;
+      background: var(--bg-base);
+    }
+    .req-group.expanded .req-group-body { display: block; }
+    .req-group-body .req-row { margin-bottom: 6px; margin-top: 6px; }
+    .req-group-body .req-row:last-child { margin-bottom: 0; }
+
     /* ═══════════════════════════════════════════════════════
        USER ROWS
        ═══════════════════════════════════════════════════════ */
@@ -1576,7 +1619,7 @@
             <a class="nav-link" href="#" data-page="requests" onclick="showPage('requests');return false">
               <span class="nav-link-icon"><i class="ti ti-inbox"></i></span>
               <span class="nav-link-title">Richieste</span>
-              <span class="badge bg-yellow ms-auto" id="queue-pending-count"></span>
+              <span class="badge bg-yellow ms-auto" id="queue-pending-count" style="display:none"></span>
             </a>
           </li>
           <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
@@ -1752,12 +1795,26 @@
         <!-- ── Request queue (approvers) ────────────────────────── -->
         <div id="page-requests" style="display:none">
           <div class="queue-filters" id="queue-filters">
-            <button class="queue-filter active" data-filter="open" onclick="setQueueFilter('open')">Aperte</button>
-            <button class="queue-filter" data-filter="pending" onclick="setQueueFilter('pending')">In attesa</button>
-            <button class="queue-filter" data-filter="needs_attention" onclick="setQueueFilter('needs_attention')">Da verificare</button>
+            <button class="queue-filter active" data-filter="action" onclick="setQueueFilter('action')">Da gestire</button>
+            <button class="queue-filter" data-filter="in_progress" onclick="setQueueFilter('in_progress')">In corso</button>
             <button class="queue-filter" data-filter="all" onclick="setQueueFilter('all')">Tutte</button>
             <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadRequestQueue()">
               <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+          <div class="fm-selection-bar" id="queue-selection-bar" style="visibility:hidden">
+            <span class="fm-selection-count" id="queue-selection-count">0 selezionate</span>
+            <button class="btn btn-sm btn-success" onclick="approveSelected()">
+              <i class="ti ti-check me-1"></i>Approva
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="denySelected()">
+              <i class="ti ti-x me-1"></i>Rifiuta
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="cancelSelected('queue')">
+              <i class="ti ti-ban me-1"></i>Annulla
+            </button>
+            <button class="btn btn-sm btn-ghost-secondary" onclick="clearSelection('queue')">
+              <i class="ti ti-x me-1"></i>Deseleziona
             </button>
           </div>
           <div id="requests-list"></div>
@@ -1771,6 +1828,15 @@
             </span>
             <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadMyRequests()">
               <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+          <div class="fm-selection-bar" id="mine-selection-bar" style="visibility:hidden">
+            <span class="fm-selection-count" id="mine-selection-count">0 selezionate</span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="cancelSelected('mine')">
+              <i class="ti ti-trash me-1"></i>Annulla selezionate
+            </button>
+            <button class="btn btn-sm btn-ghost-secondary" onclick="clearSelection('mine')">
+              <i class="ti ti-x me-1"></i>Deseleziona
             </button>
           </div>
           <div id="my-requests-list"></div>
