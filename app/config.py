@@ -64,6 +64,13 @@ COOKIE_SAMESITE = _resolve_samesite(os.getenv("COOKIE_SAMESITE", "lax"), COOKIE_
 # attacker-controlled and would poison the IP reported to Jellyfin.
 TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "0") == "1"
 
+# Set to 0 to run without a Jellyfin server: no login, no setup wizard, no
+# request queue or user management — every request gets the same implicit
+# permissions (download, settings, file manager, library), matching the panel
+# before SSO existed. Meant for a deploy-time choice, not something toggled
+# while a real Jellyfin-backed panel.db is in use.
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "1") == "1"
+
 SETTINGS_DEFAULTS = {
     "max_concurrent_downloads": 3,
     "max_segment_workers": 16,

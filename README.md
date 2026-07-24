@@ -121,12 +121,24 @@ Disabling a user takes effect on their next request and keeps their history.
 | `DATA_FILE` | `data.json` | source domain, libraries, performance settings |
 | `SCHEDULE_FILE` | `schedule.json` | scheduled downloads |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | bind address |
+| `AUTH_ENABLED` | `1` | set to `0` to run without Jellyfin — see below |
 | `COOKIE_SECURE` | `0` | set to `1` when serving over HTTPS |
 | `COOKIE_SAMESITE` | `lax` | set to `none` (with `COOKIE_SECURE=1`) only to embed the panel in an iframe on another site/scheme — see below |
 | `TRUST_PROXY_HEADERS` | `0` | set to `1` only behind a reverse proxy you control |
 
 `panel.db` holds the Jellyfin service API key: keep it out of any web-served directory and off
 world-readable storage.
+
+### Running without Jellyfin
+
+Set `AUTH_ENABLED=0` to skip Jellyfin entirely: no login, no setup wizard, no request queue, no
+user management. Every visitor gets the same implicit access — direct download, settings and the
+file manager — the same surface the panel had before SSO existed. `panel.db` is still created (it
+still backs the schedule and job bookkeeping) but stays empty of users.
+
+This is a deploy-time choice. Flipping it back to `1` on a `panel.db` that already has real users
+and requests in it works — their data is untouched — but flipping a *live* deployment from `1` to
+`0` silently drops permission enforcement for everyone, so decide once, before rollout.
 
 ### Embedding the panel in an iframe (e.g. a Jellyfin custom tab)
 

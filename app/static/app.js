@@ -12,8 +12,9 @@ let _animeCtx = {};       // context for anime episode browser
 
 // ── Session ────────────────────────────────────────────────────────────────────
 
-let _me = null;           // { user, csrf_token }
+let _me = null;           // { user, csrf_token, auth_enabled }
 let _csrf = '';
+let _authEnabled = true;  // false when the panel runs without Jellyfin (AUTH_ENABLED=0)
 let _requestStatus = {};  // external_id → { id, status } for the result cards
 
 function can(permission) {
@@ -70,6 +71,8 @@ window.fetch = async (input, init) => {
 async function initAuth() {
   if (!await _refreshIdentity()) { window.location.href = '/login'; return false; }
 
+  _authEnabled = _me.auth_enabled !== false;
+
   const initials = (_me.user.username || '?').slice(0, 2).toUpperCase();
   document.getElementById('user-initials').textContent = initials;
   document.getElementById('user-name').textContent = _me.user.username;
@@ -81,6 +84,11 @@ async function initAuth() {
     const needed = el.dataset.perm.split('|');
     el.style.display = needed.some(can) ? '' : 'none';
   });
+  // Without Jellyfin there is no identity or request queue to show, even for
+  // the one permission (DOWNLOAD) that would otherwise leave them visible.
+  if (!_authEnabled) {
+    document.querySelectorAll('[data-requires-auth]').forEach(el => { el.style.display = 'none'; });
+  }
   return true;
 }
 

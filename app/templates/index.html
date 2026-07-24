@@ -1625,7 +1625,7 @@
               <span class="badge bg-yellow ms-auto" id="queue-pending-count" style="display:none"></span>
             </a>
           </li>
-          <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD" data-requires-auth="1">
             <a class="nav-link" href="#" data-page="my-requests" onclick="showPage('my-requests');return false">
               <span class="nav-link-icon"><i class="ti ti-send"></i></span>
               <span class="nav-link-title">Le mie richieste</span>
@@ -1671,7 +1671,7 @@
             <div class="header-actions">
 
               <!-- Notification bell -->
-              <div class="notif-wrap">
+              <div class="notif-wrap" data-requires-auth="1">
                 <button class="header-icon-btn" id="notif-button" onclick="toggleNotifications()" title="Notifiche">
                   <i class="ti ti-bell"></i>
                   <span class="notif-badge" id="notif-badge" style="display:none"></span>
@@ -1686,7 +1686,7 @@
               </div>
 
               <!-- Current user -->
-              <div class="user-chip">
+              <div class="user-chip" data-requires-auth="1">
                 <div class="user-chip-avatar" id="user-initials">?</div>
                 <div class="user-chip-text">
                   <div class="user-chip-name" id="user-name">—</div>

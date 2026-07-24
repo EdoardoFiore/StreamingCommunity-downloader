@@ -13,11 +13,35 @@ import logging
 from fastapi import HTTPException, Request
 from starlette.responses import JSONResponse, RedirectResponse
 
+from app.auth import models
 from app.auth import session as sessions
 from app.auth.permissions import Permission
-from app.config import TRUST_PROXY_HEADERS
+from app.config import AUTH_ENABLED, TRUST_PROXY_HEADERS
 
 logger = logging.getLogger(__name__)
+
+# Granted to every request when AUTH_ENABLED is False: the surface the panel
+# exposed before Jellyfin SSO existed. REQUEST/MANAGE_REQUESTS/MANAGE_USERS
+# are deliberately excluded — a queue and a user list have no meaning without
+# accounts.
+OPEN_MODE_PERMISSIONS = int(
+    Permission.DOWNLOAD
+    | Permission.MANAGE_SETTINGS
+    | Permission.MANAGE_FILES
+    | Permission.VIEW_LIBRARY
+)
+
+OPEN_MODE_USER = models.User(
+    id=0,
+    jellyfin_user_id="",
+    username="Pannello",
+    is_jellyfin_admin=False,
+    permissions=OPEN_MODE_PERMISSIONS,
+    enabled=True,
+    device_id="",
+    created_at="",
+    last_login_at=None,
+)
 
 # Reachable without a session. Everything not listed here needs one.
 PUBLIC_PATHS = {
@@ -80,9 +104,20 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        scope["state"] = scope.get("state", {})
+
+        if not AUTH_ENABLED:
+            # No Jellyfin server configured: every request is the same
+            # implicit user. No cookie is ever set, so there is no session to
+            # ride — the CSRF check below exists to protect that cookie and
+            # does not apply here.
+            scope["state"]["user"] = OPEN_MODE_USER
+            scope["state"]["csrf_token"] = None
+            await self.app(scope, receive, send)
+            return
+
         request = Request(scope, receive=receive)
         path = request.url.path
-        scope["state"] = scope.get("state", {})
         scope["state"]["user"] = None
         scope["state"]["csrf_token"] = None
 

@@ -18,7 +18,7 @@ from app.auth.deps import AuthMiddleware
 from app.jobs import job_manager
 from app.requests import router as requests_router, service as requests_service
 from app.schedule import ScheduleStore
-from app.config import SCHEDULE_FILE
+from app.config import AUTH_ENABLED, SCHEDULE_FILE
 from app.routers import domain, search, tv, downloads, progress, files, images, anime
 
 logging.basicConfig(
@@ -78,6 +78,8 @@ def index(request: Request):
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     """Login and first-run setup. Public; redirects away once signed in."""
-    if getattr(request.state, "user", None) is not None and auth_models.setup_done():
+    if not AUTH_ENABLED or (
+        getattr(request.state, "user", None) is not None and auth_models.setup_done()
+    ):
         return RedirectResponse("/", status_code=302)
     return templates.TemplateResponse(request=request, name="login.html")

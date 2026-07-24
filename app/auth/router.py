@@ -20,7 +20,7 @@ from app.auth.jellyfin import (
     normalize_base_url,
 )
 from app.auth.permissions import ALL_PERMISSIONS
-from app.config import COOKIE_SAMESITE, COOKIE_SECURE
+from app.config import AUTH_ENABLED, COOKIE_SAMESITE, COOKIE_SECURE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -63,7 +63,7 @@ def _set_session_cookie(response: Response, raw_token: str):
 
 
 def _session_payload(user: models.User, csrf_token: str) -> dict:
-    return {"user": user.to_public(), "csrf_token": csrf_token}
+    return {"user": user.to_public(), "csrf_token": csrf_token, "auth_enabled": AUTH_ENABLED}
 
 
 def _authenticate(base_url: str, username: str, password: str, ip: str | None) -> dict:
@@ -86,8 +86,10 @@ def _drop_token(base_url: str, username: str, token: str, ip: str | None):
 @router.get("/status")
 def auth_status():
     """Public: tells the login page whether the panel still needs setting up."""
+    if not AUTH_ENABLED:
+        return {"setup_done": True, "jellyfin_url": None, "auth_enabled": False}
     url, _ = models.jellyfin_config()
-    return {"setup_done": models.setup_done(), "jellyfin_url": url}
+    return {"setup_done": models.setup_done(), "jellyfin_url": url, "auth_enabled": True}
 
 
 @router.post("/setup")
@@ -97,6 +99,8 @@ async def setup(body: SetupRequest, request: Request, response: Response):
     Restricted to a user who is an administrator *on Jellyfin*, which is what
     removes the need for hardcoded credentials or a setup file.
     """
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=404, detail="Autenticazione disabilitata su questa installazione")
     if models.setup_done():
         raise HTTPException(status_code=403, detail="Il pannello è già configurato")
 
@@ -175,6 +179,8 @@ async def setup(body: SetupRequest, request: Request, response: Response):
 
 @router.post("/jellyfin")
 async def login(body: LoginRequest, request: Request, response: Response):
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=404, detail="Autenticazione disabilitata su questa installazione")
     base_url, _ = models.jellyfin_config()
     if not base_url or not models.setup_done():
         raise HTTPException(status_code=409, detail="Pannello non ancora configurato")
