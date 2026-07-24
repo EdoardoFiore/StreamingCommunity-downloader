@@ -210,7 +210,7 @@ def _park(request: models.Request, problem: str, exc: Exception):
 
 # ── Denial and cancellation ────────────────────────────────────────────────────
 
-def deny(request_id: int, decided_by: int, reason: str) -> models.Request:
+def deny(request_id: int, decided_by: int, reason: str | None = None) -> models.Request:
     request = models.transition(
         request_id, models.DENIED,
         decided_by=decided_by, decided_at=models.now_iso(), denial_reason=reason,
@@ -221,9 +221,8 @@ def deny(request_id: int, decided_by: int, reason: str) -> models.Request:
             raise LookupError("Richiesta non trovata")
         raise models.InvalidTransition(current.status, models.DENIED)
 
-    notify.notify_subscribers(
-        notify.REQUEST_DENIED, f"«{_label(request)}» è stata rifiutata: {reason}", request
-    )
+    message = f"«{_label(request)}» è stata rifiutata: {reason}" if reason else f"«{_label(request)}» è stata rifiutata."
+    notify.notify_subscribers(notify.REQUEST_DENIED, message, request)
     return request
 
 

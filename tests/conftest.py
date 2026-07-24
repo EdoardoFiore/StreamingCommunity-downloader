@@ -13,7 +13,19 @@ from fastapi.testclient import TestClient
 
 from app import db
 from app.auth import jellyfin as jf
-from app.auth import models, permissions, session as sessions
+from app.auth import models, permissions, ratelimit, session as sessions
+
+
+@pytest.fixture(autouse=True)
+def _reset_ratelimit():
+    """The login backoff in app/auth/ratelimit.py is a module-level dict, not
+    DB-backed state, so a fresh test database does not clear it on its own.
+    Autouse and independent of the `client` fixture: unit tests that call
+    ratelimit functions directly need this just as much as ones that go
+    through the API, and several tests reuse the same usernames ("bob",
+    "admin") across files."""
+    ratelimit._failures.clear()
+    yield
 
 
 # ── Fake Jellyfin server ───────────────────────────────────────────────────────

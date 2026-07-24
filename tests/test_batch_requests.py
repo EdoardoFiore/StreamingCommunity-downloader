@@ -110,12 +110,19 @@ def test_deny_batch_applies_the_same_reason_to_all(client, approver, source, stu
     )
 
 
-def test_deny_batch_needs_a_reason(client, approver):
+def test_deny_batch_reason_is_optional(client, approver, source, stub_jobs):
+    bob = _user(client, "bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    request_id = _episode(client, csrf, episode="1")
+
     csrf = _login(client, approver)
     response = client.post(
-        "/api/requests/deny-batch", json={"ids": [1], "reason": ""}, headers={"X-CSRF-Token": csrf}
+        "/api/requests/deny-batch", json={"ids": [request_id]}, headers={"X-CSRF-Token": csrf}
     )
-    assert response.status_code == 422
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["ok"] is True
+    assert models.get(request_id).denial_reason is None
 
 
 # ── Batch cancel ───────────────────────────────────────────────────────────────

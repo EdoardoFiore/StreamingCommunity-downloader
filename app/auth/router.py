@@ -2,12 +2,13 @@
 
 import asyncio
 import logging
+import math
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app import db
-from app.auth import models, session as sessions
+from app.auth import models, ratelimit, session as sessions
 from app.auth.deps import client_ip, current_user
 from app.auth.jellyfin import (
     JellyfinAuthError,
@@ -23,6 +24,19 @@ from app.config import COOKIE_SECURE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _enforce_rate_limit(ip: str | None, username: str):
+    """Reject before ever touching Jellyfin if this (ip, username) pair is
+    still cooling down from previous failures."""
+    wait = ratelimit.seconds_until_allowed(ip, username)
+    if wait > 0:
+        seconds = math.ceil(wait)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Troppi tentativi falliti. Riprova tra {seconds} secondi.",
+            headers={"Retry-After": str(seconds)},
+        )
 
 
 class SetupRequest(BaseModel):
@@ -97,14 +111,17 @@ async def setup(body: SetupRequest, request: Request, response: Response):
     except JellyfinError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    _enforce_rate_limit(ip, body.username)
     try:
         account = await asyncio.to_thread(
             _authenticate, base_url, body.username, body.password, ip
         )
     except JellyfinAuthError:
+        ratelimit.record_failure(ip, body.username)
         raise HTTPException(status_code=401, detail="Credenziali Jellyfin non valide")
     except JellyfinUnreachable as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    ratelimit.record_success(ip, body.username)
 
     jellyfin_user = account["User"]
     token = account["AccessToken"]
@@ -163,15 +180,18 @@ async def login(body: LoginRequest, request: Request, response: Response):
         raise HTTPException(status_code=409, detail="Pannello non ancora configurato")
 
     ip = client_ip(request)
+    _enforce_rate_limit(ip, body.username)
     try:
         account = await asyncio.to_thread(
             _authenticate, base_url, body.username, body.password, ip
         )
     except JellyfinAuthError:
         logger.warning("Failed Jellyfin sign-in for %r", body.username)
+        ratelimit.record_failure(ip, body.username)
         raise HTTPException(status_code=401, detail="Credenziali Jellyfin non valide")
     except JellyfinUnreachable as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    ratelimit.record_success(ip, body.username)
 
     jellyfin_user = account["User"]
     await asyncio.to_thread(

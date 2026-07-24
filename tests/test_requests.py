@@ -424,7 +424,7 @@ def test_only_a_parked_request_can_be_edited(client, admin_credentials, source, 
 
 # ── Denial, cancellation, completion ───────────────────────────────────────────
 
-def test_denial_requires_a_reason_and_reaches_the_requester(
+def test_denial_reason_is_optional_and_reaches_the_requester_when_given(
     client, admin_credentials, source, stub_jobs
 ):
     do_setup(client, admin_credentials)
@@ -434,10 +434,6 @@ def test_denial_requires_a_reason_and_reaches_the_requester(
 
     boss = _user(client, "boss", ALL_PERMISSIONS)
     csrf = _login(client, boss)
-    assert client.post(
-        f"/api/requests/{request_id}/deny", json={"reason": ""}, headers={"X-CSRF-Token": csrf}
-    ).status_code == 422
-
     response = client.post(
         f"/api/requests/{request_id}/deny",
         json={"reason": "Già disponibile altrove"},
@@ -449,6 +445,40 @@ def test_denial_requires_a_reason_and_reaches_the_requester(
     assert response.json()["decided_by_username"] == "boss"
     messages = [n["message"] for n in notify.list_for_user(bob.id)]
     assert any("Già disponibile altrove" in m for m in messages)
+
+
+def test_denial_without_a_reason_still_works(client, admin_credentials, source, stub_jobs):
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    request_id = _create(client, csrf, FILM_BODY).json()["request"]["id"]
+
+    boss = _user(client, "boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+
+    response = client.post(
+        f"/api/requests/{request_id}/deny", json={}, headers={"X-CSRF-Token": csrf}
+    )
+    assert response.status_code == 200
+    assert response.json()["denial_reason"] is None
+    assert response.json()["status"] == "denied"
+
+
+def test_denial_with_a_blank_reason_is_treated_as_none(client, admin_credentials, source, stub_jobs):
+    """A whitespace-only reason from the client is the same as no reason at all."""
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    request_id = _create(client, csrf, FILM_BODY).json()["request"]["id"]
+
+    boss = _user(client, "boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    response = client.post(
+        f"/api/requests/{request_id}/deny", json={"reason": "   "}, headers={"X-CSRF-Token": csrf}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["denial_reason"] is None
 
 
 def test_job_completion_marks_the_request_done_and_notifies(

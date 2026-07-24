@@ -354,10 +354,9 @@ function denySelected() {
 
 async function confirmDeny() {
   const reason = document.getElementById('deny-reason').value.trim();
-  if (!reason) { showToast('Indica un motivo', 'warning'); return; }
   const res = await fetch('/api/requests/deny-batch', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids: _denyIds, reason }),
+    body: JSON.stringify({ ids: _denyIds, reason: reason || null }),
   });
   const data = await safeJson(res);
   if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }

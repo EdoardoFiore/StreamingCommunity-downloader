@@ -59,8 +59,18 @@ class CreateRequest(BaseModel):
         return _validate_languages(value)
 
 
+def _blank_to_none(value: str | None) -> str | None:
+    value = (value or "").strip()
+    return value or None
+
+
 class DenyRequest(BaseModel):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, value):
+        return _blank_to_none(value)
 
 
 class EditRequest(BaseModel):
@@ -101,7 +111,12 @@ class BatchIdsRequest(BaseModel):
 
 class BatchDenyRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=MAX_BATCH)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, value):
+        return _blank_to_none(value)
 
 
 def _public(request: models.Request) -> dict:
@@ -263,7 +278,7 @@ def _approve_one(request_id: int, user_id: int) -> tuple[bool, models.Request | 
 
 
 def _deny_one(
-    request_id: int, user_id: int, reason: str
+    request_id: int, user_id: int, reason: str | None
 ) -> tuple[bool, models.Request | None, str | None, int]:
     try:
         return True, service.deny(request_id, user_id, reason), None, 200
