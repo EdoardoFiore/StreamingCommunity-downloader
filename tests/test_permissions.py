@@ -35,6 +35,7 @@ CASES = [
     ((Permission.VIEW_LIBRARY,), "GET", "/api/files", None),
     ((Permission.MANAGE_REQUESTS, Permission.DOWNLOAD), "POST",
      "/api/download/does-not-exist/fire", None),
+    ((Permission.MANAGE_USERS,), "GET", "/api/users", None),
 ]
 
 
@@ -112,10 +113,31 @@ def test_unknown_permission_bits_are_dropped(client, admin_credentials):
 
 # ── Systematic sweep ───────────────────────────────────────────────────────────
 
-def _permission_guards(route: APIRoute) -> list[tuple]:
-    """Permission requirements attached to a route, at any dependency depth."""
+def _all_routes():
+    """Every routed endpoint, with its effective path and merged dependencies.
+
+    FastAPI no longer flattens ``include_router`` into ``app.routes`` — an
+    included router appears as one opaque entry — so walking ``app.routes``
+    alone sees only what was declared on the app itself, and any sweep over it
+    silently passes.
+    """
+    from app.main import app
+
+    routes = []
+    for route in app.routes:
+        effective = getattr(route, "effective_route_contexts", None)
+        if callable(effective):
+            for context in effective():
+                routes.append((context.path, context.methods, context.dependant))
+        elif isinstance(route, APIRoute):
+            routes.append((route.path, route.methods, route.dependant))
+    return routes
+
+
+def _permission_guards(dependant) -> list[tuple]:
+    """Permission requirements on a route, at any dependency depth."""
     found = []
-    stack = list(route.dependant.dependencies)
+    stack = list(dependant.dependencies)
     while stack:
         dependency = stack.pop()
         required = getattr(dependency.call, "__required_permissions__", None)
@@ -125,26 +147,46 @@ def _permission_guards(route: APIRoute) -> list[tuple]:
     return found
 
 
+def test_the_route_sweep_actually_sees_the_routers():
+    """Guard against the sweep below passing because it found nothing to check."""
+    paths = {path for path, _, _ in _all_routes()}
+    assert "/api/download/film" in paths
+    assert "/api/users" in paths
+    assert len([p for p in paths if p.startswith("/api/")]) > 20
+
+
 def test_every_api_route_is_classified():
     """No /api route may exist without an explicit decision about who reaches it.
 
     A new endpoint has to be either public, explicitly session-only, or guarded
     by a permission — otherwise this fails. Hiding a button is not authorisation.
     """
-    from app.main import app
-
     unclassified = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or not route.path.startswith("/api/"):
+    for path, methods, dependant in _all_routes():
+        if not path.startswith("/api/"):
             continue
-        if route.path in PUBLIC_PATHS or route.path in SESSION_ONLY_PATHS:
+        if path in PUBLIC_PATHS or path in SESSION_ONLY_PATHS:
             continue
-        if not _permission_guards(route):
-            unclassified.append(f"{sorted(route.methods)} {route.path}")
+        if not _permission_guards(dependant):
+            unclassified.append(f"{sorted(methods)} {path}")
 
     assert not unclassified, (
         "These API routes carry no permission guard and are not in the public or "
         "session-only allowlists:\n  " + "\n  ".join(sorted(unclassified))
+    )
+
+
+def test_every_permission_is_enforced_somewhere():
+    """A permission nobody checks is a permission that does not exist."""
+    enforced = set()
+    for _, _, dependant in _all_routes():
+        for required in _permission_guards(dependant):
+            enforced.update(required)
+
+    defined = {p for p in Permission if p is not Permission.NONE}
+    assert defined - enforced == set(), (
+        "These permissions are never checked on any route: "
+        + ", ".join(sorted(p.name for p in defined - enforced))
     )
 
 

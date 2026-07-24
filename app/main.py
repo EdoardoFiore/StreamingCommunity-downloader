@@ -13,6 +13,7 @@ from app import db
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
+from app.auth import users_router
 from app.auth.deps import AuthMiddleware
 from app.jobs import job_manager
 from app.schedule import ScheduleStore
@@ -50,6 +51,7 @@ app.mount("/docs", StaticFiles(directory=str(DOCS_DIR)), name="docs")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 app.include_router(auth_router.router)
+app.include_router(users_router.router)
 app.include_router(domain.router)
 app.include_router(search.router)
 app.include_router(tv.router)
