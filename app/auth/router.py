@@ -4,12 +4,12 @@ import asyncio
 import logging
 import math
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app import db
 from app.auth import models, ratelimit, session as sessions
-from app.auth.deps import client_ip, current_user
+from app.auth.deps import client_ip, current_user, require
 from app.auth.jellyfin import (
     TOKEN_CHECK_DEVICE_ID,
     JellyfinAuthError,
@@ -20,7 +20,7 @@ from app.auth.jellyfin import (
     is_administrator,
     normalize_base_url,
 )
-from app.auth.permissions import ALL_PERMISSIONS
+from app.auth.permissions import ALL_PERMISSIONS, Permission
 from app.config import AUTH_ENABLED, COOKIE_SAMESITE, COOKIE_SECURE
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,12 @@ def _enforce_rate_limit(ip: str | None, username: str):
 
 
 class SetupRequest(BaseModel):
+    url: str = Field(min_length=1)
+    username: str = Field(min_length=1)
+    password: str = ""
+
+
+class JellyfinConnectRequest(BaseModel):
     url: str = Field(min_length=1)
     username: str = Field(min_length=1)
     password: str = ""
@@ -68,7 +74,11 @@ def _set_session_cookie(response: Response, raw_token: str):
 
 
 def _session_payload(user: models.User, csrf_token: str) -> dict:
-    return {"user": user.to_public(), "csrf_token": csrf_token, "auth_enabled": AUTH_ENABLED}
+    return {
+        "user": user.to_public(),
+        "csrf_token": csrf_token,
+        "auth_enabled": AUTH_ENABLED and not models.runtime_open_mode(),
+    }
 
 
 def _authenticate(base_url: str, username: str, password: str, ip: str | None) -> dict:
@@ -99,10 +109,58 @@ def _drop_token(base_url: str, username: str, token: str, ip: str | None):
     ).logout()
 
 
+async def _authenticate_as_jellyfin_admin(
+    base_url: str, username: str, password: str, ip: str | None
+) -> tuple[dict, str]:
+    """Authenticate against Jellyfin, require the account to be an
+    administrator, and mint the panel's own service API key.
+
+    Shared by /setup and /jellyfin-connect: both bootstrap the panel's
+    Jellyfin identity the same way, just from different starting states.
+    Rate-limited and counted like a normal login attempt — a correct password
+    for a non-administrator account still clears the failure counter, since
+    the credentials themselves were valid. The Jellyfin token is invalidated
+    before returning either way; the panel never persists it. Raises
+    HTTPException for bad credentials, an unreachable server, a
+    non-administrator account, or a failed API key creation.
+    """
+    _enforce_rate_limit(ip, username)
+    try:
+        account = await asyncio.to_thread(_authenticate, base_url, username, password, ip)
+    except JellyfinAuthError:
+        ratelimit.record_failure(ip, username)
+        raise HTTPException(status_code=401, detail="Credenziali Jellyfin non valide")
+    except JellyfinUnreachable as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    ratelimit.record_success(ip, username)
+
+    jellyfin_user = account["User"]
+    token = account["AccessToken"]
+    try:
+        if not is_administrator(jellyfin_user):
+            logger.warning(
+                "Rejected: non-administrator Jellyfin user %r", jellyfin_user.get("Name")
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Solo un amministratore Jellyfin può configurare il pannello",
+            )
+        try:
+            api_key = await asyncio.to_thread(
+                JellyfinClient(base_url, token=token, client_ip=ip).create_api_key
+            )
+        except JellyfinError as exc:
+            raise HTTPException(status_code=502, detail=f"Creazione API key fallita: {exc}")
+    finally:
+        await asyncio.to_thread(_drop_token, base_url, username, token, ip)
+
+    return jellyfin_user, api_key
+
+
 @router.get("/status")
 def auth_status():
     """Public: tells the login page whether the panel still needs setting up."""
-    if not AUTH_ENABLED:
+    if not AUTH_ENABLED or models.runtime_open_mode():
         return {"setup_done": True, "jellyfin_url": None, "auth_enabled": False}
     url, _ = models.jellyfin_config()
     return {"setup_done": models.setup_done(), "jellyfin_url": url, "auth_enabled": True}
@@ -131,66 +189,141 @@ async def setup(body: SetupRequest, request: Request, response: Response):
     except JellyfinError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    _enforce_rate_limit(ip, body.username)
-    try:
-        account = await asyncio.to_thread(
-            _authenticate, base_url, body.username, body.password, ip
+    jellyfin_user, api_key = await _authenticate_as_jellyfin_admin(
+        base_url, body.username, body.password, ip
+    )
+
+    with db.tx() as conn:
+        # Re-checked inside the write transaction: two concurrent setup
+        # requests must not both create an administrator.
+        if conn.execute("SELECT COUNT(*) AS n FROM jf_user").fetchone()["n"]:
+            raise HTTPException(status_code=403, detail="Il pannello è già configurato")
+        models.set_setting(models.SETTING_JELLYFIN_URL, base_url, conn)
+        models.set_setting(models.SETTING_JELLYFIN_API_KEY, api_key, conn)
+        models.set_setting(
+            models.SETTING_JELLYFIN_SERVER_ID, jellyfin_user.get("ServerId", ""), conn
         )
-    except JellyfinAuthError:
-        ratelimit.record_failure(ip, body.username)
-        raise HTTPException(status_code=401, detail="Credenziali Jellyfin non valide")
-    except JellyfinUnreachable as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    ratelimit.record_success(ip, body.username)
-
-    jellyfin_user = account["User"]
-    token = account["AccessToken"]
-    try:
-        if not is_administrator(jellyfin_user):
-            logger.warning(
-                "Setup attempted by non-administrator Jellyfin user %r",
-                jellyfin_user.get("Name"),
-            )
-            raise HTTPException(
-                status_code=403,
-                detail="Solo un amministratore Jellyfin può configurare il pannello",
-            )
-
-        # The panel must be able to query Jellyfin on its own (to list users), so
-        # it creates its own application key rather than asking anyone to paste
-        # one. Done while the admin token is still valid.
-        try:
-            api_key = await asyncio.to_thread(
-                JellyfinClient(base_url, token=token, client_ip=ip).create_api_key
-            )
-        except JellyfinError as exc:
-            raise HTTPException(status_code=502, detail=f"Creazione API key fallita: {exc}")
-
-        with db.tx() as conn:
-            # Re-checked inside the write transaction: two concurrent setup
-            # requests must not both create an administrator.
-            if conn.execute("SELECT COUNT(*) AS n FROM jf_user").fetchone()["n"]:
-                raise HTTPException(status_code=403, detail="Il pannello è già configurato")
-            models.set_setting(models.SETTING_JELLYFIN_URL, base_url, conn)
-            models.set_setting(models.SETTING_JELLYFIN_API_KEY, api_key, conn)
-            models.set_setting(
-                models.SETTING_JELLYFIN_SERVER_ID, jellyfin_user.get("ServerId", ""), conn
-            )
-            user = models.create_user(
-                jellyfin_user_id=jellyfin_user["Id"],
-                username=jellyfin_user.get("Name", body.username),
-                permissions=int(ALL_PERMISSIONS),
-                is_jellyfin_admin=True,
-                conn=conn,
-            )
-    finally:
-        await asyncio.to_thread(_drop_token, base_url, body.username, token, ip)
+        models.set_setting(models.SETTING_AUTH_MODE, "jellyfin", conn)
+        user = models.create_user(
+            jellyfin_user_id=jellyfin_user["Id"],
+            username=jellyfin_user.get("Name", body.username),
+            permissions=int(ALL_PERMISSIONS),
+            is_jellyfin_admin=True,
+            conn=conn,
+        )
 
     models.touch_login(user.id, user.username, True)
     raw_token, csrf_token = sessions.create_session(user.id)
     _set_session_cookie(response, raw_token)
     logger.info("Panel bootstrapped by Jellyfin administrator %s", user.username)
     return _session_payload(models.get_user(user.id), csrf_token)
+
+
+@router.post("/skip")
+async def skip_setup():
+    """First-run alternative to /setup: run the panel without Jellyfin at all.
+
+    Interactive equivalent of deploying with AUTH_ENABLED=0, chosen from the
+    setup wizard instead of an environment variable — no restart needed, and
+    reachable again later from Settings via /jellyfin-connect. Reverting a
+    "jellyfin" mode back to "open" is intentionally not supported.
+    """
+    if not AUTH_ENABLED:
+        raise HTTPException(
+            status_code=404, detail="Autenticazione disabilitata su questa installazione"
+        )
+    if models.setup_done():
+        raise HTTPException(status_code=403, detail="Il pannello è già configurato")
+
+    with db.tx() as conn:
+        # Same race guard as /setup: two concurrent first-run choices must not
+        # both win.
+        if conn.execute("SELECT COUNT(*) AS n FROM jf_user").fetchone()["n"]:
+            raise HTTPException(status_code=403, detail="Il pannello è già configurato")
+        if models.get_setting(models.SETTING_AUTH_MODE) is not None:
+            raise HTTPException(status_code=403, detail="Il pannello è già configurato")
+        models.set_setting(models.SETTING_AUTH_MODE, "open", conn)
+
+    logger.info("Panel setup skipped: running without Jellyfin login")
+    return {"ok": True}
+
+
+@router.post("/jellyfin-connect")
+async def connect_jellyfin(
+    body: JellyfinConnectRequest,
+    request: Request,
+    response: Response,
+    user: models.User = Depends(
+        require(Permission.MANAGE_SETTINGS, Permission.MANAGE_USERS, mode="or")
+    ),
+):
+    """Connect the panel to Jellyfin from Settings.
+
+    Covers two cases: the first connection after an admin skipped setup (every
+    visitor holds MANAGE_SETTINGS in open mode — the same trust boundary as
+    /setup being unauthenticated, a valid Jellyfin administrator account is
+    what actually gates this), and reconfiguring an already-connected instance
+    (new URL, rotated credentials), which requires MANAGE_USERS specifically
+    since it can affect existing panel users.
+
+    Pointing the panel at a genuinely different Jellyfin server orphans
+    previously-imported users, whose jellyfin_user_id won't resolve there
+    anymore — this is inherent to the feature, not silently reconciled, and
+    must be called out in the Settings UI copy.
+    """
+    if not AUTH_ENABLED:
+        raise HTTPException(
+            status_code=404, detail="Autenticazione disabilitata su questa installazione"
+        )
+
+    already_connected = models.get_setting(models.SETTING_AUTH_MODE) == "jellyfin"
+    if already_connected and not user.has(Permission.MANAGE_USERS):
+        raise HTTPException(status_code=403, detail="Permesso negato")
+
+    try:
+        base_url = normalize_base_url(body.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    ip = client_ip(request)
+    try:
+        await asyncio.to_thread(JellyfinClient(base_url, client_ip=ip).public_info)
+    except JellyfinError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    jellyfin_user, api_key = await _authenticate_as_jellyfin_admin(
+        base_url, body.username, body.password, ip
+    )
+
+    with db.tx() as conn:
+        if not already_connected and models.get_setting(models.SETTING_AUTH_MODE) == "jellyfin":
+            # Same race as /setup and /skip: in open mode every visitor holds
+            # MANAGE_SETTINGS, so two concurrent first-time connections are
+            # effectively two concurrent public bootstraps.
+            raise HTTPException(
+                status_code=409, detail="Il pannello è già stato collegato a Jellyfin"
+            )
+        models.set_setting(models.SETTING_JELLYFIN_URL, base_url, conn)
+        models.set_setting(models.SETTING_JELLYFIN_API_KEY, api_key, conn)
+        models.set_setting(
+            models.SETTING_JELLYFIN_SERVER_ID, jellyfin_user.get("ServerId", ""), conn
+        )
+        models.set_setting(models.SETTING_AUTH_MODE, "jellyfin", conn)
+        panel_user = models.get_user_by_jellyfin_id(jellyfin_user["Id"])
+        if panel_user is None:
+            panel_user = models.create_user(
+                jellyfin_user_id=jellyfin_user["Id"],
+                username=jellyfin_user.get("Name", body.username),
+                permissions=int(ALL_PERMISSIONS),
+                is_jellyfin_admin=True,
+                conn=conn,
+            )
+
+    models.touch_login(panel_user.id, jellyfin_user.get("Name", panel_user.username), True)
+    raw_token, csrf_token = sessions.create_session(panel_user.id)
+    _set_session_cookie(response, raw_token)
+    logger.info("Panel connected to Jellyfin by administrator %s", panel_user.username)
+    return _session_payload(models.get_user(panel_user.id), csrf_token)
 
 
 @router.post("/jellyfin")

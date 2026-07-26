@@ -69,6 +69,12 @@ TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "0") == "1"
 # permissions (download, settings, file manager, library), matching the panel
 # before SSO existed. Meant for a deploy-time choice, not something toggled
 # while a real Jellyfin-backed panel.db is in use.
+#
+# There is also a runtime, DB-backed equivalent: an admin can choose "Continua
+# senza Jellyfin" in the setup wizard (POST /api/auth/skip), which reaches the
+# same open mode without touching this env var or restarting, and can later
+# connect the instance to Jellyfin from Settings (POST /api/auth/jellyfin-connect).
+# See app.auth.models.SETTING_AUTH_MODE / runtime_open_mode().
 AUTH_ENABLED = os.getenv("AUTH_ENABLED", "1") == "1"
 
 SETTINGS_DEFAULTS = {

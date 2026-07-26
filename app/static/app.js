@@ -313,8 +313,60 @@ async function openSettings() {
   document.getElementById('domain-input').value = currentDomain;
   document.getElementById('domain-feedback').textContent = '';
   renderLibrariesList();
-  await loadPerfSettings();
+  await Promise.all([loadPerfSettings(), loadJellyfinSettings()]);
   showModal('settings-modal');
+}
+
+// ── Jellyfin connection ──────────────────────────────────────────────────────
+
+async function loadJellyfinSettings() {
+  try {
+    const res = await fetch('/api/auth/status');
+    const data = await safeJson(res);
+    const connected = !!data.jellyfin_url;
+    document.getElementById('jf-not-connected').style.display = connected ? 'none' : '';
+    document.getElementById('jf-connected').style.display = connected ? '' : 'none';
+    if (connected) {
+      document.getElementById('jf-connected-url').textContent = data.jellyfin_url;
+      document.getElementById('jf-reconfigure-wrap').style.display = can('MANAGE_USERS') ? '' : 'none';
+    }
+  } catch (e) { console.error('loadJellyfinSettings:', e); }
+}
+
+function toggleJellyfinReconfigure() {
+  const form = document.getElementById('jf-reconfigure-form');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function connectJellyfin(reconfigure) {
+  const prefix = reconfigure ? 'jf-reconf-' : 'jf-';
+  const btn = document.getElementById(reconfigure ? 'jf-reconnect-btn' : 'jf-connect-btn');
+  const feedback = document.getElementById(reconfigure ? 'jf-reconnect-feedback' : 'jf-connect-feedback');
+  const url = document.getElementById(prefix + 'url').value.trim();
+  const username = document.getElementById(prefix + 'username').value.trim();
+  const password = document.getElementById(prefix + 'password').value;
+  if (!url || !username) { feedback.textContent = 'Compila URL e utente amministratore.'; return; }
+
+  btn.disabled = true;
+  feedback.textContent = 'Connessione...';
+  try {
+    const res = await fetch('/api/auth/jellyfin-connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, username, password }),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) {
+      feedback.textContent = data.detail || 'Collegamento fallito.';
+      btn.disabled = false;
+      return;
+    }
+    feedback.textContent = 'Collegato. Ricaricamento...';
+    window.location.reload();
+  } catch (e) {
+    feedback.textContent = 'Errore di rete.';
+    btn.disabled = false;
+  }
 }
 
 async function loadPerfSettings() {

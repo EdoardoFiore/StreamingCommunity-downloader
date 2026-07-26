@@ -97,6 +97,25 @@ $('setup-form').addEventListener('submit', async e => {
   }
 });
 
+$('skip-setup-btn').addEventListener('click', async () => {
+  clearAlert();
+  const btn = $('skip-setup-btn');
+  busy(btn, true, 'Attendere...');
+  try {
+    const res = await fetch('/api/auth/skip', { method: 'POST' });
+    const data = await safeJson(res);
+    if (!res.ok) {
+      showAlert(data.detail || 'Operazione fallita.');
+      busy(btn, false, 'Continua senza Jellyfin');
+      return;
+    }
+    window.location.href = '/';
+  } catch {
+    showAlert('Errore di rete.');
+    busy(btn, false, 'Continua senza Jellyfin');
+  }
+});
+
 $('login-form').addEventListener('submit', async e => {
   e.preventDefault();
   clearAlert();

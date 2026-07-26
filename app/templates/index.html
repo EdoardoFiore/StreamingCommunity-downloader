@@ -1966,6 +1966,67 @@
         </div>
 
         <hr>
+        <p class="settings-section-label">Jellyfin</p>
+        <div id="jf-not-connected" style="display:none">
+          <div class="form-text mb-2">
+            Il pannello funziona senza Jellyfin: nessun login, nessuna coda richieste, nessuna gestione utenti.
+            Collegalo per abilitarli.
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-12">
+              <label class="form-label">URL server Jellyfin</label>
+              <input type="text" id="jf-url" class="form-control" placeholder="http://192.168.1.10:8096">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Utente amministratore</label>
+              <input type="text" id="jf-username" class="form-control">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Password</label>
+              <input type="password" id="jf-password" class="form-control">
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="jf-connect-btn" onclick="connectJellyfin(false)">
+            <i class="ti ti-plug-connected me-1"></i>Collega a Jellyfin
+          </button>
+          <div id="jf-connect-feedback" class="form-text mt-1"></div>
+        </div>
+        <div id="jf-connected" style="display:none">
+          <div class="form-text mb-2">
+            Connesso a <strong id="jf-connected-url"></strong>
+          </div>
+          <div id="jf-reconfigure-wrap" style="display:none">
+            <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="toggleJellyfinReconfigure()">
+              Cambia server Jellyfin
+            </button>
+            <div id="jf-reconfigure-form" style="display:none">
+              <div class="form-text mb-2" style="color:#e6a23c">
+                Chi sta usando il pannello in questo momento senza login dovrà accedere di nuovo dopo
+                l'aggiornamento. Puntare a un server Jellyfin diverso renderà orfani gli utenti già importati.
+              </div>
+              <div class="row g-2 mb-2">
+                <div class="col-12">
+                  <label class="form-label">URL server Jellyfin</label>
+                  <input type="text" id="jf-reconf-url" class="form-control">
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label">Utente amministratore</label>
+                  <input type="text" id="jf-reconf-username" class="form-control">
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label">Password</label>
+                  <input type="password" id="jf-reconf-password" class="form-control">
+                </div>
+              </div>
+              <button type="button" class="btn btn-primary btn-sm" id="jf-reconnect-btn" onclick="connectJellyfin(true)">
+                Aggiorna configurazione
+              </button>
+              <div id="jf-reconnect-feedback" class="form-text mt-1"></div>
+            </div>
+          </div>
+        </div>
+
+        <hr>
         <p class="settings-section-label">Librerie Jellyfin</p>
         <div id="libraries-list" class="mb-3"></div>
         <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">

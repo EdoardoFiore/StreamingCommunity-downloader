@@ -25,6 +25,12 @@ SETTING_JELLYFIN_SERVER_ID = "jellyfin_server_id"
 SETTING_ALLOW_NEW_LOGIN = "allow_new_jellyfin_login"
 SETTING_DEFAULT_PERMISSIONS = "default_permissions"
 
+# Explicit auth mode chosen at setup time. Unset = wizard still pending, "open"
+# = admin chose to skip Jellyfin (no login, same surface as AUTH_ENABLED=0 but
+# a runtime choice instead of a deploy-time one), "jellyfin" = connected.
+# Reverting "jellyfin" -> "open" is intentionally not supported.
+SETTING_AUTH_MODE = "auth_mode"
+
 _SETTING_DEFAULTS = {
     SETTING_ALLOW_NEW_LOGIN: "0",  # off by default: users are imported explicitly
     SETTING_DEFAULT_PERMISSIONS: str(int(perms.DEFAULT_PERMISSIONS)),
@@ -63,9 +69,23 @@ def jellyfin_config() -> tuple[str | None, str | None]:
 
 
 def setup_done() -> bool:
-    """True once the first administrator exists and Jellyfin is configured."""
+    """True once the panel is configured: either Jellyfin is connected, or the
+    admin explicitly chose to skip it.
+
+    The Jellyfin check is unconditional (not gated on SETTING_AUTH_MODE being
+    "jellyfin") so installs that ran /setup before this flag existed are not
+    sent back to the wizard: they have jellyfin_url + a jf_user row but no
+    auth_mode key at all.
+    """
+    if get_setting(SETTING_AUTH_MODE) == "open":
+        return True
     row = db.query_one("SELECT COUNT(*) AS n FROM jf_user")
     return bool(row["n"]) and get_setting(SETTING_JELLYFIN_URL) is not None
+
+
+def runtime_open_mode() -> bool:
+    """True once an admin has explicitly skipped Jellyfin from the setup wizard."""
+    return get_setting(SETTING_AUTH_MODE) == "open"
 
 
 # ── Users ──────────────────────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ PUBLIC_PATHS = {
     "/favicon.ico",
     "/api/auth/status",
     "/api/auth/setup",
+    "/api/auth/skip",
     "/api/auth/jellyfin",
     "/api/auth/jellyfin-token",
 }
@@ -107,11 +108,12 @@ class AuthMiddleware:
 
         scope["state"] = scope.get("state", {})
 
-        if not AUTH_ENABLED:
-            # No Jellyfin server configured: every request is the same
-            # implicit user. No cookie is ever set, so there is no session to
-            # ride — the CSRF check below exists to protect that cookie and
-            # does not apply here.
+        if not AUTH_ENABLED or models.runtime_open_mode():
+            # No Jellyfin server configured (deploy-time env var, or an admin
+            # explicitly skipped it in the setup wizard): every request is the
+            # same implicit user. No cookie is ever set, so there is no
+            # session to ride — the CSRF check below exists to protect that
+            # cookie and does not apply here.
             scope["state"]["user"] = OPEN_MODE_USER
             scope["state"]["csrf_token"] = None
             await self.app(scope, receive, send)

@@ -103,6 +103,18 @@
     .btn-auth:hover:not(:disabled) { filter: brightness(1.1); color: #fff; }
     .btn-auth:disabled { opacity: .6; }
 
+    .btn-auth-ghost {
+      width: 100%;
+      background: transparent; border: 1px solid var(--border-mid); color: var(--text-muted);
+      border-radius: var(--radius-sm);
+      padding: 9px 16px; font-size: 13px; font-weight: 500;
+      margin-top: 10px;
+      transition: border-color .15s ease, color .15s ease;
+    }
+    .btn-auth-ghost:hover:not(:disabled) { border-color: var(--text-sub); color: var(--text-sub); }
+    .btn-auth-ghost:disabled { opacity: .5; }
+    .skip-hint { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 8px; line-height: 1.4; }
+
     .auth-alert {
       display: none;
       background: rgba(224,36,68,.12);
@@ -173,6 +185,10 @@
     <button type="submit" class="btn-auth" id="setup-btn">
       <i class="ti ti-plug-connected me-1"></i>Configura e accedi
     </button>
+    <button type="button" class="btn-auth-ghost" id="skip-setup-btn">
+      Continua senza Jellyfin
+    </button>
+    <p class="skip-hint">Userai il pannello senza login. Potrai collegarlo a Jellyfin in seguito dalle Impostazioni.</p>
   </form>
 
   <!-- ── Login ───────────────────────────────────────────────────────── -->
