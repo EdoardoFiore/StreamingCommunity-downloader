@@ -17,6 +17,51 @@ from app.auth import models, permissions, ratelimit, session as sessions
 
 
 @pytest.fixture(autouse=True)
+def _auth_enabled(monkeypatch):
+    """Force AUTH_ENABLED on for the suite.
+
+    The shipped default is off (open mode) so that pulling a newer image never
+    locks an existing deployment out — see app/config.py. Almost every test
+    here exercises the authenticated panel, so the default is flipped once,
+    centrally, instead of in each test.
+
+    Patched on the three modules that read it as an import-time constant rather
+    than on app.config, since rebinding the source module would not reach the
+    names already bound. Tests that want open mode override these afterwards
+    with their own monkeypatch call, which wins (see tests/test_open_mode.py).
+    """
+    from app import main as main_module
+    from app.auth import deps, router as auth_router
+
+    for module in (deps, auth_router, main_module):
+        monkeypatch.setattr(module, "AUTH_ENABLED", True)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _configured_domain(tmp_path, monkeypatch):
+    """Give every test a configured source domain, in a throwaway file.
+
+    This used to come for free from the ``data.json`` committed at the repo
+    root, which is no longer shipped — the source domain rotates, so a
+    baked-in value is stale by definition. Tests that hit a download or search
+    endpoint need one, otherwise the route refuses with 409 before reaching
+    what is under test.
+
+    Patched on ``app.config`` because ``configured_domain()`` reads the module
+    constant at call time; the routers import the function, not the path. The
+    ``source`` fixture separately points ``resolver.DATA_FILE`` at its own file
+    for library paths — same split as before.
+    """
+    from app import config
+
+    data_file = tmp_path / "config-data.json"
+    data_file.write_text(json.dumps({"domain": "example.test"}), encoding="utf-8")
+    monkeypatch.setattr(config, "DATA_FILE", data_file)
+    yield data_file
+
+
+@pytest.fixture(autouse=True)
 def _reset_ratelimit():
     """The login backoff in app/auth/ratelimit.py is a module-level dict, not
     DB-backed state, so a fresh test database does not clear it on its own.

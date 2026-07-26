@@ -7,5 +7,16 @@ videos/
 tmp/
 .git
 .gitignore
+.pytest_cache/
 
 docker-compose.yml
+
+# README screenshots and the design doc: repo-only, never needed at runtime.
+# Keeping them out also stops the design doc from being served and drops ~5 MB
+# from the image. The favicon lives in app/static/, not here.
+docs/
+design/
+
+# Tests and their dependencies do not belong in the runtime image.
+tests/
+requirements-dev.txt

@@ -10,7 +10,7 @@ test:
   stage: test
   image: python:3.11-slim
   script:
-    - pip install --no-cache-dir -r requirements.txt
+    - pip install --no-cache-dir -r requirements-dev.txt
     - pytest -q
   rules:
     - if: '$CI_COMMIT_BRANCH'

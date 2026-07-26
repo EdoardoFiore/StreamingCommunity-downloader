@@ -1,18 +1,27 @@
-# SC Panel with Jellyfin SSO, roles and the request system.
+# DEPRECATED — use docker-compose.template.yml instead.
 #
-# Published as a separate GHCR package from the main panel, so pulling this does
-# not replace a running production deployment:
-#   ghcr.io/edoardofiore/streamingcommunity-downloader-jellyfin
+# The Jellyfin SSO work this file existed for is now the main panel, published
+# to the main image. The separate `-jellyfin` GHCR package it points at is no
+# longer built: the workflow that produced it was pinned to the feature branch
+# and was removed at the merge, so its `:latest` tag is frozen and will never
+# receive a fix again.
 #
-#   docker compose -f docker-compose.jellyfin.yml up -d
+# To migrate, change one line in your own compose file:
 #
-# On first start open http://localhost:8000 — the panel asks for the Jellyfin
-# URL and the credentials of a Jellyfin administrator, who becomes the panel
-# administrator. No API key to paste, no credentials in this file.
+#   -  image: ghcr.io/edoardofiore/streamingcommunity-downloader-jellyfin:latest
+#   +  image: ghcr.io/edoardofiore/streamingcommunity-downloader:latest
+#
+# Nothing else changes: the environment variables and the /app/config volume are
+# identical, so your panel.db, users, requests and settings carry over as they
+# are. This file is kept for one release to make the rename discoverable, and
+# will be deleted after that.
+#
+# The content below is unchanged, apart from the image name, so an existing
+# deployment can keep using it in the meantime.
 
 services:
   web:
-    image: ghcr.io/edoardofiore/streamingcommunity-downloader-jellyfin:latest
+    image: ghcr.io/edoardofiore/streamingcommunity-downloader:latest
     ports:
       - "8000:8000"
     volumes:

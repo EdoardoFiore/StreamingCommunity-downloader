@@ -64,18 +64,27 @@ COOKIE_SAMESITE = _resolve_samesite(os.getenv("COOKIE_SAMESITE", "lax"), COOKIE_
 # attacker-controlled and would poison the IP reported to Jellyfin.
 TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "0") == "1"
 
-# Set to 0 to run without a Jellyfin server: no login, no setup wizard, no
-# request queue or user management — every request gets the same implicit
-# permissions (download, settings, file manager, library), matching the panel
-# before SSO existed. Meant for a deploy-time choice, not something toggled
-# while a real Jellyfin-backed panel.db is in use.
+# Jellyfin authentication is opt-in: set AUTH_ENABLED=1 to get the login screen,
+# the setup wizard, the request queue and user management. Left unset, the panel
+# runs open — no login, every request gets the same implicit permissions
+# (download, settings, file manager, library) — which is what the panel did
+# before SSO existed.
 #
-# There is also a runtime, DB-backed equivalent: an admin can choose "Continua
-# senza Jellyfin" in the setup wizard (POST /api/auth/skip), which reaches the
-# same open mode without touching this env var or restarting, and can later
-# connect the instance to Jellyfin from Settings (POST /api/auth/jellyfin-connect).
-# See app.auth.models.SETTING_AUTH_MODE / runtime_open_mode().
-AUTH_ENABLED = os.getenv("AUTH_ENABLED", "1") == "1"
+# The default is 0 deliberately, and it is the upgrade path: an existing
+# deployment's compose file predates this variable, so pulling a newer image
+# keeps behaving exactly as before instead of suddenly demanding a Jellyfin
+# server. Nothing here can distinguish an upgrade from a fresh install — there
+# is no persistent state that says so — hence a safe default rather than a
+# guess. The shipped compose file sets AUTH_ENABLED=1 explicitly, so new
+# deployments do get authentication.
+#
+# There is also a runtime, DB-backed equivalent, used when AUTH_ENABLED=1: an
+# admin can choose "Continua senza Jellyfin" in the setup wizard
+# (POST /api/auth/skip), reaching the same open mode without an env var or a
+# restart, and can connect Jellyfin later from Settings
+# (POST /api/auth/jellyfin-connect). See app.auth.models.SETTING_AUTH_MODE /
+# runtime_open_mode().
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "0") == "1"
 
 SETTINGS_DEFAULTS = {
     "max_concurrent_downloads": 3,

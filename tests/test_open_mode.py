@@ -82,7 +82,20 @@ def test_status_reports_auth_disabled(client, monkeypatch):
 
 
 def test_normal_mode_is_unaffected(client, admin_credentials):
-    """AUTH_ENABLED defaults to True when not overridden: setup still works
-    and reports itself as enabled."""
+    """With AUTH_ENABLED on — as the suite's autouse fixture sets it — setup
+    still works and reports itself as enabled."""
     body = do_setup(client, admin_credentials)
     assert body["auth_enabled"] is True
+
+
+def test_shipped_default_is_open_mode(monkeypatch):
+    """The default must stay off, so that an existing deployment pulling a newer
+    image is not locked out by a login screen its compose file knows nothing
+    about. Read through a reload rather than the imported constant, which the
+    autouse fixture has already flipped."""
+    import importlib
+
+    from app import config
+
+    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    assert importlib.reload(config).AUTH_ENABLED is False

@@ -18,3 +18,8 @@ panel.db
 panel.db-wal
 panel.db-shm
 .pytest_cache/
+
+# Runtime config, written by the panel (source domain, libraries, settings).
+# Not committed: the source domain rotates, so a baked-in value ships stale.
+data.json
+schedule.json

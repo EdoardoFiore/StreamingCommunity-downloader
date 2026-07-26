@@ -53,7 +53,7 @@ PUBLIC_PATHS = {
     "/api/auth/jellyfin",
     "/api/auth/jellyfin-token",
 }
-PUBLIC_PREFIXES = ("/static/", "/docs/")
+PUBLIC_PREFIXES = ("/static/",)
 
 # API routes that need a session but no particular permission — they only ever
 # expose the caller's own identity. Listed explicitly so that a new endpoint

@@ -8,14 +8,19 @@ A self-hosted FastAPI web panel that searches and downloads films, TV series and
 StreamingCommunity and AnimeUnity into a Jellyfin library. It handles M3U8 parsing, AES-CBC segment
 decryption, parallel downloading and FFmpeg merging.
 
-Access is authenticated against a Jellyfin server; there is no local password store.
+Access can be authenticated against a Jellyfin server; there is no local password store.
+Authentication is **opt-in**: `AUTH_ENABLED` defaults to `0`, which runs the panel open (no login),
+so pulling a newer image never locks out a deployment whose compose file predates the variable.
+The shipped compose sets `AUTH_ENABLED=1`.
 
 ## Running the Project
 
 ```bash
 pip install -r requirements.txt
-python main.py            # http://127.0.0.1:8000
-pytest -q                 # test suite
+python main.py            # http://127.0.0.1:8000, open mode
+
+pip install -r requirements-dev.txt   # tests only; kept out of the runtime image
+pytest -q
 ```
 
 **Prerequisites:** FFmpeg on PATH (the Docker image installs it).
@@ -65,16 +70,27 @@ request before any route runs.
 - `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications. Migrations are
   the ordered `MIGRATIONS` list in `app/db.py`, applied against `PRAGMA user_version`. Never edit an
   applied migration; append a new one.
-- `data.json` — source domain, library paths, performance settings
+- `data.json` — source domain, library paths, performance settings. Runtime state, not committed:
+  a baked-in source domain ships stale, since the domain rotates. Tests get one from the
+  `_configured_domain` autouse fixture in `tests/conftest.py`.
 - `schedule.json` — scheduled downloads
 
 Point `DB_FILE`, `DATA_FILE` and `SCHEDULE_FILE` at a persistent volume in Docker; see
-`docker-compose.jellyfin.yml`.
+`docker-compose.template.yml`.
+
+`docs/` holds README screenshots only. It is **not** served by the app and is excluded from the
+image — the favicon lives in `app/static/`. Design notes go in `design/`, which is likewise never
+served: anything under a mounted static directory is readable by unauthenticated visitors.
 
 ### Rules that are easy to break
 
 - **The source domain never comes from the client.** Use `app.config.configured_domain()`. Same for
   the requester's identity, which comes from the session, never from a request body.
+- **`AUTH_ENABLED` is read as an import-time constant** in `app/auth/deps.py`, `app/auth/router.py`
+  and `app/main.py`. Patching `app.config` alone does not reach those bindings — all three must be
+  patched (see the `_auth_enabled` fixture in `tests/conftest.py`). Open mode is also reachable at
+  runtime via `models.runtime_open_mode()` (the `auth_mode` setting), so both paths must be checked
+  wherever one is.
 - **Every `/api` route needs a decision**: public allowlist, `SESSION_ONLY_PATHS`, or a
   `require(...)` dependency. `tests/test_permissions.py` fails otherwise.
 - **No ADMIN super-permission.** Flags are independent, so an administrator can exist who never sees

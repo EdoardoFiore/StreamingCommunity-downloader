@@ -51,20 +51,52 @@
 ### Docker (recommended)
 
 ```bash
-curl -O https://raw.githubusercontent.com/EdoardoFiore/StreamingCommunity-downloader/main/docker-compose.jellyfin.yml
-# Edit the volume paths, then:
-docker compose -f docker-compose.jellyfin.yml up -d
+curl -O https://raw.githubusercontent.com/EdoardoFiore/StreamingCommunity-downloader/main/docker-compose.template.yml
+# Edit the two volume paths — and create the config one — then:
+docker compose -f docker-compose.template.yml up -d
 ```
 
 The panel is available at `http://localhost:8000`. On first start it asks for the Jellyfin server
 URL and the credentials of a **Jellyfin administrator**, who becomes the panel administrator. There
 is no API key to paste and no credentials in the compose file.
 
+**No Jellyfin server?** Press **Continua senza Jellyfin** on that screen. The panel then runs with no
+login at all — direct download, settings and the file manager — and you can connect Jellyfin later
+from **Impostazioni → Accesso e utenti**, without a restart. Setting `AUTH_ENABLED=0` (or leaving the
+variable out) does the same thing at deploy time.
+
 The image is published to GitHub Container Registry:
 
 ```
-ghcr.io/edoardofiore/streamingcommunity-downloader-jellyfin:latest
+ghcr.io/edoardofiore/streamingcommunity-downloader:latest
 ```
+
+Set the **source domain** in **Impostazioni** after the first start: it is not baked into the image,
+because it rotates.
+
+### Upgrading from v1
+
+v1 is the panel before Jellyfin authentication existed. If you are running it, two things matter:
+
+- **Nothing breaks by default.** `AUTH_ENABLED` defaults to off, and your existing compose file does
+  not set it, so pulling the new image keeps the panel exactly as open as it was. You will notice
+  the redesigned interface, and you will have to re-enter the source domain once (see above).
+- **Add a config volume before enabling authentication.** Users, sessions, requests and the auth
+  choice live in `panel.db`. Without the `/app/config` volume and the `DB_FILE`/`DATA_FILE`/
+  `SCHEDULE_FILE` variables from `docker-compose.template.yml`, that file sits inside the container
+  and is destroyed on every re-pull — the setup wizard would come back every time.
+
+To stay on v1 instead, pin the tag and stop pulling `latest`:
+
+```yaml
+image: ghcr.io/edoardofiore/streamingcommunity-downloader:1.0.0
+```
+
+Its compose file remains available at
+`https://raw.githubusercontent.com/EdoardoFiore/StreamingCommunity-downloader/v1.0.0/docker-compose.template.yml`.
+
+If you were using the `-jellyfin` image from the feature branch, change the `image:` line to the one
+above — that package is no longer built. Everything else in your compose file stays as it is.
 
 ### From source
 
@@ -73,7 +105,9 @@ git clone https://github.com/EdoardoFiore/StreamingCommunity-downloader.git
 cd StreamingCommunity-downloader
 pip install -r requirements.txt
 python main.py
-pytest -q      # run the tests
+
+pip install -r requirements-dev.txt   # tests only
+pytest -q
 ```
 
 **Prerequisites:** Python ≥ 3.11, FFmpeg.
@@ -120,8 +154,9 @@ Disabling a user takes effect on their next request and keeps their history.
 | `DB_FILE` | `panel.db` | users, sessions, requests — **put this on a persistent volume** |
 | `DATA_FILE` | `data.json` | source domain, libraries, performance settings |
 | `SCHEDULE_FILE` | `schedule.json` | scheduled downloads |
+| `TMP_DIR` | `tmp` | working directory for HLS segments, cleaned up after each job |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | bind address |
-| `AUTH_ENABLED` | `1` | set to `0` to run without Jellyfin — see below |
+| `AUTH_ENABLED` | `0` | set to `1` to enable Jellyfin login, requests and users — see below |
 | `COOKIE_SECURE` | `0` | set to `1` when serving over HTTPS |
 | `COOKIE_SAMESITE` | `lax` | set to `none` (with `COOKIE_SECURE=1`) only to embed the panel in an iframe on another site/scheme — see below |
 | `TRUST_PROXY_HEADERS` | `0` | set to `1` only behind a reverse proxy you control |
@@ -129,16 +164,31 @@ Disabling a user takes effect on their next request and keeps their history.
 `panel.db` holds the Jellyfin service API key: keep it out of any web-served directory and off
 world-readable storage.
 
+**Run one process.** Download state is held in memory by a single process, so do not add
+`--workers` or scale the service — a second replica would neither see nor report on the first's
+downloads.
+
 ### Running without Jellyfin
 
-Set `AUTH_ENABLED=0` to skip Jellyfin entirely: no login, no setup wizard, no request queue, no
-user management. Every visitor gets the same implicit access — direct download, settings and the
-file manager — the same surface the panel had before SSO existed. `panel.db` is still created (it
-still backs the schedule and job bookkeeping) but stays empty of users.
+Two ways, and they end up in the same place — no login, no setup wizard, no request queue, no user
+management. Every visitor gets the same implicit access: direct download, settings and the file
+manager, the surface the panel had before SSO existed.
 
-This is a deploy-time choice. Flipping it back to `1` on a `panel.db` that already has real users
-and requests in it works — their data is untouched — but flipping a *live* deployment from `1` to
-`0` silently drops permission enforcement for everyone, so decide once, before rollout.
+- **`AUTH_ENABLED=0`, or the variable left out entirely** — the default. A deploy-time choice, which
+  is also what makes an upgrade from v1 a no-op.
+- **`AUTH_ENABLED=1` and then "Continua senza Jellyfin"** on the setup screen. Same result, chosen at
+  runtime and recorded in `panel.db`, so it needs the config volume to survive a re-pull. Connect
+  Jellyfin later from **Impostazioni → Accesso e utenti**; it authenticates a Jellyfin administrator,
+  creates the panel's own API key and signs you in. Every other session that was open at that moment
+  is signed out, since the panel stops being open.
+
+Going the other way — from a connected Jellyfin back to open mode — is deliberately not supported in
+the UI: the imported users and their permissions would be left in an ambiguous state. Flipping
+`AUTH_ENABLED` from `1` to `0` on a live deployment does stop enforcing the permissions of users who
+already exist, so decide once, before rollout.
+
+`panel.db` is created either way (it also backs the schedule and job bookkeeping) but stays empty of
+users while the panel is open.
 
 ### Embedding the panel in an iframe (e.g. a Jellyfin custom tab)
 
@@ -192,24 +242,6 @@ The token is never trusted blindly: the panel checks it live against the configu
 before issuing a session, exactly as it would a password. Nothing changes for a Jellyfin user who has not
 been imported into the panel, or who visits the panel outside the iframe — they still see the normal
 login form.
-
-**Run one process.** Download state is held in memory by a single process, so do not add
-`--workers` or scale the service — a second replica would neither see nor report on the first's
-downloads.
-
----
-
-## Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `HOST` | `127.0.0.1` | Bind address |
-| `PORT` | `8000` | Bind port |
-| `VIDEOS_DIR` | `videos/` | Output directory |
-| `DATA_FILE` | `data.json` | Domain + library config |
-| `TMP_DIR` | `tmp/` | Temp directory for segments |
-
-The StreamingCommunity domain and Jellyfin library paths are configurable from the **Settings** panel in the UI.
 
 ---
 
