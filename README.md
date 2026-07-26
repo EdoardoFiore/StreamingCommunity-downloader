@@ -96,6 +96,10 @@ To stay on v1, pin the tag instead of following `latest`:
 image: ghcr.io/edoardofiore/streamingcommunity-downloader:1.0.0
 ```
 
+If you were running the `-jellyfin` image from the development branch, change the `image:` line to
+the main one above — that package is frozen and no longer built. Nothing else changes: the variables
+and the `/app/config` volume are the same, so `panel.db` and your users carry over as they are.
+
 ---
 
 ## Users, roles and requests
