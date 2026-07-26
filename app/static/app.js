@@ -309,9 +309,23 @@ function showPage(page) {
 
 // ── Settings ───────────────────────────────────────────────────────────────────
 
+// Every section in the settings modal saves itself, so each one reports into its
+// own feedback line rather than sharing one status area.
+const _SETTINGS_FEEDBACK_IDS = [
+  'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
+  'jf-connect-feedback', 'jf-reconnect-feedback',
+];
+
+function _feedback(id, message = '', kind = 'muted') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = message;
+  el.className = 'form-text' + (message ? ` text-${kind}` : '');
+}
+
 async function openSettings() {
   document.getElementById('domain-input').value = currentDomain;
-  document.getElementById('domain-feedback').textContent = '';
+  _SETTINGS_FEEDBACK_IDS.forEach(id => _feedback(id));
   renderLibrariesList();
   await Promise.all([loadPerfSettings(), loadJellyfinSettings()]);
   showModal('settings-modal');
@@ -341,14 +355,17 @@ function toggleJellyfinReconfigure() {
 async function connectJellyfin(reconfigure) {
   const prefix = reconfigure ? 'jf-reconf-' : 'jf-';
   const btn = document.getElementById(reconfigure ? 'jf-reconnect-btn' : 'jf-connect-btn');
-  const feedback = document.getElementById(reconfigure ? 'jf-reconnect-feedback' : 'jf-connect-feedback');
+  const fbId = reconfigure ? 'jf-reconnect-feedback' : 'jf-connect-feedback';
   const url = document.getElementById(prefix + 'url').value.trim();
   const username = document.getElementById(prefix + 'username').value.trim();
   const password = document.getElementById(prefix + 'password').value;
-  if (!url || !username) { feedback.textContent = 'Compila URL e utente amministratore.'; return; }
+  if (!url || !username) {
+    _feedback(fbId, 'Compila URL e utente amministratore.', 'danger');
+    return;
+  }
 
   btn.disabled = true;
-  feedback.textContent = 'Connessione...';
+  _feedback(fbId, 'Connessione...');
   try {
     const res = await fetch('/api/auth/jellyfin-connect', {
       method: 'POST',
@@ -357,14 +374,16 @@ async function connectJellyfin(reconfigure) {
     });
     const data = await safeJson(res);
     if (!res.ok) {
-      feedback.textContent = data.detail || 'Collegamento fallito.';
+      _feedback(fbId, data.detail || 'Collegamento fallito.', 'danger');
       btn.disabled = false;
       return;
     }
-    feedback.textContent = 'Collegato. Ricaricamento...';
+    // A full reload re-runs initAuth() against the now-real permission set,
+    // which is simpler than patching _me and the nav in place.
+    _feedback(fbId, 'Collegato. Ricaricamento...', 'success');
     window.location.reload();
   } catch (e) {
-    feedback.textContent = 'Errore di rete.';
+    _feedback(fbId, 'Errore di rete.', 'danger');
     btn.disabled = false;
   }
 }
@@ -381,12 +400,11 @@ async function loadPerfSettings() {
 
 async function savePerfSettings() {
   const btn = document.getElementById('save-perf-btn');
-  const feedback = document.getElementById('perf-settings-feedback');
-  btn.disabled = true;
-  feedback.textContent = '';
   const concurrent = parseInt(document.getElementById('setting-max-concurrent').value, 10);
   const workers = parseInt(document.getElementById('setting-max-workers').value, 10);
-  if (!concurrent || !workers) { feedback.textContent = 'Valori non validi.'; btn.disabled = false; return; }
+  if (!concurrent || !workers) { _feedback('perf-settings-feedback', 'Valori non validi.', 'danger'); return; }
+  btn.disabled = true;
+  _feedback('perf-settings-feedback', 'Salvataggio...');
   try {
     const res = await fetch('/api/domain/settings', {
       method: 'PUT',
@@ -394,22 +412,22 @@ async function savePerfSettings() {
       body: JSON.stringify({max_concurrent_downloads: concurrent, max_segment_workers: workers}),
     });
     if (res.ok) {
-      showToast('Impostazioni salvate', 'success');
+      _feedback('perf-settings-feedback', 'Salvato.', 'success');
+      showToast('Performance salvate', 'success');
     } else {
       const d = await safeJson(res);
-      feedback.textContent = d.detail || 'Errore salvataggio.';
+      _feedback('perf-settings-feedback', d.detail || 'Errore salvataggio.', 'danger');
     }
-  } catch (e) { feedback.textContent = 'Errore di rete.'; }
+  } catch (e) { _feedback('perf-settings-feedback', 'Errore di rete.', 'danger'); }
   finally { btn.disabled = false; }
 }
+
 async function saveDomain() {
   const domain = document.getElementById('domain-input').value.trim();
-  const feedback = document.getElementById('domain-feedback');
   const btn = document.getElementById('save-domain-btn');
-  if (!domain) return;
+  if (!domain) { _feedback('domain-feedback', 'Inserisci un domain.', 'danger'); return; }
   btn.disabled = true;
-  feedback.textContent = 'Verifica in corso...';
-  feedback.className = 'form-text text-muted';
+  _feedback('domain-feedback', 'Verifica in corso...');
   try {
     const res = await fetch('/api/domain', {
       method:'PUT', headers:{'Content-Type':'application/json'},
@@ -418,18 +436,16 @@ async function saveDomain() {
     const data = await safeJson(res);
     if (res.ok) {
       currentDomain = data.domain; currentVersion = data.version;
-      feedback.textContent = `OK — versione ${data.version}`;
-      feedback.className = 'form-text text-success';
+      _feedback('domain-feedback', `OK — versione ${data.version}`, 'success');
       const badge = document.getElementById('domain-badge');
       badge.className = 'badge bg-success';
       badge.textContent = data.domain;
-      setTimeout(() => hideModal('settings-modal'), 800);
+      showToast('Domain salvato', 'success');
     } else {
-      feedback.textContent = data.detail || 'Errore';
-      feedback.className = 'form-text text-danger';
+      _feedback('domain-feedback', data.detail || 'Errore', 'danger');
     }
   } catch(e) {
-    feedback.textContent = 'Errore di rete'; feedback.className = 'form-text text-danger';
+    _feedback('domain-feedback', 'Errore di rete', 'danger');
   } finally { btn.disabled = false; }
 }
 
@@ -484,14 +500,22 @@ async function saveLibraries() {
   const excluded = (document.getElementById('excluded-input')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
   const btn = document.getElementById('save-libraries-btn');
   btn.disabled = true;
+  _feedback('libraries-feedback', 'Salvataggio...');
   try {
     const res = await fetch('/api/domain/libraries', {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({libraries:updated, excluded_folders:excluded}),
     });
-    if (res.ok) { _libraries=updated; showToast('Librerie salvate','success'); hideModal('settings-modal'); }
-    else { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
-  } catch(e) { showToast('Errore di rete','danger'); }
+    if (res.ok) {
+      _libraries = updated;
+      renderLibrariesList();
+      _feedback('libraries-feedback', 'Salvato.', 'success');
+      showToast('Librerie salvate','success');
+    } else {
+      const d = await safeJson(res);
+      _feedback('libraries-feedback', d.detail || 'Errore', 'danger');
+    }
+  } catch(e) { _feedback('libraries-feedback', 'Errore di rete', 'danger'); }
   finally { btn.disabled = false; }
 }
 

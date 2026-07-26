@@ -1037,6 +1037,29 @@
       margin-top: 2px;
     }
 
+    /* Every settings section owns its own save action: two of them (verifying a
+       domain, connecting to Jellyfin) have side effects beyond writing a value,
+       so a single modal-wide save button would be a lie. */
+    .settings-section + .settings-section {
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+      margin-top: 24px;
+    }
+    .settings-section-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin: -4px 0 12px;
+    }
+    .settings-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .settings-actions .form-text { margin: 0; }
+
     /* Empty state */
     #jobs-empty { color: var(--text-dim) !important; }
 
@@ -1948,127 +1971,151 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="settings-section-label">Domain</p>
-        <div class="row g-2 align-items-end mb-4">
-          <div class="col">
-            <label class="form-label">
-              Domain
-              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">
-                (es: streamingcommunityz.parts)
-              </span>
-            </label>
-            <input type="text" id="domain-input" class="form-control" placeholder="streamingcommunityz.parts">
+
+        <!-- ── Sorgente ──────────────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Sorgente</p>
+          <p class="settings-section-hint">
+            Il dominio da cui il pannello cerca e scarica. Salvando viene verificato.
+          </p>
+          <label class="form-label" for="domain-input">Domain</label>
+          <input type="text" id="domain-input" class="form-control" placeholder="streamingcommunityz.parts">
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveDomain()" id="save-domain-btn">
+              Verifica e salva
+            </button>
             <div id="domain-feedback" class="form-text"></div>
           </div>
-          <div class="col-auto">
-            <button type="button" class="btn btn-primary" onclick="saveDomain()" id="save-domain-btn">Salva</button>
-          </div>
         </div>
 
-        <hr>
-        <p class="settings-section-label">Jellyfin</p>
-        <div id="jf-not-connected" style="display:none">
-          <div class="form-text mb-2">
-            Il pannello funziona senza Jellyfin: nessun login, nessuna coda richieste, nessuna gestione utenti.
-            Collegalo per abilitarli.
-          </div>
-          <div class="row g-2 mb-2">
-            <div class="col-12">
-              <label class="form-label">URL server Jellyfin</label>
-              <input type="text" id="jf-url" class="form-control" placeholder="http://192.168.1.10:8096">
-            </div>
-            <div class="col-sm-6">
-              <label class="form-label">Utente amministratore</label>
-              <input type="text" id="jf-username" class="form-control">
-            </div>
-            <div class="col-sm-6">
-              <label class="form-label">Password</label>
-              <input type="password" id="jf-password" class="form-control">
-            </div>
-          </div>
-          <button type="button" class="btn btn-primary btn-sm" id="jf-connect-btn" onclick="connectJellyfin(false)">
-            <i class="ti ti-plug-connected me-1"></i>Collega a Jellyfin
+        <!-- ── Librerie e cartelle ───────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Librerie multimediali</p>
+          <p class="settings-section-hint">
+            Dove finiscono i file scaricati, una cartella per tipo di contenuto.
+          </p>
+          <div id="libraries-list" class="mb-2"></div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
+            <i class="ti ti-plus me-1"></i>Aggiungi libreria
           </button>
-          <div id="jf-connect-feedback" class="form-text mt-1"></div>
-        </div>
-        <div id="jf-connected" style="display:none">
-          <div class="form-text mb-2">
-            Connesso a <strong id="jf-connected-url"></strong>
-          </div>
-          <div id="jf-reconfigure-wrap" style="display:none">
-            <button type="button" class="btn btn-sm btn-outline-secondary mb-2" onclick="toggleJellyfinReconfigure()">
-              Cambia server Jellyfin
+
+          <label class="form-label mt-3" for="excluded-input">Cartelle escluse</label>
+          <input type="text" id="excluded-input" class="form-control"
+                 placeholder="lost+found, .recycle, @eaDir, ...">
+          <div class="form-text">Nomi separati da virgola, ignorati sfogliando le librerie.</div>
+
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveLibraries()" id="save-libraries-btn">
+              Salva librerie e cartelle
             </button>
-            <div id="jf-reconfigure-form" style="display:none">
-              <div class="form-text mb-2" style="color:#e6a23c">
-                Chi sta usando il pannello in questo momento senza login dovrà accedere di nuovo dopo
-                l'aggiornamento. Puntare a un server Jellyfin diverso renderà orfani gli utenti già importati.
+            <div id="libraries-feedback" class="form-text"></div>
+          </div>
+        </div>
+
+        <!-- ── Performance download ──────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Performance download</p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="setting-max-concurrent">
+                Download contemporanei
+                <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–32)</span>
+              </label>
+              <input type="number" id="setting-max-concurrent" class="form-control" min="1" max="32" value="3">
+              <div class="form-text">Suggerito: 2–4. Valori alti aumentano l'uso di rete e RAM.</div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="setting-max-workers">
+                Thread per segmento
+                <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–128)</span>
+              </label>
+              <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
+              <div class="form-text">Suggerito: 8–32. Valori >64 raramente migliorano le prestazioni.</div>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="savePerfSettings()" id="save-perf-btn">
+              Salva performance
+            </button>
+            <div id="perf-settings-feedback" class="form-text"></div>
+          </div>
+        </div>
+
+        <!-- ── Accesso (Jellyfin SSO) ────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Accesso e utenti</p>
+
+          <div id="jf-not-connected" style="display:none">
+            <p class="settings-section-hint">
+              Il pannello sta funzionando senza Jellyfin: nessun login, nessuna coda richieste,
+              nessuna gestione utenti. Collegalo per abilitarli.
+            </p>
+            <div class="row g-2">
+              <div class="col-12">
+                <label class="form-label" for="jf-url">URL server Jellyfin</label>
+                <input type="text" id="jf-url" class="form-control" placeholder="http://192.168.1.10:8096">
               </div>
-              <div class="row g-2 mb-2">
-                <div class="col-12">
-                  <label class="form-label">URL server Jellyfin</label>
-                  <input type="text" id="jf-reconf-url" class="form-control">
-                </div>
-                <div class="col-sm-6">
-                  <label class="form-label">Utente amministratore</label>
-                  <input type="text" id="jf-reconf-username" class="form-control">
-                </div>
-                <div class="col-sm-6">
-                  <label class="form-label">Password</label>
-                  <input type="password" id="jf-reconf-password" class="form-control">
-                </div>
+              <div class="col-sm-6">
+                <label class="form-label" for="jf-username">Utente amministratore</label>
+                <input type="text" id="jf-username" class="form-control" autocomplete="off">
               </div>
-              <button type="button" class="btn btn-primary btn-sm" id="jf-reconnect-btn" onclick="connectJellyfin(true)">
-                Aggiorna configurazione
+              <div class="col-sm-6">
+                <label class="form-label" for="jf-password">Password</label>
+                <input type="password" id="jf-password" class="form-control" autocomplete="off">
+              </div>
+            </div>
+            <div class="form-text mt-1">Serve un account amministratore Jellyfin. La password non viene salvata.</div>
+            <div class="settings-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="jf-connect-btn" onclick="connectJellyfin(false)">
+                <i class="ti ti-plug-connected me-1"></i>Collega a Jellyfin
               </button>
-              <div id="jf-reconnect-feedback" class="form-text mt-1"></div>
+              <div id="jf-connect-feedback" class="form-text"></div>
+            </div>
+          </div>
+
+          <div id="jf-connected" style="display:none">
+            <p class="settings-section-hint mb-0">
+              Collegato a <strong id="jf-connected-url" style="color:var(--text)"></strong>
+            </p>
+            <div id="jf-reconfigure-wrap" style="display:none">
+              <div class="settings-actions">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleJellyfinReconfigure()">
+                  Cambia server Jellyfin
+                </button>
+              </div>
+              <div id="jf-reconfigure-form" style="display:none;margin-top:14px">
+                <p class="settings-section-hint" style="color:#e6a23c">
+                  Chi sta usando il pannello senza login dovrà accedere di nuovo dopo l'aggiornamento.
+                  Puntare a un server Jellyfin diverso renderà orfani gli utenti già importati.
+                </p>
+                <div class="row g-2">
+                  <div class="col-12">
+                    <label class="form-label" for="jf-reconf-url">URL server Jellyfin</label>
+                    <input type="text" id="jf-reconf-url" class="form-control" placeholder="http://192.168.1.10:8096">
+                  </div>
+                  <div class="col-sm-6">
+                    <label class="form-label" for="jf-reconf-username">Utente amministratore</label>
+                    <input type="text" id="jf-reconf-username" class="form-control" autocomplete="off">
+                  </div>
+                  <div class="col-sm-6">
+                    <label class="form-label" for="jf-reconf-password">Password</label>
+                    <input type="password" id="jf-reconf-password" class="form-control" autocomplete="off">
+                  </div>
+                </div>
+                <div class="settings-actions">
+                  <button type="button" class="btn btn-primary btn-sm" id="jf-reconnect-btn" onclick="connectJellyfin(true)">
+                    Aggiorna configurazione
+                  </button>
+                  <div id="jf-reconnect-feedback" class="form-text"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <hr>
-        <p class="settings-section-label">Librerie Jellyfin</p>
-        <div id="libraries-list" class="mb-3"></div>
-        <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
-          <i class="ti ti-plus me-1"></i>Aggiungi libreria
-        </button>
-
-        <hr>
-        <p class="settings-section-label">Cartelle escluse</p>
-        <input type="text" id="excluded-input" class="form-control"
-               placeholder="lost+found, .recycle, @eaDir, ...">
-        <div class="form-text">Nomi separati da virgola</div>
-
-        <hr>
-        <p class="settings-section-label">Performance download</p>
-        <div class="row g-3">
-          <div class="col-sm-6">
-            <label class="form-label">
-              Download contemporanei
-              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–32)</span>
-            </label>
-            <input type="number" id="setting-max-concurrent" class="form-control" min="1" max="32" value="3">
-            <div class="form-text">Suggerito: 2–4. Valori alti aumentano l'uso di rete e RAM.</div>
-          </div>
-          <div class="col-sm-6">
-            <label class="form-label">
-              Thread per segmento
-              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–128)</span>
-            </label>
-            <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
-            <div class="form-text">Suggerito: 8–32. Valori >64 raramente migliorano le prestazioni.</div>
-          </div>
-        </div>
-        <div id="perf-settings-feedback" class="form-text mt-1"></div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
-        <button type="button" class="btn btn-outline-primary me-2" onclick="savePerfSettings()" id="save-perf-btn">
-          Salva performance
-        </button>
-        <button type="button" class="btn btn-primary" onclick="saveLibraries()" id="save-libraries-btn">
-          Salva librerie
-        </button>
+        <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Chiudi</button>
       </div>
     </div>
   </div>
