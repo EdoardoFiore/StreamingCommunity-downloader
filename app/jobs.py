@@ -54,6 +54,7 @@ class JobManager:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscribers: list[asyncio.Queue] = []
         self._schedule_store = None  # set via set_schedule_store()
+        self._listeners: list = []
 
     @staticmethod
     def _compute_phases(audio_languages: list) -> list:
@@ -117,6 +118,40 @@ class JobManager:
         """Thread-safe push to all global SSE subscribers."""
         if self._loop:
             asyncio.run_coroutine_threadsafe(self._fanout(event), self._loop)
+
+    def broadcast(self, event: dict):
+        """Public entry point for other modules pushing to the SSE stream."""
+        self._broadcast(event)
+
+    # ── Terminal-state listeners ───────────────────────────────────────────────
+
+    def add_listener(self, callback):
+        """Register a callback invoked when a job reaches a terminal state.
+
+        Used by the request system to move a request to completed or failed
+        without the job manager knowing that requests exist.
+        """
+        self._listeners.append(callback)
+
+    def _notify_listeners(self, job: "DownloadJob"):
+        for callback in list(self._listeners):
+            try:
+                callback(job)
+            except Exception:
+                logger.exception("Job listener failed for job %s", job.job_id)
+
+    def _emit(self, job: "DownloadJob", event: dict):
+        """Push a terminal/progress event to the job's own queue and to everyone.
+
+        The loop is only set once the app has started; a job finishing before
+        that (or in a test) must not leave an un-awaited coroutine behind.
+        """
+        if self._loop is not None:
+            asyncio.run_coroutine_threadsafe(job.progress_queue.put(event), self._loop)
+        else:
+            logger.debug("No event loop bound; dropping %s for job %s",
+                         event.get("type"), job.job_id)
+        self._broadcast({**event, "job_id": job.job_id})
 
     async def _fanout(self, event: dict):
         dead = []
@@ -243,9 +278,7 @@ class JobManager:
                 return False
             job.cancel_event.set()
             job.status = "cancelled"
-        event = {"type": "error", "message": "Annullato"}
-        asyncio.run_coroutine_threadsafe(job.progress_queue.put(event), self._loop)
-        self._broadcast({**event, "job_id": job_id})
+        self._emit(job, {"type": "error", "message": "Annullato"})
         return True
 
     def dismiss(self, job_id: str) -> bool:
@@ -264,9 +297,7 @@ class JobManager:
         with self._semaphore:
             if job.cancel_event.is_set():
                 job.status = "cancelled"
-                ev = {"type": "error", "message": "Annullato"}
-                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-                self._broadcast({**ev, "job_id": job.job_id})
+                self._emit(job, {"type": "error", "message": "Annullato"})
                 return
 
             job.status = "running"
@@ -276,26 +307,21 @@ class JobManager:
                 result = fn(*args, **kwargs)
                 job.status = "done"
                 job.output_path = result
-                ev = {"type": "done", "output_path": result}
-                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-                self._broadcast({**ev, "job_id": job.job_id})
+                self._emit(job, {"type": "done", "output_path": result})
             except DownloadCancelledError:
                 job.status = "cancelled"
-                ev = {"type": "error", "message": "Annullato"}
-                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-                self._broadcast({**ev, "job_id": job.job_id})
+                self._emit(job, {"type": "error", "message": "Annullato"})
             except Exception as e:
                 logger.exception(f"Job {job.job_id} failed: {e}")
                 job.status = "error"
                 job.error = str(e)
-                ev = {"type": "error", "message": str(e)}
-                asyncio.run_coroutine_threadsafe(job.progress_queue.put(ev), self._loop)
-                self._broadcast({**ev, "job_id": job.job_id})
+                self._emit(job, {"type": "error", "message": str(e)})
             finally:
                 tmp_path = TMP_DIR / job.job_id
                 if tmp_path.exists():
                     shutil.rmtree(tmp_path, ignore_errors=True)
                     logger.info("Cleaned up temp dir: %s", tmp_path)
+                self._notify_listeners(job)
 
     def _submit_job(self, job: DownloadJob, fn, *args, **kwargs) -> str:
         with self._lock:
@@ -314,7 +340,9 @@ class JobManager:
             title=title,
             type=type_,
             status=status,
-            created_at=datetime.now(timezone.utc),
+            # Same instant `status` was decided against, and timezone-aware like
+            # scheduled_at so the two stay comparable.
+            created_at=now,
             scheduled_at=scheduled_at,
             schedule_id=schedule_id,
             phases=phases or [],
@@ -325,7 +353,8 @@ class JobManager:
     def submit_film(self, id_film: int, title: str, domain: str, year: str = None,
                     schedule_id: str = None,
                     audio_languages: list[str] = None,
-                    subtitle_languages: list[str] = None) -> str:
+                    subtitle_languages: list[str] = None,
+                    strict_audio: bool = False) -> str:
         from app.core.film import download_film
 
         job = self._make_job(title, "film", schedule_id=schedule_id,
@@ -340,13 +369,15 @@ class JobManager:
             cancel_event=job.cancel_event,
             audio_languages=audio_languages or ["ita"],
             subtitle_languages=subtitle_languages or ["ita", "eng"],
+            strict_audio=strict_audio,
         )
 
     def submit_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                        token: str, tv_name: str, season: int, year: str = None,
                        schedule_id: str = None,
                        audio_languages: list[str] = None,
-                       subtitle_languages: list[str] = None) -> str:
+                       subtitle_languages: list[str] = None,
+                       strict_audio: bool = False) -> str:
         from app.core.tv import download_episode, fmt_ep
 
         ep = eps[ep_index]
@@ -363,13 +394,15 @@ class JobManager:
             year=year,
             audio_languages=audio_languages or ["ita"],
             subtitle_languages=subtitle_languages or ["ita", "eng"],
+            strict_audio=strict_audio,
         )
 
     def submit_anime_episode(self, anime_id: str, episode: dict, anime_name: str,
                              anime_type: str = "tv", year: str = None,
                              schedule_id: str = None,
                              audio_languages: list[str] = None,
-                             subtitle_languages: list[str] = None) -> str:
+                             subtitle_languages: list[str] = None,
+                             strict_audio: bool = False) -> str:
         from app.core.animeunity import download_anime_episode
 
         ep_num = episode.get("number", "?")
@@ -386,6 +419,7 @@ class JobManager:
             year=year,
             audio_languages=audio_languages or ["ita"],
             subtitle_languages=subtitle_languages or ["ita", "eng"],
+            strict_audio=strict_audio,
         )
 
     # ── Schedule (future) ──────────────────────────────────────────────────────

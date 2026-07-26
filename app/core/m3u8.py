@@ -162,7 +162,7 @@ class M3U8_Segments:
         tried_with_b1 = False
         
         for attempt in range(max_retries):
-            response = requests.get(current_url, headers=self._headers())
+            response = requests.get(current_url, headers=self._headers(), timeout=15)
             if response.ok:
                 break
             # On 403, retry with &b1 parameter (some TV episodes require it)
@@ -198,7 +198,7 @@ class M3U8_Segments:
             # Master playlist — resolve the best quality rendition
             best_url = parser.get_best_quality()
             logger.info("Master playlist detected (%d variants), fetching best rendition: %s", len(parser.video_playlist), best_url)
-            rendition_resp = requests.get(best_url, headers=self._headers())
+            rendition_resp = requests.get(best_url, headers=self._headers(), timeout=15)
             if not rendition_resp.ok:
                 raise RuntimeError(f"Failed to fetch rendition M3U8: HTTP {rendition_resp.status_code}")
             rp = M3U8_Parser()
@@ -522,18 +522,18 @@ class M3U8_Downloader:
 
 
 def _fetch_text(url):
-    response = requests.get(url)
+    response = requests.get(url, timeout=15)
     if response.ok:
         return response.text
     raise RuntimeError(f"Failed to fetch {url}: HTTP {response.status_code}")
 
 
 def _fetch_text_with_b1_fallback(url):
-    response = requests.get(url)
+    response = requests.get(url, timeout=15)
     if response.status_code == 403:
         logger.warning("M3U8 fetch returned 403, retrying with ?b=1: %s", url)
         b1_url = url + ("&b=1" if "?" in url else "?b=1")
-        response = requests.get(b1_url)
+        response = requests.get(b1_url, timeout=15)
     if response.ok:
         return response.text
     raise RuntimeError(f"Failed to fetch {url}: HTTP {response.status_code}")

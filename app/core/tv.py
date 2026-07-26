@@ -7,16 +7,16 @@ from bs4 import BeautifulSoup
 
 from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
-from app.core._shared import _parse_content, _get_m3u8_key, _get_m3u8_url, _fetch_vixcloud_embed
+from app.core._shared import (
+    MissingAudioTrackError,
+    _fetch_vixcloud_embed,
+    _parse_content,
+    _get_m3u8_key,
+    _get_m3u8_url,
+)
+from app.core.paths import episode_path, fmt_ep  # noqa: F401  (fmt_ep re-exported)
 
 logger = logging.getLogger(__name__)
-
-
-def fmt_ep(n) -> str:
-    """Format episode number with zero-padded integer part (e.g. '7' → '07', '7.5' → '07.5')."""
-    s = str(n)
-    parts = s.split(".", 1)
-    return parts[0].zfill(2) if len(parts) == 1 else parts[0].zfill(2) + "." + parts[1]
 
 
 def get_token(id_tv: int, domain: str) -> str:
@@ -37,6 +37,7 @@ def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -
             "X-Inertia-Version": site_version,
             "User-Agent": get_headers(),
         },
+        timeout=15,
     )
     if req.ok:
         return req.json()["props"]["title"]["seasons_count"]
@@ -54,6 +55,7 @@ def get_info_season(tv_id: int, tv_name: str, domain: str, version: str, token: 
             "x-inertia-version": version,
             "x-xsrf-token": token,
         },
+        timeout=15,
     )
     if req.ok:
         return [
@@ -76,6 +78,7 @@ def _get_iframe(tv_id, ep_id, domain, token):
                 "referer": f"https://{domain}/it/watch/{tv_id}?e={ep_id}",
                 "user-agent": ua,
             },
+            timeout=15,
         )
         if req.ok:
             break
@@ -88,76 +91,10 @@ def _get_iframe(tv_id, ep_id, domain, token):
     return script_text, url_embed
 
 
-_AUDIO_LANG_ALIASES = {
-    "ita": ("it", "Italian", "Italiano"),
-    "eng": ("en", "English"),
-    "fra": ("fr", "French", "Français"),
-    "spa": ("es", "Spanish", "Español"),
-    "deu": ("de", "German", "Deutsch"),
-    "por": ("pt", "Portuguese", "Português"),
-    "jpn": ("ja", "Japanese", "日本語"),
-}
-
-
-def _get_audio_track_url(parser, lang_code: str) -> str | None:
-    """Match audio track by ISO 639-2 code, ISO 639-1 code, or full name."""
-    aliases = {lang_code} | set(_AUDIO_LANG_ALIASES.get(lang_code, ()))
-    if parser.audio_ts:
-        for obj_audio in parser.audio_ts:
-            if obj_audio.get("language") in aliases or obj_audio.get("name") in aliases:
-                return obj_audio.get("uri")
-    return None
-
-
-def _collect_audio_tracks(m3u8_url: str, referer: str, audio_languages: list[str]) -> list[dict]:
-    tracks = []
-    try:
-        headers = {"user-agent": get_headers(), "referer": referer}
-        req = requests.get(m3u8_url, headers=headers, timeout=15)
-        if req.status_code == 403:
-            b1_url = m3u8_url + ("&b=1" if "?" in m3u8_url else "?b=1")
-            logger.warning("Master M3U8 returned 403, retrying with ?b=1 for audio track collection")
-            req = requests.get(b1_url, headers=headers, timeout=15)
-        if not req.ok:
-            logger.warning("Could not fetch master M3U8 for audio tracks: HTTP %d", req.status_code)
-            return tracks
-        parser = M3U8_Parser()
-        parser.parse_data(req.text)
-        for lang in audio_languages:
-            url = _get_audio_track_url(parser, lang)
-            if url:
-                tracks.append({"url": url, "language": lang})
-                logger.info("Audio track found for %s: %s", lang, url[:80])
-            else:
-                logger.warning("Audio track not found for language: %s (available: %s)",
-                               lang, [t.get("language") or t.get("name") for t in parser.audio_ts])
-    except Exception as e:
-        logger.warning("Could not collect audio tracks: %s", e)
-    return tracks
-
-
-def _collect_subtitle_tracks(m3u8_url: str, referer: str, subtitle_languages: list[str]) -> list[dict]:
-    tracks = []
-    try:
-        headers = {"user-agent": get_headers(), "referer": referer}
-        req = requests.get(m3u8_url, headers=headers, timeout=15)
-        if req.status_code == 403:
-            b1_url = m3u8_url + ("&b=1" if "?" in m3u8_url else "?b=1")
-            logger.warning("Master M3U8 returned 403, retrying with ?b=1 for subtitle track collection")
-            req = requests.get(b1_url, headers=headers, timeout=15)
-        if not req.ok:
-            return tracks
-        parser = M3U8_Parser()
-        parser.parse_data(req.text)
-        for lang in subtitle_languages:
-            for sub in parser.subtitle_playlist:
-                if sub.get("language") == lang:
-                    tracks.append({"uri": sub.get("uri"), "language": lang})
-                    logger.info("Subtitle track found for %s: %s", lang, sub.get("uri", "")[:80])
-                    break
-    except Exception as e:
-        logger.warning("Could not collect subtitle tracks: %s", e)
-    return tracks
+# Track collection is identical for films, episodes and anime — the same
+# vixcloud master playlist in all three cases — so there is one
+# implementation, in film.py, and strict mode cannot diverge between them.
+from app.core.film import _collect_audio_tracks, _collect_subtitle_tracks  # noqa: E402
 
 
 def get_tv_languages(tv_id: int, slug: str, domain: str, version: str) -> dict:
@@ -180,6 +117,23 @@ def get_tv_languages(tv_id: int, slug: str, domain: str, version: str) -> dict:
     return langs
 
 
+def get_episode_languages(tv_id: int, ep_id: int, domain: str, token: str) -> dict:
+    """Languages available on one specific episode.
+
+    get_tv_languages() samples S01E01, which is right for the browse view but
+    not for verifying a request: tracks can differ per episode, and a request
+    approved days later must be checked against the episode it actually names.
+    """
+    embed_content, url_embed = _get_iframe(tv_id, ep_id, domain, token)
+    json_win_video, json_win_param = _parse_content(embed_content, url_embed)
+    m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
+    referer = (
+        f"https://vixcloud.co/embed/{json_win_video['id']}"
+        f"?token={json_win_param['token']}&expires={json_win_param['expires']}"
+    )
+    return fetch_master_languages(m3u8_url, referer)
+
+
 def download_episode(
     tv_id: int,
     eps: list[dict],
@@ -195,6 +149,7 @@ def download_episode(
     year: str = None,
     audio_languages: list[str] = None,
     subtitle_languages: list[str] = None,
+    strict_audio: bool = False,
 ) -> str:
     audio_languages = audio_languages or ["ita"]
     subtitle_languages = subtitle_languages or []
@@ -215,13 +170,12 @@ def download_episode(
     m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
     m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_referer)
 
-    audio_track_urls = _collect_audio_tracks(m3u8_url, embed_referer, audio_languages)
+    audio_track_urls = _collect_audio_tracks(
+        m3u8_url, embed_referer, audio_languages, strict=strict_audio
+    )
     subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_referer, subtitle_languages)
 
-    safe_name = sanitize_filename(tv_name)
-    series_folder = f"{safe_name} ({year})" if year else safe_name
-    mp4_name = f"{safe_name} S{season:02d}E{fmt_ep(ep['n'])}"
-    mp4_path = os.path.join(output_dir, series_folder, f"Season {season:02d}", mp4_name + ".mp4")
+    mp4_path = episode_path(output_dir, tv_name, season, ep["n"], year)
 
     final_path = download_m3u8(
         m3u8_index=m3u8_url,

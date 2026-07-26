@@ -1,3 +1,18 @@
+# SC Panel — reference deployment.
+#
+#   docker compose -f docker-compose.template.yml up -d
+#
+# Then open http://localhost:8000. With AUTH_ENABLED=1 below, the panel asks for
+# the Jellyfin server URL and the credentials of a Jellyfin administrator, who
+# becomes the panel administrator — no API key to paste, no credentials in this
+# file. If you have no Jellyfin server, press "Continua senza Jellyfin" on that
+# screen: the panel runs with no login and you can connect Jellyfin later from
+# Settings.
+#
+# Upgrading from v1 (the pre-authentication panel)? See the "Upgrading" section
+# in the README first — in particular the /app/config volume below, which your
+# existing compose file does not have.
+
 services:
   web:
     image: ghcr.io/edoardofiore/streamingcommunity-downloader:latest
@@ -5,14 +20,48 @@ services:
       - "8000:8000"
     volumes:
       - nfs_storage:/app/videos
+      # Users, sessions, requests, notifications, the source domain and the
+      # schedule all live here. Without this volume they are lost on every
+      # re-pull: the setup wizard comes back and the request history is gone.
+      - panel_config:/app/config
     environment:
       - VIDEOS_DIR=/app/videos
+      - DB_FILE=/app/config/panel.db
+      - DATA_FILE=/app/config/data.json
+      - SCHEDULE_FILE=/app/config/schedule.json
       - HOST=0.0.0.0
       - PORT=8000
+      # 1 enables Jellyfin login, the request queue and user management.
+      # Removing this line (or setting 0) runs the panel open: no login, every
+      # visitor gets direct download, settings and the file manager — what the
+      # panel did before SSO existed. Decide at deploy time: flipping a live
+      # deployment from 1 to 0 stops enforcing the permissions of users who
+      # already exist.
+      - AUTH_ENABLED=1
+      # Set to 1 when the panel is served over HTTPS, so the session cookie is
+      # only ever sent over TLS.
+      - COOKIE_SECURE=0
+      # lax (default) is correct for a normal deployment. Only switch to none
+      # if you embed the panel in an iframe on a different site or scheme —
+      # e.g. a Jellyfin custom tab — where a Lax cookie is silently dropped
+      # inside the frame and login looks like an infinite loop. none REQUIRES
+      # COOKIE_SECURE=1 (HTTPS) as well, or browsers reject the cookie
+      # outright — set both together, never one without the other.
+      - COOKIE_SAMESITE=lax
+      # Set to 1 ONLY behind a reverse proxy you control. It makes the panel
+      # trust X-Forwarded-For for the client address it reports to Jellyfin;
+      # exposed directly, that header is attacker-controlled.
+      - TRUST_PROXY_HEADERS=0
     dns:
       - 8.8.8.8
       - 1.1.1.1
     restart: unless-stopped
+
+    # Do not scale this service or add uvicorn --workers: download job state is
+    # held in memory by a single process, so a second replica would neither see
+    # nor be able to report on the other's downloads.
+    deploy:
+      replicas: 1
 
 volumes:
   nfs_storage:
@@ -20,4 +69,10 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: /srv/nfs/storage  # ← cambia con il percorso locale dove vuoi salvare i video
+      device: /srv/nfs/storage  # ← change to the local path where videos are stored
+  panel_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/scpanel/config  # ← change to a local path; create it first

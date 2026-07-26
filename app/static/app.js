@@ -10,6 +10,101 @@ let _jobPhases = {};      // job_id → current phase string
 const _jobs = new Map();  // job_id → job dict (source of truth)
 let _animeCtx = {};       // context for anime episode browser
 
+// ── Session ────────────────────────────────────────────────────────────────────
+
+let _me = null;           // { user, csrf_token, auth_enabled }
+let _csrf = '';
+let _authEnabled = true;  // false when the panel runs without Jellyfin (AUTH_ENABLED=0)
+let _requestStatus = {};  // external_id → { id, status } for the result cards
+
+function can(permission) {
+  return !!_me && _me.user.permission_names.includes(permission);
+}
+
+// Every state-changing call carries the session's CSRF token, and an expired or
+// revoked session lands on the login page instead of failing silently. Wrapping
+// fetch once covers every call site, including the ones written before auth
+// existed.
+const _nativeFetch = window.fetch.bind(window);
+
+function _withCsrfHeader(opts, method) {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && _csrf) {
+    opts.headers = { ...(opts.headers || {}), 'X-CSRF-Token': _csrf };
+  }
+  return opts;
+}
+
+/** Re-fetch identity and CSRF token without the page-load side effects
+ * (nav visibility, header). Returns false if the session itself is gone. */
+async function _refreshIdentity() {
+  const res = await _nativeFetch('/api/auth/me');
+  if (!res.ok) return false;
+  _me = await res.json();
+  _csrf = _me.csrf_token;
+  return true;
+}
+
+window.fetch = async (input, init) => {
+  init = init || {};
+  const method = (init.method || 'GET').toUpperCase();
+  const isAuthCall = String(input).startsWith('/api/auth/');
+
+  let res = await _nativeFetch(input, _withCsrfHeader(init, method));
+
+  // A stale token — typically a tab left open across a newer login elsewhere,
+  // which rotates the (browser-wide) session cookie but leaves this tab's own
+  // in-memory token behind — is safe to recover from: refresh it once and
+  // retry. A real permission-denied 403 carries no such header and falls
+  // through untouched, since refreshing a token would never fix that.
+  if (res.status === 403 && res.headers.get('X-CSRF-Retry') && !isAuthCall) {
+    if (await _refreshIdentity()) {
+      res = await _nativeFetch(input, _withCsrfHeader(init, method));
+    }
+  }
+
+  if (res.status === 401 && !isAuthCall) {
+    window.location.href = '/login';
+  }
+  return res;
+};
+
+async function initAuth() {
+  if (!await _refreshIdentity()) { window.location.href = '/login'; return false; }
+
+  _authEnabled = _me.auth_enabled !== false;
+
+  const initials = (_me.user.username || '?').slice(0, 2).toUpperCase();
+  document.getElementById('user-initials').textContent = initials;
+  document.getElementById('user-name').textContent = _me.user.username;
+  document.getElementById('user-role').textContent = _roleLabel();
+
+  // Menu entries follow the permissions. This is cosmetic only — every one of
+  // these endpoints is checked server-side as well.
+  document.querySelectorAll('[data-perm]').forEach(el => {
+    const needed = el.dataset.perm.split('|');
+    el.style.display = needed.some(can) ? '' : 'none';
+  });
+  // Without Jellyfin there is no identity or request queue to show, even for
+  // the one permission (DOWNLOAD) that would otherwise leave them visible.
+  if (!_authEnabled) {
+    document.querySelectorAll('[data-requires-auth]').forEach(el => { el.style.display = 'none'; });
+  }
+  return true;
+}
+
+function _roleLabel() {
+  if (can('MANAGE_USERS') || can('MANAGE_SETTINGS')) return 'Amministratore';
+  if (can('MANAGE_REQUESTS')) return 'Approvatore';
+  if (can('DOWNLOAD')) return 'Download diretto';
+  if (can('REQUEST')) return 'Richieste';
+  return 'Sola lettura';
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+
 // ── Utilities ──────────────────────────────────────────────────────────────────
 
 function scConfirm(msg) {
@@ -133,12 +228,29 @@ function showToast(message, type = 'info') {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadDomainStatus();
-  await Promise.all([loadLibraries(), loadPerfSettings()]);
-  connectGlobalStream();
-  setupFileManager();
+  if (!await initAuth()) return;
+  if (can('REQUEST') || can('DOWNLOAD') || can('MANAGE_SETTINGS')) await loadDomainStatus();
+  if (can('MANAGE_SETTINGS')) await Promise.all([loadLibraries(), loadPerfSettings()]);
+  if (can('DOWNLOAD') || can('MANAGE_REQUESTS')) {
+    connectGlobalStream();
+  } else {
+    // Without access to the job stream there is nothing to push on, so the bell
+    // polls instead. Cheap: one indexed count per minute.
+    setInterval(refreshNotifications, 60000);
+  }
+  if (can('VIEW_LIBRARY')) setupFileManager();
   setupSearchDebounce();
+  refreshNotifications();
+  refreshQueueBadge();
+  showPage(defaultPage());
 });
+
+function defaultPage() {
+  if (can('REQUEST') || can('DOWNLOAD')) return 'search';
+  if (can('MANAGE_REQUESTS')) return 'requests';
+  if (can('VIEW_LIBRARY')) return 'files';
+  return 'search';
+}
 
 // ── Domain ─────────────────────────────────────────────────────────────────────
 
@@ -179,24 +291,101 @@ function showPage(page) {
   if (mobileMenu && mobileMenu.classList.contains('show')) {
     mobileMenu.classList.remove('show');
   }
-  ['search','downloads','files'].forEach(p => {
-    document.getElementById(`page-${p}`).style.display = p === page ? '' : 'none';
+  ['search','downloads','files','requests','my-requests','users'].forEach(p => {
+    const el = document.getElementById(`page-${p}`);
+    if (el) el.style.display = p === page ? '' : 'none';
   });
-  document.getElementById('page-title').textContent =
-    { search:'Cerca', downloads:'Download', files:'File' }[page];
+  document.getElementById('page-title').textContent = {
+    search:'Cerca', downloads:'Download', files:'File',
+    requests:'Coda richieste', 'my-requests':'Le mie richieste', users:'Utenti',
+  }[page] || 'Cerca';
   document.querySelectorAll('.nav-link[data-page]').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
   if (page === 'files') loadFiles();
+  if (page === 'requests') loadRequestQueue();
+  if (page === 'my-requests') loadMyRequests();
+  if (page === 'users') loadUsersPage();
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────────
 
+// Every section in the settings modal saves itself, so each one reports into its
+// own feedback line rather than sharing one status area.
+const _SETTINGS_FEEDBACK_IDS = [
+  'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
+  'jf-connect-feedback', 'jf-reconnect-feedback',
+];
+
+function _feedback(id, message = '', kind = 'muted') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = message;
+  el.className = 'form-text' + (message ? ` text-${kind}` : '');
+}
+
 async function openSettings() {
   document.getElementById('domain-input').value = currentDomain;
-  document.getElementById('domain-feedback').textContent = '';
+  _SETTINGS_FEEDBACK_IDS.forEach(id => _feedback(id));
   renderLibrariesList();
-  await loadPerfSettings();
+  await Promise.all([loadPerfSettings(), loadJellyfinSettings()]);
   showModal('settings-modal');
+}
+
+// ── Jellyfin connection ──────────────────────────────────────────────────────
+
+async function loadJellyfinSettings() {
+  try {
+    const res = await fetch('/api/auth/status');
+    const data = await safeJson(res);
+    const connected = !!data.jellyfin_url;
+    document.getElementById('jf-not-connected').style.display = connected ? 'none' : '';
+    document.getElementById('jf-connected').style.display = connected ? '' : 'none';
+    if (connected) {
+      document.getElementById('jf-connected-url').textContent = data.jellyfin_url;
+      document.getElementById('jf-reconfigure-wrap').style.display = can('MANAGE_USERS') ? '' : 'none';
+    }
+  } catch (e) { console.error('loadJellyfinSettings:', e); }
+}
+
+function toggleJellyfinReconfigure() {
+  const form = document.getElementById('jf-reconfigure-form');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function connectJellyfin(reconfigure) {
+  const prefix = reconfigure ? 'jf-reconf-' : 'jf-';
+  const btn = document.getElementById(reconfigure ? 'jf-reconnect-btn' : 'jf-connect-btn');
+  const fbId = reconfigure ? 'jf-reconnect-feedback' : 'jf-connect-feedback';
+  const url = document.getElementById(prefix + 'url').value.trim();
+  const username = document.getElementById(prefix + 'username').value.trim();
+  const password = document.getElementById(prefix + 'password').value;
+  if (!url || !username) {
+    _feedback(fbId, 'Compila URL e utente amministratore.', 'danger');
+    return;
+  }
+
+  btn.disabled = true;
+  _feedback(fbId, 'Connessione...');
+  try {
+    const res = await fetch('/api/auth/jellyfin-connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, username, password }),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) {
+      _feedback(fbId, data.detail || 'Collegamento fallito.', 'danger');
+      btn.disabled = false;
+      return;
+    }
+    // A full reload re-runs initAuth() against the now-real permission set,
+    // which is simpler than patching _me and the nav in place.
+    _feedback(fbId, 'Collegato. Ricaricamento...', 'success');
+    window.location.reload();
+  } catch (e) {
+    _feedback(fbId, 'Errore di rete.', 'danger');
+    btn.disabled = false;
+  }
 }
 
 async function loadPerfSettings() {
@@ -211,12 +400,11 @@ async function loadPerfSettings() {
 
 async function savePerfSettings() {
   const btn = document.getElementById('save-perf-btn');
-  const feedback = document.getElementById('perf-settings-feedback');
-  btn.disabled = true;
-  feedback.textContent = '';
   const concurrent = parseInt(document.getElementById('setting-max-concurrent').value, 10);
   const workers = parseInt(document.getElementById('setting-max-workers').value, 10);
-  if (!concurrent || !workers) { feedback.textContent = 'Valori non validi.'; btn.disabled = false; return; }
+  if (!concurrent || !workers) { _feedback('perf-settings-feedback', 'Valori non validi.', 'danger'); return; }
+  btn.disabled = true;
+  _feedback('perf-settings-feedback', 'Salvataggio...');
   try {
     const res = await fetch('/api/domain/settings', {
       method: 'PUT',
@@ -224,22 +412,22 @@ async function savePerfSettings() {
       body: JSON.stringify({max_concurrent_downloads: concurrent, max_segment_workers: workers}),
     });
     if (res.ok) {
-      showToast('Impostazioni salvate', 'success');
+      _feedback('perf-settings-feedback', 'Salvato.', 'success');
+      showToast('Performance salvate', 'success');
     } else {
       const d = await safeJson(res);
-      feedback.textContent = d.detail || 'Errore salvataggio.';
+      _feedback('perf-settings-feedback', d.detail || 'Errore salvataggio.', 'danger');
     }
-  } catch (e) { feedback.textContent = 'Errore di rete.'; }
+  } catch (e) { _feedback('perf-settings-feedback', 'Errore di rete.', 'danger'); }
   finally { btn.disabled = false; }
 }
+
 async function saveDomain() {
   const domain = document.getElementById('domain-input').value.trim();
-  const feedback = document.getElementById('domain-feedback');
   const btn = document.getElementById('save-domain-btn');
-  if (!domain) return;
+  if (!domain) { _feedback('domain-feedback', 'Inserisci un domain.', 'danger'); return; }
   btn.disabled = true;
-  feedback.textContent = 'Verifica in corso...';
-  feedback.className = 'form-text text-muted';
+  _feedback('domain-feedback', 'Verifica in corso...');
   try {
     const res = await fetch('/api/domain', {
       method:'PUT', headers:{'Content-Type':'application/json'},
@@ -248,18 +436,16 @@ async function saveDomain() {
     const data = await safeJson(res);
     if (res.ok) {
       currentDomain = data.domain; currentVersion = data.version;
-      feedback.textContent = `OK — versione ${data.version}`;
-      feedback.className = 'form-text text-success';
+      _feedback('domain-feedback', `OK — versione ${data.version}`, 'success');
       const badge = document.getElementById('domain-badge');
       badge.className = 'badge bg-success';
       badge.textContent = data.domain;
-      setTimeout(() => hideModal('settings-modal'), 800);
+      showToast('Domain salvato', 'success');
     } else {
-      feedback.textContent = data.detail || 'Errore';
-      feedback.className = 'form-text text-danger';
+      _feedback('domain-feedback', data.detail || 'Errore', 'danger');
     }
   } catch(e) {
-    feedback.textContent = 'Errore di rete'; feedback.className = 'form-text text-danger';
+    _feedback('domain-feedback', 'Errore di rete', 'danger');
   } finally { btn.disabled = false; }
 }
 
@@ -314,14 +500,22 @@ async function saveLibraries() {
   const excluded = (document.getElementById('excluded-input')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
   const btn = document.getElementById('save-libraries-btn');
   btn.disabled = true;
+  _feedback('libraries-feedback', 'Salvataggio...');
   try {
     const res = await fetch('/api/domain/libraries', {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({libraries:updated, excluded_folders:excluded}),
     });
-    if (res.ok) { _libraries=updated; showToast('Librerie salvate','success'); hideModal('settings-modal'); }
-    else { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
-  } catch(e) { showToast('Errore di rete','danger'); }
+    if (res.ok) {
+      _libraries = updated;
+      renderLibrariesList();
+      _feedback('libraries-feedback', 'Salvato.', 'success');
+      showToast('Librerie salvate','success');
+    } else {
+      const d = await safeJson(res);
+      _feedback('libraries-feedback', d.detail || 'Errore', 'danger');
+    }
+  } catch(e) { _feedback('libraries-feedback', 'Errore di rete', 'danger'); }
   finally { btn.disabled = false; }
 }
 
@@ -366,7 +560,6 @@ async function doSearch() {
   _showSearchSkeletons();
   try {
     const searchParams = new URLSearchParams({ q, source: currentSource });
-    if (currentSource !== 'animeunity') searchParams.set('domain', currentDomain);
     const res = await fetch(`/api/search?${searchParams}`, {signal: _searchAbort.signal});
     const container = document.getElementById('search-results');
     const results = await safeJson(res);
@@ -378,19 +571,27 @@ async function doSearch() {
       const year = itemYear(item);
       const score = item.score ? parseFloat(item.score).toFixed(1) : null;
       const posterUrl = item.poster
-        ? (item.poster.startsWith('http') ? item.poster : `/api/image/${currentDomain}/${item.poster}`)
+        ? (item.poster.startsWith('http') ? item.poster : `/api/image/${item.poster}`)
         : '';
       const card = document.createElement('div');
       card.className = 'col-6 col-sm-4 col-md-3 col-lg-2';
       const posterHtml = posterUrl
         ? `<img src="${posterUrl}" alt="" onerror="this.closest('.poster-wrap').querySelector('.poster-noimg').style.display='flex';this.style.display='none'">`
         : '';
+      // Movie cards carry no status ribbon: a movie can be requested again
+      // freely (denied/failed/cancelled never block it), so a "richiesto" chip
+      // would just read as blocked when it is not. TV and anime keep it — their
+      // status is read from the grouped request rows anyway, not per-title.
+      const ribbonHtml = isMovie
+        ? ''
+        : `<div class="status-ribbon" data-ribbon-for="${escapeHtml(String(item.id))}"></div>`;
       card.innerHTML = `
         <div class="result-card" onclick="openDetailModal(${idx})">
           <div class="poster-wrap">
             ${posterHtml}
             <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
             <div class="poster-overlay"></div>
+            ${ribbonHtml}
             <div class="poster-play"><i class="ti ti-player-play-filled" style="font-size:16px"></i></div>
           </div>
           <div class="card-meta">
@@ -405,6 +606,7 @@ async function doSearch() {
       container.appendChild(card);
     });
     _searchResults = results;
+    loadRequestStatuses(results.filter(r => r.type !== 'movie').map(r => String(r.id)));
   } catch(e) {
     if (e.name === 'AbortError') return; // cancelled by new search
     const container = document.getElementById('search-results');
@@ -412,6 +614,46 @@ async function doSearch() {
   } finally {
     btn.disabled=false; btn.innerHTML='<i class="ti ti-search me-1"></i>Cerca';
   }
+}
+
+// ── Request status on the result cards ─────────────────────────────────────────
+//
+// The one thing worth taking from Seerr: the state of a title is readable on the
+// card itself, without opening anything.
+
+const STATUS_RIBBONS = {
+  pending:         { label: 'Richiesto',    cls: 'ribbon-pending',   icon: 'ti-clock' },
+  approved:        { label: 'Approvato',    cls: 'ribbon-approved',  icon: 'ti-check' },
+  downloading:     { label: 'In download',  cls: 'ribbon-download',  icon: 'ti-download' },
+  completed:       { label: 'Disponibile',  cls: 'ribbon-available', icon: 'ti-circle-check' },
+  available:       { label: 'Disponibile',  cls: 'ribbon-available', icon: 'ti-circle-check' },
+  denied:          { label: 'Rifiutato',    cls: 'ribbon-denied',    icon: 'ti-x' },
+  failed:          { label: 'Fallito',      cls: 'ribbon-denied',    icon: 'ti-alert-triangle' },
+  needs_attention: { label: 'Attenzione',   cls: 'ribbon-attention', icon: 'ti-alert-circle' },
+  cancelled:       { label: 'Annullato',    cls: 'ribbon-denied',    icon: 'ti-ban' },
+};
+
+async function loadRequestStatuses(externalIds) {
+  if (!externalIds.length || !(can('REQUEST') || can('DOWNLOAD'))) return;
+  try {
+    const res = await fetch('/api/requests/status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: currentSource, external_ids: externalIds }),
+    });
+    if (!res.ok) return;
+    _requestStatus = await res.json();
+    renderRequestRibbons();
+  } catch (e) { /* the cards simply stay plain */ }
+}
+
+function renderRequestRibbons() {
+  document.querySelectorAll('[data-ribbon-for]').forEach(el => {
+    const info = _requestStatus[el.dataset.ribbonFor];
+    const style = info && STATUS_RIBBONS[info.status];
+    if (!style) { el.innerHTML = ''; el.className = 'status-ribbon'; return; }
+    el.className = `status-ribbon ${style.cls}`;
+    el.innerHTML = `<i class="ti ${style.icon}"></i>${style.label}`;
+  });
 }
 
 // ── Detail Modal ───────────────────────────────────────────────────────────────
@@ -440,7 +682,7 @@ function openDetailModal(idx) {
   const year = itemYear(item);
   const score = item.score ? parseFloat(item.score).toFixed(1) : null;
   const posterUrl = item.poster
-    ? (item.poster.startsWith('http') ? item.poster : `/api/image/${currentDomain}/${item.poster}`)
+    ? (item.poster.startsWith('http') ? item.poster : `/api/image/${item.poster}`)
     : '';
 
   const poster = document.getElementById('detail-poster');
@@ -466,31 +708,38 @@ function openDetailModal(idx) {
   const scheduleWrap = document.getElementById('detail-schedule-wrap');
   const scheduledAtInput = document.getElementById('detail-scheduled-at');
   scheduledAtInput.value = '';
-  scheduleWrap.style.display = '';
+  // Scheduling a download is part of the download privilege; a requester picks
+  // tracks and the approver decides when it runs.
+  scheduleWrap.style.display = can('DOWNLOAD') ? '' : 'none';
+
+  const requestOnly = !can('DOWNLOAD');
   const btn = document.getElementById('detail-action-btn');
+  const readAt = () => (can('DOWNLOAD') && scheduledAtInput.value)
+    ? new Date(scheduledAtInput.value).toISOString() : null;
+
   if (isAnime) {
     btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
     btn.onclick = () => {
-      const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
       const { audio, subs } = _getLangSelections();
       hideModal('detail-modal');
-      openAnimeBrowser(item.id, item.name, item.type, year, scheduledAt, audio, subs);
+      openAnimeBrowser(item.id, item.name, item.type, year, readAt(), audio, subs);
     };
   } else if (isMovie) {
-    btn.className='btn btn-primary'; btn.innerHTML='<i class="ti ti-download me-1"></i>Scarica';
+    btn.className = requestOnly ? 'btn btn-warning' : 'btn btn-primary';
+    btn.innerHTML = requestOnly
+      ? '<i class="ti ti-send me-1"></i>Richiedi'
+      : '<i class="ti ti-download me-1"></i>Scarica';
     btn.onclick = () => {
-      const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
       const { audio, subs } = _getLangSelections();
       hideModal('detail-modal');
-      startFilmDownload(item.id, item.name, year, scheduledAt, audio, subs);
+      startFilmDownload(item.id, item.name, year, readAt(), audio, subs, item.poster);
     };
   } else {
     btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
     btn.onclick = () => {
-      const scheduledAt = scheduledAtInput.value ? new Date(scheduledAtInput.value).toISOString() : null;
       const { audio, subs } = _getLangSelections();
       hideModal('detail-modal');
-      openEpisodeBrowser(item.id, item.name, item.slug, year, scheduledAt, audio, subs);
+      openEpisodeBrowser(item.id, item.name, item.slug, year, readAt(), audio, subs, item.poster);
     };
   }
 
@@ -504,7 +753,7 @@ function openDetailModal(idx) {
   langsEl.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Caricamento lingue...';
   showModal('detail-modal');
 
-  const p = new URLSearchParams({ type:isMovie?'movie':'tv', domain:currentDomain, slug:item.slug||'', version:currentVersion||'' });
+  const p = new URLSearchParams({ type:isMovie?'movie':'tv', slug:item.slug||'', version:currentVersion||'' });
   fetch(`/api/search/languages/${item.id}?${p}`)
     .then(r => r.ok ? r.json() : null)
     .then(info => {
@@ -531,13 +780,48 @@ function openDetailModal(idx) {
     .catch(()=>{ langsEl.innerHTML=''; });
 }
 
+// ── Requesting ─────────────────────────────────────────────────────────────────
+
+// Same form, different action: without the download permission the choice of
+// audio and subtitles becomes a request instead of a job.
+async function submitRequest(payload, label) {
+  try {
+    const res = await fetch('/api/requests', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return false; }
+
+    const status = data.request.status;
+    if (status === 'available') showToast(`${label} è già in libreria.`, 'info');
+    else if (!data.created) showToast(`${label} era già stato richiesto: sarai avvisato.`, 'info');
+    else showToast(`Richiesta inviata: ${label}`, 'success');
+
+    _requestStatus[String(payload.external_id)] = { id: data.request.id, status };
+    renderRequestRibbons();
+    refreshNotifications();
+    return true;
+  } catch (e) { showToast('Errore di rete', 'danger'); return false; }
+}
+
 // ── Film download ──────────────────────────────────────────────────────────────
 
-async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLangs=null, subLangs=null) {
+async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLangs=null, subLangs=null, poster=null) {
+  if (!can('DOWNLOAD')) {
+    const ok = await submitRequest({
+      source: currentSource, media_type: 'film', external_id: String(id),
+      title, year, poster,
+      audio_languages: audioLangs || ['ita'],
+      subtitle_languages: subLangs || [],
+    }, title);
+    if (ok) showPage('my-requests');
+    return;
+  }
   try {
     const endpoint = scheduledAt ? '/api/download/schedule/film' : '/api/download/film';
     const body = {
-      id, title, year, domain: currentDomain,
+      id, title, year,
       audio_languages: audioLangs || ['ita'],
       subtitle_languages: subLangs || ['ita', 'eng'],
     };
@@ -561,8 +845,8 @@ async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLa
 
 let _epCtx = {};
 
-async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=null, audioLangs=null, subLangs=null) {
-  _epCtx = { tvId, tvName, slug, year, scheduledAt, token:null, episodes:[], currentSeason:null,
+async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=null, audioLangs=null, subLangs=null, poster=null) {
+  _epCtx = { tvId, tvName, slug, year, scheduledAt, token:null, episodes:[], currentSeason:null, poster,
     audioLangs: audioLangs || ['ita'], subLangs: subLangs || ['ita', 'eng'] };
   document.getElementById('episode-modal-title').textContent = tvName;
   document.getElementById('season-tabs-wrap').style.display='none';
@@ -573,8 +857,8 @@ async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=nul
 
   try {
     const [tokenData, seasonsData] = await Promise.all([
-      fetch(`/api/tv/${tvId}/token?domain=${currentDomain}`).then(r=>r.json()),
-      fetch(`/api/tv/${tvId}/seasons?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}`).then(r=>r.json()),
+      fetch(`/api/tv/${tvId}/token`).then(r=>r.json()),
+      fetch(`/api/tv/${tvId}/seasons?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}`).then(r=>r.json()),
     ]);
     _epCtx.token = tokenData.token;
     _epCtx.seasonsCount = seasonsData.seasons_count;
@@ -611,7 +895,7 @@ async function loadSeason(season) {
   const container = document.getElementById('episode-modal-body');
   container.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';
   try {
-    const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
+    const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
     const eps = await safeJson(res);
     if (!res.ok) { container.innerHTML=`<div class="alert alert-danger">${escapeHtml(eps.detail||'Errore caricamento episodi')}</div>`; return; }
     if (!Array.isArray(eps)) { container.innerHTML=`<div class="alert alert-danger">Risposta non valida dal server</div>`; return; }
@@ -646,11 +930,24 @@ async function loadSeason(season) {
 }
 
 async function startEpisodeDownload(epIndex) {
-  const { tvId, tvName, year, scheduledAt, token, episodes, currentSeason, audioLangs, subLangs } = _epCtx;
+  const { tvId, tvName, slug, year, scheduledAt, token, episodes, currentSeason, audioLangs, subLangs, poster } = _epCtx;
   const ep = episodes[epIndex];
+  const label = `${tvName} S${String(currentSeason).padStart(2,'0')}E${String(ep.n).padStart(2,'0')}`;
+
+  if (!can('DOWNLOAD')) {
+    await submitRequest({
+      source: 'streamingcommunity', media_type: 'episode', external_id: String(tvId),
+      slug, title: tvName, year, poster,
+      season: currentSeason, episode_number: String(ep.n),
+      audio_languages: audioLangs || ['ita'],
+      subtitle_languages: subLangs || [],
+    }, label);
+    return;
+  }
+
   const endpoint = scheduledAt ? '/api/download/schedule/episode' : '/api/download/episode';
   const body = {
-    tv_id: tvId, eps: episodes, ep_index: epIndex, domain: currentDomain, token,
+    tv_id: tvId, eps: episodes, ep_index: epIndex, token,
     tv_name: tvName, season: currentSeason, year,
     audio_languages: audioLangs || ['ita'],
     subtitle_languages: subLangs || ['ita', 'eng'],
@@ -662,7 +959,6 @@ async function startEpisodeDownload(epIndex) {
       body: JSON.stringify(body),
     });
     const data = await safeJson(res);
-    const label = `${tvName} S${String(currentSeason).padStart(2,'0')}E${String(ep.n).padStart(2,'0')}`;
     if (res.ok) showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
     else showToast(data.detail||'Errore','danger');
   } catch(e) { showToast('Errore di rete','danger'); }
@@ -687,7 +983,7 @@ async function downloadWholeSeries() {
   showPage('downloads');
   for (let s = 1; s <= seasonsCount; s++) {
     try {
-      const res = await fetch(`/api/tv/${tvId}/seasons/${s}/episodes?slug=${encodeURIComponent(slug)}&domain=${currentDomain}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
+      const res = await fetch(`/api/tv/${tvId}/seasons/${s}/episodes?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
       const eps = await safeJson(res);
       _epCtx.episodes = eps;
       _epCtx.currentSeason = s;
@@ -794,6 +1090,19 @@ async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null,
 async function startAnimeDownload(epIndex) {
   const { animeId, animeName, animeType, animeYear, scheduledAt, episodes, audioLangs, subLangs } = _animeCtx;
   const episode = episodes[epIndex];
+  const label = `${animeName} E${episode.number}`;
+
+  if (!can('DOWNLOAD')) {
+    await submitRequest({
+      source: 'animeunity', media_type: 'anime', external_id: String(animeId),
+      title: animeName, year: animeYear, anime_type: animeType,
+      episode_number: String(episode.number),
+      audio_languages: audioLangs || ['ita'],
+      subtitle_languages: subLangs || [],
+    }, label);
+    return;
+  }
+
   const endpoint = scheduledAt ? '/api/download/schedule/anime' : '/api/download/anime';
   const body = {
     anime_id: animeId, episode, anime_name: animeName, anime_type: animeType, year: animeYear,
@@ -807,7 +1116,6 @@ async function startAnimeDownload(epIndex) {
       body: JSON.stringify(body),
     });
     const data = await safeJson(res);
-    const label = `${animeName} E${episode.number}`;
     if (res.ok) showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
     else showToast(data.detail || 'Errore', 'danger');
   } catch(e) { showToast('Errore di rete', 'danger'); }
@@ -877,6 +1185,16 @@ function connectGlobalStream() {
         _jobs.delete(msg.job_id);
         document.getElementById(`job-card-${msg.job_id}`)?.remove();
         updateActiveBadge();
+        break;
+      case 'notification':
+        // A bare signal: the payload lives behind /api/notifications, which is
+        // scoped to the caller, so a shared stream leaks nothing.
+        refreshNotifications();
+        refreshQueueBadge();
+        if (can('MANAGE_REQUESTS') &&
+            document.getElementById('page-requests').style.display !== 'none') {
+          loadRequestQueue();
+        }
         break;
     }
   };

@@ -1,15 +1,21 @@
-import os
 import re
 
 from random_user_agent.user_agent import UserAgent
 from random_user_agent.params import SoftwareName, OperatingSystem
 
+# Windows forbids \ / : * ? " < > | ; POSIX only forbids / and NUL. The filter is
+# applied on every platform regardless: titles come from third-party sites and
+# end up in filesystem paths, so a title containing "../" must not become a
+# traversal just because the container happens to run Linux.
+_FORBIDDEN = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
 
 def sanitize_filename(name: str) -> str:
-    if os.name == 'nt':
-        # Windows forbids: \ / : * ? " < > |
-        return re.sub(r'[\\/:*?"<>|]', '', name).strip()
-    return name
+    cleaned = _FORBIDDEN.sub("", str(name)).strip().strip(".")
+    # "." and ".." survive the character filter but are not usable names.
+    if not cleaned or set(cleaned) <= {"."}:
+        return "senza-nome"
+    return cleaned[:180]
 
 
 def get_headers():

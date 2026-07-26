@@ -3,14 +3,24 @@ import json
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.auth.deps import require
+from app.auth.permissions import Permission
 from app.config import DATA_FILE, get_settings, save_settings
 from app.core.page import get_domain_version
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/domain", tags=["domain"])
+
+CAN_MANAGE = [Depends(require(Permission.MANAGE_SETTINGS))]
+
+# Reading the current domain is not a settings operation: every signed-in user
+# needs it to build poster URLs. Anyone who can search can already see it.
+CAN_READ_DOMAIN = [
+    Depends(require(Permission.REQUEST, Permission.DOWNLOAD, Permission.MANAGE_SETTINGS, mode="or"))
+]
 
 
 def _read_data() -> dict:
@@ -26,7 +36,7 @@ def _write_data(data: dict):
         json.dump(data, f)
 
 
-@router.get("")
+@router.get("", dependencies=CAN_READ_DOMAIN)
 async def get_domain():
     data = _read_data()
     domain = data.get("domain", "")
@@ -55,7 +65,7 @@ class LibrariesUpdate(BaseModel):
     excluded_folders: list[str]
 
 
-@router.get("/libraries")
+@router.get("/libraries", dependencies=CAN_MANAGE)
 def get_libraries():
     data = _read_data()
     return {
@@ -64,7 +74,7 @@ def get_libraries():
     }
 
 
-@router.put("/libraries")
+@router.put("/libraries", dependencies=CAN_MANAGE)
 def set_libraries(body: LibrariesUpdate):
     data = _read_data()
     # Deduplicate: last entry per type wins
@@ -82,12 +92,12 @@ class SettingsUpdate(BaseModel):
     max_segment_workers: int
 
 
-@router.get("/settings")
+@router.get("/settings", dependencies=CAN_MANAGE)
 def get_app_settings():
     return get_settings()
 
 
-@router.put("/settings")
+@router.put("/settings", dependencies=CAN_MANAGE)
 def set_app_settings(body: SettingsUpdate):
     if body.max_concurrent_downloads < 1 or body.max_concurrent_downloads > 32:
         raise HTTPException(status_code=400, detail="max_concurrent_downloads must be between 1 and 32")
@@ -103,7 +113,7 @@ def set_app_settings(body: SettingsUpdate):
     return new_settings
 
 
-@router.put("")
+@router.put("", dependencies=CAN_MANAGE)
 async def set_domain(body: DomainUpdate):
     domain = body.domain.strip()
     if not domain:

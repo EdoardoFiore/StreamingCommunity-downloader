@@ -2,13 +2,24 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.auth.deps import require
+from app.auth.permissions import Permission
 from app.jobs import job_manager
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api", tags=["progress"])
+
+# The job list and its SSE stream describe downloads across the whole panel, so
+# they belong to whoever can start one or approve one — not to every user.
+router = APIRouter(
+    prefix="/api",
+    tags=["progress"],
+    dependencies=[
+        Depends(require(Permission.DOWNLOAD, Permission.MANAGE_REQUESTS, mode="or"))
+    ],
+)
 
 
 @router.get("/jobs")

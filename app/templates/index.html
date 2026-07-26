@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <title>SC Panel</title>
-  <link rel="icon" type="image/x-icon" href="/docs/favicon.ico"/>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Karla:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
@@ -1037,6 +1037,29 @@
       margin-top: 2px;
     }
 
+    /* Every settings section owns its own save action: two of them (verifying a
+       domain, connecting to Jellyfin) have side effects beyond writing a value,
+       so a single modal-wide save button would be a lie. */
+    .settings-section + .settings-section {
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+      margin-top: 24px;
+    }
+    .settings-section-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin: -4px 0 12px;
+    }
+    .settings-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .settings-actions .form-text { margin: 0; }
+
     /* Empty state */
     #jobs-empty { color: var(--text-dim) !important; }
 
@@ -1321,6 +1344,267 @@
     @media (hover: none) {
       .fm-actions { opacity: 1 !important; }
     }
+
+    /* ═══════════════════════════════════════════════════════
+       HEADER — current user and notifications
+       ═══════════════════════════════════════════════════════ */
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+
+    .header-icon-btn {
+      background: transparent; border: none; color: var(--text-sub);
+      width: 32px; height: 32px; border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; cursor: pointer; transition: background .15s ease, color .15s ease;
+    }
+    .header-icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+    .notif-wrap { position: relative; }
+
+    .notif-badge {
+      position: absolute; top: 1px; right: 1px;
+      min-width: 15px; height: 15px; padding: 0 4px;
+      background: var(--accent); color: #fff;
+      border-radius: 8px; font-size: 9px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .notif-panel {
+      position: absolute; right: 0; top: 38px; z-index: 1050;
+      width: 330px; max-height: 400px; overflow-y: auto;
+      background: var(--bg-raised);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 34px rgba(0,0,0,.45);
+    }
+    .notif-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 13px; border-bottom: 1px solid var(--border);
+      font-size: 12px; font-weight: 600; color: var(--text-sub);
+      position: sticky; top: 0; background: var(--bg-raised);
+    }
+    .btn-link-sm {
+      background: none; border: none; color: var(--blue);
+      font-size: 11px; cursor: pointer; padding: 0;
+    }
+    .notif-item {
+      display: flex; gap: 9px; padding: 10px 13px;
+      border-bottom: 1px solid var(--border); font-size: 12.5px;
+    }
+    .notif-item i { color: var(--text-muted); font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+    .notif-unread { background: rgba(224,36,68,.06); }
+    .notif-unread i { color: var(--accent); }
+    .notif-text { line-height: 1.4; }
+    .notif-time { color: var(--text-dim); font-size: 10.5px; margin-top: 2px; }
+    .notif-empty { padding: 22px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+    .user-chip {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 4px 6px 4px 8px;
+    }
+    .user-chip-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+    }
+    .user-chip-name { font-size: 12.5px; font-weight: 600; line-height: 1.1; }
+    .user-chip-role { font-size: 10px; color: var(--text-muted); line-height: 1.2; }
+    @media (max-width: 575px) { .user-chip-text { display: none; } }
+
+    /* ═══════════════════════════════════════════════════════
+       STATUS RIBBON on result cards
+       ═══════════════════════════════════════════════════════ */
+    .status-ribbon {
+      position: absolute; top: 6px; right: 6px; z-index: 3;
+      display: none; align-items: center; gap: 3px;
+      padding: 3px 7px; border-radius: 20px;
+      font-size: 9.5px; font-weight: 700; letter-spacing: .2px;
+      text-transform: uppercase; color: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,.4);
+      backdrop-filter: blur(4px);
+    }
+    .status-ribbon i { font-size: 11px; }
+    .status-ribbon.ribbon-pending,
+    .status-ribbon.ribbon-approved,
+    .status-ribbon.ribbon-download,
+    .status-ribbon.ribbon-available,
+    .status-ribbon.ribbon-denied,
+    .status-ribbon.ribbon-attention { display: flex; }
+
+    .ribbon-pending   { background: var(--yellow); color: #1a1a24; }
+    .ribbon-approved  { background: var(--blue); }
+    .ribbon-download  { background: var(--teal); color: #1a1a24; }
+    .ribbon-available { background: var(--green); color: #08231a; }
+    .ribbon-denied    { background: var(--accent); }
+    .ribbon-attention { background: #f5731f; }
+
+    /* ═══════════════════════════════════════════════════════
+       REQUEST ROWS — queue and my requests
+       ═══════════════════════════════════════════════════════ */
+    .queue-filters {
+      display: flex; align-items: center; gap: 7px;
+      margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .queue-filter {
+      background: var(--bg-surface); border: 1px solid var(--border);
+      color: var(--text-sub); border-radius: 20px;
+      padding: 5px 13px; font-size: 12px; cursor: pointer;
+      transition: all .15s ease;
+    }
+    .queue-filter:hover { background: var(--bg-hover); color: var(--text); }
+    .queue-filter.active {
+      background: var(--accent-dim); border-color: var(--accent);
+      color: #ff8fa3; font-weight: 600;
+    }
+
+    .req-row {
+      display: flex; gap: 13px; align-items: flex-start;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 13px; margin-bottom: 10px;
+      transition: border-color .15s ease;
+    }
+    .req-row:hover { border-color: var(--border-mid); }
+    .req-row-attention { border-left: 3px solid #f5731f; }
+
+    .req-poster {
+      width: 52px; height: 78px; flex-shrink: 0;
+      object-fit: cover; border-radius: var(--radius-xs);
+      background: var(--bg-input);
+    }
+    .req-poster-empty {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 21px; opacity: .35;
+    }
+
+    .req-main { flex: 1; min-width: 0; }
+    .req-title { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+    .req-meta {
+      font-size: 11.5px; color: var(--text-muted);
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    }
+    .req-meta i { font-size: 13px; }
+    .req-dot { color: var(--text-dim); }
+
+    .track-badges {
+      display: flex; align-items: center; gap: 4px;
+      flex-wrap: wrap; margin-top: 7px;
+    }
+    .track-label { color: var(--text-muted); font-size: 12px; }
+
+    .req-problem {
+      margin-top: 8px; padding: 6px 9px;
+      background: rgba(245,115,31,.10); border: 1px solid rgba(245,115,31,.3);
+      border-radius: var(--radius-xs); color: #ffb079; font-size: 11.5px;
+    }
+    .req-denied {
+      margin-top: 8px; padding: 6px 9px;
+      background: var(--accent-dim); border: 1px solid rgba(224,36,68,.3);
+      border-radius: var(--radius-xs); color: #ff8fa3; font-size: 11.5px;
+    }
+
+    .req-side {
+      display: flex; flex-direction: column; align-items: flex-end;
+      gap: 8px; flex-shrink: 0;
+    }
+    .req-actions { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+
+    @media (max-width: 575px) {
+      .req-row { flex-wrap: wrap; }
+      .req-side { width: 100%; align-items: flex-start; flex-direction: row;
+                  justify-content: space-between; }
+    }
+
+    .empty-panel {
+      text-align: center; padding: 48px 20px; color: var(--text-muted);
+    }
+    .empty-panel i { font-size: 34px; opacity: .3; display: block; margin-bottom: 10px; }
+    .empty-panel p { font-size: 13px; margin: 0; }
+
+    /* ── Request row checkbox ─────────────────────────────────── */
+    .req-check {
+      flex-shrink: 0; align-self: center;
+      width: 17px; height: 17px; margin-top: 0; cursor: pointer;
+    }
+    /* Keeps rows aligned when a row has nothing selectable (closed requests
+       cannot be withdrawn, so they render no checkbox). */
+    .req-check-spacer { display: inline-block; width: 17px; flex-shrink: 0; }
+
+    /* ── Collapsible series/season groups ─────────────────────── */
+    .req-group { margin-bottom: 10px; }
+
+    .req-group-header {
+      display: flex; gap: 13px; align-items: center;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 10px 13px;
+      cursor: pointer; transition: border-color .15s ease;
+    }
+    .req-group-header:hover { border-color: var(--border-mid); }
+    .req-group.expanded .req-group-header {
+      border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+      border-bottom-color: transparent;
+    }
+    .req-group-header .req-poster { width: 40px; height: 58px; }
+
+    .req-group-chevron {
+      color: var(--text-muted); font-size: 15px; flex-shrink: 0;
+      transition: transform .15s ease;
+    }
+    .req-group.expanded .req-group-chevron { transform: rotate(90deg); }
+
+    .req-group-title { font-size: 14px; font-weight: 600; }
+    .req-group-count { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+    .req-group-statuses { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+
+    .req-group-body {
+      display: none;
+      border: 1px solid var(--border); border-top: none;
+      border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius);
+      padding: 6px 10px 10px;
+      background: var(--bg-base);
+    }
+    .req-group.expanded .req-group-body { display: block; }
+    .req-group-body .req-row { margin-bottom: 6px; margin-top: 6px; }
+    .req-group-body .req-row:last-child { margin-bottom: 0; }
+
+    /* ═══════════════════════════════════════════════════════
+       USER ROWS
+       ═══════════════════════════════════════════════════════ */
+    .user-row {
+      display: flex; gap: 13px; align-items: flex-start;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 13px; margin-bottom: 9px;
+    }
+    .user-row-disabled { opacity: .55; }
+
+    .user-avatar {
+      width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+      background: var(--bg-raised); color: var(--text-sub);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700;
+    }
+    .user-main { flex: 1; min-width: 0; }
+    .user-name { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .user-actions { display: flex; gap: 5px; flex-shrink: 0; }
+
+    .perm-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+    .perm-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 20px; padding: 3px 10px 3px 8px;
+      font-size: 11px; color: var(--text-sub); cursor: pointer;
+      transition: all .15s ease;
+    }
+    .perm-chip:hover { border-color: var(--border-strong); color: var(--text); }
+    .perm-chip:has(input:checked) {
+      background: var(--blue-dim); border-color: rgba(79,128,255,.45); color: #a9c2ff;
+    }
+    .perm-chip input { margin: 0; }
+
+    @media (max-width: 575px) {
+      .user-row { flex-wrap: wrap; }
+      .user-actions { width: 100%; }
+    }
   </style>
 </head>
 <body class="antialiased">
@@ -1344,23 +1628,42 @@
       </div>
       <div class="collapse navbar-collapse" id="sidebar-menu">
         <ul class="navbar-nav pt-lg-3">
-          <li class="nav-item">
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
             <a class="nav-link active" href="#" data-page="search" onclick="showPage('search');return false">
               <span class="nav-link-icon"><i class="ti ti-search"></i></span>
               <span class="nav-link-title">Cerca</span>
             </a>
           </li>
-          <li class="nav-item">
+          <li class="nav-item" data-perm="DOWNLOAD|MANAGE_REQUESTS">
             <a class="nav-link" href="#" data-page="downloads" onclick="showPage('downloads');return false">
               <span class="nav-link-icon"><i class="ti ti-download"></i></span>
               <span class="nav-link-title">Download</span>
               <span class="badge bg-red ms-auto" id="active-jobs-badge" style="display:none"></span>
             </a>
           </li>
-          <li class="nav-item">
+          <li class="nav-item" data-perm="MANAGE_REQUESTS">
+            <a class="nav-link" href="#" data-page="requests" onclick="showPage('requests');return false">
+              <span class="nav-link-icon"><i class="ti ti-inbox"></i></span>
+              <span class="nav-link-title">Richieste</span>
+              <span class="badge bg-yellow ms-auto" id="queue-pending-count" style="display:none"></span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD" data-requires-auth="1">
+            <a class="nav-link" href="#" data-page="my-requests" onclick="showPage('my-requests');return false">
+              <span class="nav-link-icon"><i class="ti ti-send"></i></span>
+              <span class="nav-link-title">Le mie richieste</span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="VIEW_LIBRARY">
             <a class="nav-link" href="#" data-page="files" onclick="showPage('files');return false">
               <span class="nav-link-icon"><i class="ti ti-folder-filled"></i></span>
               <span class="nav-link-title">File</span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="MANAGE_USERS">
+            <a class="nav-link" href="#" data-page="users" onclick="showPage('users');return false">
+              <span class="nav-link-icon"><i class="ti ti-users"></i></span>
+              <span class="nav-link-title">Utenti</span>
             </a>
           </li>
         </ul>
@@ -1370,7 +1673,7 @@
             <span id="stream-label">Connessione...</span>
           </div>
           <span id="domain-badge" class="badge bg-secondary">caricamento...</span>
-          <button class="btn-sidebar-settings" onclick="openSettings()">
+          <button class="btn-sidebar-settings" data-perm="MANAGE_SETTINGS" onclick="openSettings()">
             <i class="ti ti-settings" style="font-size:15px;flex-shrink:0"></i>
             Impostazioni
           </button>
@@ -1386,6 +1689,38 @@
         <div class="row align-items-center">
           <div class="col">
             <h2 class="page-title" id="page-title">Cerca</h2>
+          </div>
+          <div class="col-auto">
+            <div class="header-actions">
+
+              <!-- Notification bell -->
+              <div class="notif-wrap" data-requires-auth="1">
+                <button class="header-icon-btn" id="notif-button" onclick="toggleNotifications()" title="Notifiche">
+                  <i class="ti ti-bell"></i>
+                  <span class="notif-badge" id="notif-badge" style="display:none"></span>
+                </button>
+                <div class="notif-panel" id="notif-panel" style="display:none">
+                  <div class="notif-header">
+                    <span>Notifiche</span>
+                    <button class="btn-link-sm" onclick="markAllNotificationsRead()">Segna lette</button>
+                  </div>
+                  <div id="notif-list"></div>
+                </div>
+              </div>
+
+              <!-- Current user -->
+              <div class="user-chip" data-requires-auth="1">
+                <div class="user-chip-avatar" id="user-initials">?</div>
+                <div class="user-chip-text">
+                  <div class="user-chip-name" id="user-name">—</div>
+                  <div class="user-chip-role" id="user-role"></div>
+                </div>
+                <button class="header-icon-btn" onclick="logout()" title="Esci">
+                  <i class="ti ti-logout"></i>
+                </button>
+              </div>
+
+            </div>
           </div>
         </div>
       </div>
@@ -1483,6 +1818,143 @@
           </div>
         </div>
 
+        <!-- ── Request queue (approvers) ────────────────────────── -->
+        <div id="page-requests" style="display:none">
+          <div class="queue-filters" id="queue-filters">
+            <button class="queue-filter active" data-filter="action" onclick="setQueueFilter('action')">Da gestire</button>
+            <button class="queue-filter" data-filter="in_progress" onclick="setQueueFilter('in_progress')">In corso</button>
+            <button class="queue-filter" data-filter="all" onclick="setQueueFilter('all')">Tutte</button>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadRequestQueue()">
+              <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+          <div class="fm-selection-bar" id="queue-selection-bar" style="visibility:hidden">
+            <span class="fm-selection-count" id="queue-selection-count">0 selezionate</span>
+            <button class="btn btn-sm btn-success" onclick="approveSelected()">
+              <i class="ti ti-check me-1"></i>Approva
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="denySelected()">
+              <i class="ti ti-x me-1"></i>Rifiuta
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="cancelSelected('queue')">
+              <i class="ti ti-ban me-1"></i>Annulla
+            </button>
+            <button class="btn btn-sm btn-ghost-secondary" onclick="clearSelection('queue')">
+              <i class="ti ti-x me-1"></i>Deseleziona
+            </button>
+          </div>
+          <div id="requests-list"></div>
+        </div>
+
+        <!-- ── My requests ─────────────────────────────────────── -->
+        <div id="page-my-requests" style="display:none">
+          <div class="queue-filters" id="mine-filters">
+            <button class="queue-filter active" data-filter="active" onclick="setMineFilter('active')">In corso</button>
+            <button class="queue-filter" data-filter="closed" onclick="setMineFilter('closed')">Concluse</button>
+            <button class="queue-filter" data-filter="all" onclick="setMineFilter('all')">Tutte</button>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadMyRequests()">
+              <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+          <div class="fm-selection-bar" id="mine-selection-bar" style="visibility:hidden">
+            <span class="fm-selection-count" id="mine-selection-count">0 selezionate</span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="cancelSelected('mine')">
+              <i class="ti ti-trash me-1"></i>Annulla selezionate
+            </button>
+            <button class="btn btn-sm btn-ghost-secondary" onclick="clearSelection('mine')">
+              <i class="ti ti-x me-1"></i>Deseleziona
+            </button>
+          </div>
+          <div id="my-requests-list"></div>
+        </div>
+
+        <!-- ── Users ───────────────────────────────────────────── -->
+        <div id="page-users" style="display:none">
+          <div class="card mb-3">
+            <div class="card-body py-3">
+              <label class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="open-signin" onchange="saveOpenSignin()">
+                <span class="form-check-label">
+                  Consenti l'accesso a qualsiasi account Jellyfin
+                  <span class="d-block text-muted" style="font-size:11px">
+                    Disattivato: gli utenti vanno importati esplicitamente qui sotto.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div id="users-list"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Deny Request Modal ───────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="deny-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="ti ti-circle-x me-2 text-danger"></i>Rifiuta richiesta</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2" id="deny-title" style="font-weight:600"></p>
+        <label class="form-label">Motivo (opzionale, visibile al richiedente)</label>
+        <textarea class="form-control" id="deny-reason" rows="3"
+                  placeholder="Es. contenuto già presente in libreria"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Annulla</button>
+        <button class="btn btn-danger" onclick="confirmDeny()">Rifiuta</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Fix Request Modal ────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="fix-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="ti ti-tool me-2 text-warning"></i>Correggi richiesta</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-1" id="fix-title" style="font-weight:600"></p>
+        <div class="req-problem mb-3" id="fix-problem"></div>
+
+        <label class="form-label">Tracce audio disponibili all'ultimo tentativo</label>
+        <div id="fix-audio" class="mb-3"></div>
+
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">ID sulla fonte</label>
+            <input class="form-control" id="fix-external-id">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Slug</label>
+            <input class="form-control" id="fix-slug">
+          </div>
+        </div>
+        <div class="row g-2 mt-1" id="fix-season-row">
+          <div class="col-6">
+            <label class="form-label">Stagione</label>
+            <input class="form-control" id="fix-season" type="number" min="0">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Episodio</label>
+            <input class="form-control" id="fix-episode">
+          </div>
+        </div>
+        <p class="text-muted mt-3 mb-0" style="font-size:11px">
+          Dopo la correzione, approva di nuovo la richiesta per riprovare.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Annulla</button>
+        <button class="btn btn-warning" onclick="confirmFix()">Salva correzione</button>
       </div>
     </div>
   </div>
@@ -1499,66 +1971,151 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="settings-section-label">Domain</p>
-        <div class="row g-2 align-items-end mb-4">
-          <div class="col">
-            <label class="form-label">
-              Domain
-              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">
-                (es: streamingcommunityz.parts)
-              </span>
-            </label>
-            <input type="text" id="domain-input" class="form-control" placeholder="streamingcommunityz.parts">
+
+        <!-- ── Sorgente ──────────────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Sorgente</p>
+          <p class="settings-section-hint">
+            Il dominio da cui il pannello cerca e scarica. Salvando viene verificato.
+          </p>
+          <label class="form-label" for="domain-input">Domain</label>
+          <input type="text" id="domain-input" class="form-control" placeholder="streamingcommunityz.parts">
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveDomain()" id="save-domain-btn">
+              Verifica e salva
+            </button>
             <div id="domain-feedback" class="form-text"></div>
           </div>
-          <div class="col-auto">
-            <button type="button" class="btn btn-primary" onclick="saveDomain()" id="save-domain-btn">Salva</button>
+        </div>
+
+        <!-- ── Librerie e cartelle ───────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Librerie multimediali</p>
+          <p class="settings-section-hint">
+            Dove finiscono i file scaricati, una cartella per tipo di contenuto.
+          </p>
+          <div id="libraries-list" class="mb-2"></div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
+            <i class="ti ti-plus me-1"></i>Aggiungi libreria
+          </button>
+
+          <label class="form-label mt-3" for="excluded-input">Cartelle escluse</label>
+          <input type="text" id="excluded-input" class="form-control"
+                 placeholder="lost+found, .recycle, @eaDir, ...">
+          <div class="form-text">Nomi separati da virgola, ignorati sfogliando le librerie.</div>
+
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveLibraries()" id="save-libraries-btn">
+              Salva librerie e cartelle
+            </button>
+            <div id="libraries-feedback" class="form-text"></div>
           </div>
         </div>
 
-        <hr>
-        <p class="settings-section-label">Librerie Jellyfin</p>
-        <div id="libraries-list" class="mb-3"></div>
-        <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
-          <i class="ti ti-plus me-1"></i>Aggiungi libreria
-        </button>
-
-        <hr>
-        <p class="settings-section-label">Cartelle escluse</p>
-        <input type="text" id="excluded-input" class="form-control"
-               placeholder="lost+found, .recycle, @eaDir, ...">
-        <div class="form-text">Nomi separati da virgola</div>
-
-        <hr>
-        <p class="settings-section-label">Performance download</p>
-        <div class="row g-3">
-          <div class="col-sm-6">
-            <label class="form-label">
-              Download contemporanei
-              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–32)</span>
-            </label>
-            <input type="number" id="setting-max-concurrent" class="form-control" min="1" max="32" value="3">
-            <div class="form-text">Suggerito: 2–4. Valori alti aumentano l'uso di rete e RAM.</div>
+        <!-- ── Performance download ──────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Performance download</p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="setting-max-concurrent">
+                Download contemporanei
+                <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–32)</span>
+              </label>
+              <input type="number" id="setting-max-concurrent" class="form-control" min="1" max="32" value="3">
+              <div class="form-text">Suggerito: 2–4. Valori alti aumentano l'uso di rete e RAM.</div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="setting-max-workers">
+                Thread per segmento
+                <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–128)</span>
+              </label>
+              <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
+              <div class="form-text">Suggerito: 8–32. Valori >64 raramente migliorano le prestazioni.</div>
+            </div>
           </div>
-          <div class="col-sm-6">
-            <label class="form-label">
-              Thread per segmento
-              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–128)</span>
-            </label>
-            <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
-            <div class="form-text">Suggerito: 8–32. Valori >64 raramente migliorano le prestazioni.</div>
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="savePerfSettings()" id="save-perf-btn">
+              Salva performance
+            </button>
+            <div id="perf-settings-feedback" class="form-text"></div>
           </div>
         </div>
-        <div id="perf-settings-feedback" class="form-text mt-1"></div>
+
+        <!-- ── Accesso (Jellyfin SSO) ────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Accesso e utenti</p>
+
+          <div id="jf-not-connected" style="display:none">
+            <p class="settings-section-hint">
+              Il pannello sta funzionando senza Jellyfin: nessun login, nessuna coda richieste,
+              nessuna gestione utenti. Collegalo per abilitarli.
+            </p>
+            <div class="row g-2">
+              <div class="col-12">
+                <label class="form-label" for="jf-url">URL server Jellyfin</label>
+                <input type="text" id="jf-url" class="form-control" placeholder="http://192.168.1.10:8096">
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label" for="jf-username">Utente amministratore</label>
+                <input type="text" id="jf-username" class="form-control" autocomplete="off">
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label" for="jf-password">Password</label>
+                <input type="password" id="jf-password" class="form-control" autocomplete="off">
+              </div>
+            </div>
+            <div class="form-text mt-1">Serve un account amministratore Jellyfin. La password non viene salvata.</div>
+            <div class="settings-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="jf-connect-btn" onclick="connectJellyfin(false)">
+                <i class="ti ti-plug-connected me-1"></i>Collega a Jellyfin
+              </button>
+              <div id="jf-connect-feedback" class="form-text"></div>
+            </div>
+          </div>
+
+          <div id="jf-connected" style="display:none">
+            <p class="settings-section-hint mb-0">
+              Collegato a <strong id="jf-connected-url" style="color:var(--text)"></strong>
+            </p>
+            <div id="jf-reconfigure-wrap" style="display:none">
+              <div class="settings-actions">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleJellyfinReconfigure()">
+                  Cambia server Jellyfin
+                </button>
+              </div>
+              <div id="jf-reconfigure-form" style="display:none;margin-top:14px">
+                <p class="settings-section-hint" style="color:#e6a23c">
+                  Chi sta usando il pannello senza login dovrà accedere di nuovo dopo l'aggiornamento.
+                  Puntare a un server Jellyfin diverso renderà orfani gli utenti già importati.
+                </p>
+                <div class="row g-2">
+                  <div class="col-12">
+                    <label class="form-label" for="jf-reconf-url">URL server Jellyfin</label>
+                    <input type="text" id="jf-reconf-url" class="form-control" placeholder="http://192.168.1.10:8096">
+                  </div>
+                  <div class="col-sm-6">
+                    <label class="form-label" for="jf-reconf-username">Utente amministratore</label>
+                    <input type="text" id="jf-reconf-username" class="form-control" autocomplete="off">
+                  </div>
+                  <div class="col-sm-6">
+                    <label class="form-label" for="jf-reconf-password">Password</label>
+                    <input type="password" id="jf-reconf-password" class="form-control" autocomplete="off">
+                  </div>
+                </div>
+                <div class="settings-actions">
+                  <button type="button" class="btn btn-primary btn-sm" id="jf-reconnect-btn" onclick="connectJellyfin(true)">
+                    Aggiorna configurazione
+                  </button>
+                  <div id="jf-reconnect-feedback" class="form-text"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
-        <button type="button" class="btn btn-outline-primary me-2" onclick="savePerfSettings()" id="save-perf-btn">
-          Salva performance
-        </button>
-        <button type="button" class="btn btn-primary" onclick="saveLibraries()" id="save-libraries-btn">
-          Salva librerie
-        </button>
+        <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Chiudi</button>
       </div>
     </div>
   </div>
@@ -1696,5 +2253,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
 <script src="/static/app.js"></script>
+<script src="/static/panel.js"></script>
 </body>
 </html>

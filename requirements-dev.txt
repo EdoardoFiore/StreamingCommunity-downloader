@@ -1,0 +1,6 @@
+# Test-only dependencies. Kept out of requirements.txt so the runtime image
+# does not ship a test framework: the Dockerfile installs requirements.txt only.
+-r requirements.txt
+
+httpx        # required by fastapi.testclient
+pytest
