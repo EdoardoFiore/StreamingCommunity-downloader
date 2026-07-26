@@ -30,10 +30,6 @@
 ## Features
 
 - Search and download films, TV series, and anime
-- **Login with Jellyfin credentials** — no second account, no local password store
-- **Independent permissions** — download directly, request, approve, manage users, manage settings
-- **Request queue with approval**, preserving the audio and subtitle tracks the requester chose
-- Request status shown on the search result cards, and in-app notifications
 - Automatic quality selection (1080p → 720p → 480p → 360p)
 - Parallel HLS segment download with AES-CBC decryption
 - Multi-audio track merge via FFmpeg
@@ -42,6 +38,10 @@
 - Integrated file manager with drag-and-drop and video streaming
 - Jellyfin library path configuration
 - Scheduled downloads
+- Optional login with Jellyfin credentials — no second account, no local password store
+- Independent permissions: download directly, request, approve, manage users, manage settings
+- Request queue with approval, preserving the audio and subtitle tracks the requester chose
+- Request status on the search result cards, and in-app notifications
 - Docker ready
 
 ---
@@ -52,51 +52,18 @@
 
 ```bash
 curl -O https://raw.githubusercontent.com/EdoardoFiore/StreamingCommunity-downloader/main/docker-compose.template.yml
-# Edit the two volume paths — and create the config one — then:
+# Edit the volume paths — create the config one — then:
 docker compose -f docker-compose.template.yml up -d
 ```
 
-The panel is available at `http://localhost:8000`. On first start it asks for the Jellyfin server
-URL and the credentials of a **Jellyfin administrator**, who becomes the panel administrator. There
-is no API key to paste and no credentials in the compose file.
+The panel is available at `http://localhost:8000`. Set the source domain in **Impostazioni** on first
+use: it is not shipped in the image, because it rotates.
 
-**No Jellyfin server?** Press **Continua senza Jellyfin** on that screen. The panel then runs with no
-login at all — direct download, settings and the file manager — and you can connect Jellyfin later
-from **Impostazioni → Accesso e utenti**, without a restart. Setting `AUTH_ENABLED=0` (or leaving the
-variable out) does the same thing at deploy time.
-
-The image is published to GitHub Container Registry:
+The image is published to GitHub Container Registry on every push to `main`:
 
 ```
 ghcr.io/edoardofiore/streamingcommunity-downloader:latest
 ```
-
-Set the **source domain** in **Impostazioni** after the first start: it is not baked into the image,
-because it rotates.
-
-### Upgrading from v1
-
-v1 is the panel before Jellyfin authentication existed. If you are running it, two things matter:
-
-- **Nothing breaks by default.** `AUTH_ENABLED` defaults to off, and your existing compose file does
-  not set it, so pulling the new image keeps the panel exactly as open as it was. You will notice
-  the redesigned interface, and you will have to re-enter the source domain once (see above).
-- **Add a config volume before enabling authentication.** Users, sessions, requests and the auth
-  choice live in `panel.db`. Without the `/app/config` volume and the `DB_FILE`/`DATA_FILE`/
-  `SCHEDULE_FILE` variables from `docker-compose.template.yml`, that file sits inside the container
-  and is destroyed on every re-pull — the setup wizard would come back every time.
-
-To stay on v1 instead, pin the tag and stop pulling `latest`:
-
-```yaml
-image: ghcr.io/edoardofiore/streamingcommunity-downloader:1.0.0
-```
-
-Its compose file remains available at
-`https://raw.githubusercontent.com/EdoardoFiore/StreamingCommunity-downloader/v1.0.0/docker-compose.template.yml`.
-
-If you were using the `-jellyfin` image from the feature branch, change the `image:` line to the one
-above — that package is no longer built. Everything else in your compose file stays as it is.
 
 ### From source
 
@@ -112,14 +79,31 @@ pytest -q
 
 **Prerequisites:** Python ≥ 3.11, FFmpeg.
 
+### Upgrading from v1
+
+v1 is the panel before the Jellyfin login existed. **Pulling the new image changes nothing by
+default**: `AUTH_ENABLED` is off unless you set it, so the panel stays as open as it was. You will
+see the redesigned interface, and you have to set the source domain once (see above).
+
+To turn the login on, copy the `/app/config` volume and the `DB_FILE` / `DATA_FILE` /
+`SCHEDULE_FILE` variables from `docker-compose.template.yml`, then set `AUTH_ENABLED=1`. That volume
+is not optional: users, sessions and requests live in `panel.db`, which without it sits inside the
+container and is lost on every pull.
+
+To stay on v1, pin the tag instead of following `latest`:
+
+```yaml
+image: ghcr.io/edoardofiore/streamingcommunity-downloader:1.0.0
+```
+
 ---
 
 ## Users, roles and requests
 
-The first sign-in configures the panel and creates its administrator; only a Jellyfin administrator
-can do it. After that, Jellyfin accounts **do not** get access automatically — an administrator
-imports them from **Utenti** and assigns permissions. Opening the panel to every Jellyfin account is
-a switch on that page, off by default.
+With `AUTH_ENABLED=1`, the first sign-in configures the panel and creates its administrator; only a
+Jellyfin administrator can do it. After that, Jellyfin accounts **do not** get access automatically —
+an administrator imports them from **Utenti** and assigns permissions. Opening the panel to every
+Jellyfin account is a switch on that page, off by default.
 
 Permissions are independent flags, not a ladder:
 
@@ -142,7 +126,15 @@ domain — a dead link or a missing audio track parks the request for a human in
 the wrong thing. Two people asking for the same content with the same tracks share one download and
 are both notified; different audio makes two distinct requests.
 
-Disabling a user takes effect on their next request and keeps their history.
+### Running without Jellyfin
+
+Leave `AUTH_ENABLED` unset (or `0`) and the panel runs with no login at all: every visitor gets
+direct download, settings and the file manager. With `AUTH_ENABLED=1` you get the same result by
+pressing **Continua senza Jellyfin** on the setup screen, and can connect Jellyfin later from
+**Impostazioni → Accesso e utenti** without a restart.
+
+Going back — from a connected Jellyfin to no login — is deliberately not offered in the UI: the
+imported users and their permissions would be left in an ambiguous state.
 
 ---
 
@@ -150,16 +142,18 @@ Disabling a user takes effect on their next request and keeps their history.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `HOST` / `PORT` | `127.0.0.1` / `8000` | bind address |
 | `VIDEOS_DIR` | `videos` | download destination |
 | `DB_FILE` | `panel.db` | users, sessions, requests — **put this on a persistent volume** |
 | `DATA_FILE` | `data.json` | source domain, libraries, performance settings |
 | `SCHEDULE_FILE` | `schedule.json` | scheduled downloads |
-| `TMP_DIR` | `tmp` | working directory for HLS segments, cleaned up after each job |
-| `HOST` / `PORT` | `127.0.0.1` / `8000` | bind address |
-| `AUTH_ENABLED` | `0` | set to `1` to enable Jellyfin login, requests and users — see below |
+| `TMP_DIR` | `tmp` | HLS segments while a job runs, cleaned up afterwards |
+| `AUTH_ENABLED` | `0` | `1` enables Jellyfin login, requests and users |
 | `COOKIE_SECURE` | `0` | set to `1` when serving over HTTPS |
-| `COOKIE_SAMESITE` | `lax` | set to `none` (with `COOKIE_SECURE=1`) only to embed the panel in an iframe on another site/scheme — see below |
+| `COOKIE_SAMESITE` | `lax` | `none` (with `COOKIE_SECURE=1`) only to embed the panel cross-site |
 | `TRUST_PROXY_HEADERS` | `0` | set to `1` only behind a reverse proxy you control |
+
+The source domain and the Jellyfin library paths are configurable from **Impostazioni** in the UI.
 
 `panel.db` holds the Jellyfin service API key: keep it out of any web-served directory and off
 world-readable storage.
@@ -168,80 +162,9 @@ world-readable storage.
 `--workers` or scale the service — a second replica would neither see nor report on the first's
 downloads.
 
-### Running without Jellyfin
-
-Two ways, and they end up in the same place — no login, no setup wizard, no request queue, no user
-management. Every visitor gets the same implicit access: direct download, settings and the file
-manager, the surface the panel had before SSO existed.
-
-- **`AUTH_ENABLED=0`, or the variable left out entirely** — the default. A deploy-time choice, which
-  is also what makes an upgrade from v1 a no-op.
-- **`AUTH_ENABLED=1` and then "Continua senza Jellyfin"** on the setup screen. Same result, chosen at
-  runtime and recorded in `panel.db`, so it needs the config volume to survive a re-pull. Connect
-  Jellyfin later from **Impostazioni → Accesso e utenti**; it authenticates a Jellyfin administrator,
-  creates the panel's own API key and signs you in. Every other session that was open at that moment
-  is signed out, since the panel stops being open.
-
-Going the other way — from a connected Jellyfin back to open mode — is deliberately not supported in
-the UI: the imported users and their permissions would be left in an ambiguous state. Flipping
-`AUTH_ENABLED` from `1` to `0` on a live deployment does stop enforcing the permissions of users who
-already exist, so decide once, before rollout.
-
-`panel.db` is created either way (it also backs the schedule and job bookkeeping) but stays empty of
-users while the panel is open.
-
-### Embedding the panel in an iframe (e.g. a Jellyfin custom tab)
-
-A `SameSite=Lax` session cookie — the default, correct for every normal deployment — is not sent on
-requests made from inside a cross-site iframe. Framed on a different domain, port-with-different-scheme,
-or behind a different reverse proxy than the panel's own origin, every request inside the frame looks
-logged out, and login bounces straight back to itself: an apparent infinite loop.
-
-Two ways to fix it:
-
-- **Reverse-proxy the panel under the same site and scheme as the embedding page** (e.g. as a subpath of
-  your Jellyfin domain). No configuration change needed — the iframe stops being cross-site.
-- **Set `COOKIE_SAMESITE=none`**, together with `COOKIE_SECURE=1` — the panel must be served over HTTPS,
-  since browsers reject a `SameSite=None` cookie that isn't also `Secure`. This is safe to relax: CSRF
-  protection here does not depend on `SameSite` — every state-changing request already carries a
-  double-submit token no outside origin can read.
-
-Chrome (and Chromium-based browsers) separately enforce **Private Network Access**: a page loaded from a
-public address cannot embed a frame that resolves to a private/LAN address, and vice versa. Both the
-Jellyfin page and the panel need to resolve to addresses in the *same* tier — both public or both
-private — from the browser's point of view, or the iframe fails with "the connection was blocked".
-
-### Skipping the login screen inside the custom tab
-
-Since the panel is already embedded in a page where Jellyfin itself is signed in, the visitor should not
-have to log in a second time. `POST /api/auth/jellyfin-token` trades an already-issued Jellyfin access
-token for a panel session — the panel's own login page listens for one over `postMessage` and, if it gets
-one, skips straight past the login form.
-
-The token has to come from the parent frame, since that's the only place it exists: add this to the same
-custom tab HTML that holds the iframe (Jellyfin's own page, not the panel), replacing `PANEL_ORIGIN` with
-the panel's exact origin:
-
-```html
-<script>
-(function () {
-  var PANEL_ORIGIN = 'https://request.edoardo-fiore.it'; // ← your panel's origin, no trailing slash
-  window.addEventListener('message', function (event) {
-    if (event.origin !== PANEL_ORIGIN) return;
-    if (!event.data || event.data.type !== 'sc-panel-ready') return;
-    try {
-      var token = window.ApiClient.accessToken();
-      if (token) event.source.postMessage({ type: 'sc-panel-jellyfin-token', token: token }, PANEL_ORIGIN);
-    } catch (e) { /* ApiClient not ready yet */ }
-  });
-})();
-</script>
-```
-
-The token is never trusted blindly: the panel checks it live against the configured Jellyfin server
-before issuing a session, exactly as it would a password. Nothing changes for a Jellyfin user who has not
-been imported into the panel, or who visits the panel outside the iframe — they still see the normal
-login form.
+To embed the panel as a Jellyfin custom tab, see
+[docs/jellyfin-custom-tab.md](docs/jellyfin-custom-tab.md) — it covers the cookie settings a
+cross-site iframe needs and how to skip the second login.
 
 ---
 
