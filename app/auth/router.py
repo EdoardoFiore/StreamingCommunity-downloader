@@ -7,7 +7,7 @@ import math
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from app import db
+from app import __version__, db
 from app.auth import models, ratelimit, session as sessions
 from app.auth.deps import client_ip, current_user, require
 from app.auth.jellyfin import (
@@ -78,6 +78,10 @@ def _session_payload(user: models.User, csrf_token: str) -> dict:
         "user": user.to_public(),
         "csrf_token": csrf_token,
         "auth_enabled": AUTH_ENABLED and not models.runtime_open_mode(),
+        # Shown in the UI so a bug report can name the build it came from. Here
+        # rather than in the public /status: it is only useful to someone
+        # already inside.
+        "version": __version__,
     }
 
 

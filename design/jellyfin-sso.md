@@ -1,15 +1,24 @@
 # Jellyfin SSO, Roles and Request System — Design
 
-Design document for the `feat/jellyfin-sso` branch. Written before phase 2; records what the repo
-looks like today, which decisions were taken and why, and which problems in the existing code were
-found along the way.
+> **Historical document. Do not read it as a description of the current code.**
+>
+> Written before phase 2 of the `feat/jellyfin-sso` branch, which shipped in v2.0.0. It records the
+> repo as it was *then*, the decisions taken and why, and the defects found along the way. Kept
+> because the rationale is still useful; not kept up to date.
+>
+> In particular, **every defect in §2 has since been fixed** — including the two SSRFs, which are
+> the ones that matter if you are skimming. The source domain is read server-side through
+> `app.config.configured_domain()` (`app/routers/downloads.py`), the image proxy no longer takes a
+> host from the caller (`app/routers/images.py`), and `sanitize_filename` is a real implementation
+> (`app/core/headers.py`). `tests/test_security.py` covers them. For how the panel works now, read
+> `README.md` and `CLAUDE.md`.
 
 ---
 
-## 1. The repo as it is today
+## 1. The repo as it was
 
-`CLAUDE.md` still describes a CLI under `Src/` with `run.py`. That code no longer exists — the repo
-is only the FastAPI web panel. `CLAUDE.md` is updated in phase 7.
+*(At the time of writing. `CLAUDE.md` then still described a CLI under `Src/` with `run.py`, code
+that had already been removed; it now describes the web panel.)*
 
 | Area | State |
 |---|---|
@@ -51,7 +60,8 @@ seconds, backed by the durable JSON `ScheduleStore` and re-hydrated at startup. 
 
 ## 2. Problems found in the existing code
 
-Reported rather than replicated. Fixes land in the phase they touch, or in phase 7.
+**All fixed as of v2.0.0 — see the note at the top of this file.** Listed here as they were found:
+reported rather than replicated, with fixes landing in the phase that touched them, or in phase 7.
 
 | # | Where | Problem |
 |---|---|---|

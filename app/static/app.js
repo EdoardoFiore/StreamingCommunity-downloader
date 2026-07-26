@@ -78,6 +78,9 @@ async function initAuth() {
   document.getElementById('user-name').textContent = _me.user.username;
   document.getElementById('user-role').textContent = _roleLabel();
 
+  const version = document.getElementById('app-version');
+  if (version) version.textContent = _me.version ? `v${_me.version}` : '';
+
   // Menu entries follow the permissions. This is cosmetic only — every one of
   // these endpoints is checked server-side as well.
   document.querySelectorAll('[data-perm]').forEach(el => {

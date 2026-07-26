@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import logging
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app import db
+from app import __version__, db
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
@@ -26,7 +28,56 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
+logger = logging.getLogger(__name__)
+
 BASE_DIR = Path(__file__).parent
+STATIC_DIR = BASE_DIR / "static"
+
+
+@lru_cache(maxsize=None)
+def _asset_version(name: str) -> str:
+    """Short content hash of a static file. Empty when the file is missing.
+
+    Computed once per process: the files are baked into the image and cannot
+    change while it runs.
+    """
+    try:
+        return hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:10]
+    except OSError:
+        logger.warning("Static asset not found, serving it unversioned: %s", name)
+        return ""
+
+
+def asset(name: str) -> str:
+    """URL for a static file, carrying a hash of its contents.
+
+    Templates must go through this rather than hardcoding ``/static/...``. The
+    URL is the only thing an intermediate cache is guaranteed to key on: with a
+    fixed path, a reverse proxy is free to keep serving the previous ``app.js``
+    against freshly deployed HTML for as long as its own heuristics say, which
+    looks exactly like a deploy that did nothing.
+    """
+    version = _asset_version(name)
+    return f"/static/{name}?v={version}" if version else f"/static/{name}"
+
+
+class VersionedStaticFiles(StaticFiles):
+    """Static files with an explicit caching policy.
+
+    Starlette sends only ``ETag``/``Last-Modified`` and no ``Cache-Control``,
+    which leaves the decision to each intermediary. Requests carrying a version
+    query (everything ``asset()`` emits) may be kept indefinitely, since a
+    changed file means a changed URL. Anything else must be revalidated — the
+    ETag keeps that cheap — so an unversioned path can never pin a stale file.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        versioned = b"v=" in scope.get("query_string", b"")
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable" if versioned else "no-cache"
+        )
+        return response
 
 
 @asynccontextmanager
@@ -45,14 +96,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="StreamingCommunity Web Panel", lifespan=lifespan)
+app = FastAPI(title="StreamingCommunity Web Panel", version=__version__, lifespan=lifespan)
 
 # Authentication is enforced here, once, for every request. Endpoints are closed
 # by default; app/auth/deps.py holds the explicit public allowlist.
 app.add_middleware(AuthMiddleware)
 
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/static", VersionedStaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals["asset"] = asset
 
 app.include_router(auth_router.router)
 app.include_router(users_router.router)

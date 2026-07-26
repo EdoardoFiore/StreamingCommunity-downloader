@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <title>SC Panel</title>
-  <link rel="icon" type="image/x-icon" href="/static/favicon.ico"/>
+  <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Karla:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
@@ -202,6 +202,13 @@
       flex-direction: column;
       gap: 9px;
       flex-shrink: 0;
+    }
+
+    .sidebar-version {
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: .3px;
+      text-align: center;
     }
 
     /* SSE status */
@@ -1677,6 +1684,7 @@
             <i class="ti ti-settings" style="font-size:15px;flex-shrink:0"></i>
             Impostazioni
           </button>
+          <span id="app-version" class="sidebar-version" title="Versione del pannello"></span>
         </div>
       </div>
     </div>
@@ -2252,7 +2260,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
-<script src="/static/app.js"></script>
-<script src="/static/panel.js"></script>
+<script src="{{ asset('app.js') }}"></script>
+<script src="{{ asset('panel.js') }}"></script>
 </body>
 </html>
