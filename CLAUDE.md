@@ -78,10 +78,9 @@ request before any route runs.
 Point `DB_FILE`, `DATA_FILE` and `SCHEDULE_FILE` at a persistent volume in Docker; see
 `docker-compose.template.yml`.
 
-`docs/` holds README screenshots and user-facing docs the README links to. It is **not** served by
-the app and is excluded from the image — the favicon lives in `app/static/`. Design notes go in
-`design/`, likewise never served: anything under a mounted static directory is readable by
-unauthenticated visitors.
+`docs/` holds README screenshots only. It is **not** served by the app and is excluded from the
+image — the favicon lives in `app/static/`. Design notes go in `design/`, likewise never served:
+anything under a mounted static directory is readable by unauthenticated visitors.
 
 ### Rules that are easy to break
 

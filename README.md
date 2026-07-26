@@ -166,9 +166,28 @@ world-readable storage.
 `--workers` or scale the service — a second replica would neither see nor report on the first's
 downloads.
 
-To embed the panel as a Jellyfin custom tab, see
-[docs/jellyfin-custom-tab.md](docs/jellyfin-custom-tab.md) — it covers the cookie settings a
-cross-site iframe needs and how to skip the second login.
+### Embedding as a Jellyfin custom tab
+
+Point an iframe at the panel; nothing else is required. Sign in once inside the tab and stay signed
+in — the session lasts **30 days** and renews on every visit, so in practice you log in once and
+forget about it.
+
+With Jellyfin and the panel on subdomains of the same domain over HTTPS — say `jf.example.com` and
+`request.example.com` — the frame is same-site and the session cookie is sent inside it with the
+default `COOKIE_SAMESITE=lax`. On different domains, or different schemes, the frame is cross-site
+and a `Lax` cookie is dropped silently: every request inside the frame looks logged out and login
+bounces back on itself, which reads as an infinite loop. Either set `COOKIE_SAMESITE=none` together
+with `COOKIE_SECURE=1` — browsers reject a `SameSite=None` cookie that is not also `Secure` — or
+reverse-proxy the panel under the same site as Jellyfin.
+
+Chromium browsers separately enforce Private Network Access: the Jellyfin page and the panel must
+both resolve to public addresses, or both to private ones, from the browser's point of view. Mixing
+tiers fails with "the connection was blocked".
+
+`POST /api/auth/jellyfin-token` trades an already-issued Jellyfin access token for a panel session,
+for skipping even that one login. It needs a script running on the Jellyfin page, which posts the
+token to the frame. Do not put that script in the custom tab HTML: tab content is injected as a
+string, so quoting breaks the page, and `<script>` tags inserted that way never execute.
 
 ---
 
