@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
 from app.config import get_settings
+from app.core.ffmpeg_path import get_ffmpeg_exe
 from app.core.headers import get_headers
 from app.progress import DownloadCancelledError
 
@@ -371,7 +372,7 @@ class M3U8_Segments:
             ffmpeg.input(combined_ts, fflags="+genpts", avoid_negative_ts="make_zero").output(
                 output_filename, **{"c:v": "copy", "c:a": "aac", "b:a": "192k",
                                     "af": "aresample=async=1000", "movflags": "+faststart"}
-            ).overwrite_output().run(capture_stdout=True, capture_stderr=True)
+            ).overwrite_output().run(cmd=get_ffmpeg_exe(), capture_stdout=True, capture_stderr=True)
         except ffmpeg.Error as e:
             stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
             if len(stderr) > 500:
@@ -509,7 +510,7 @@ class M3U8_Downloader:
                 )
                 .global_args("-map", "0:v:0", "-map", "1:a:0", "-shortest", "-strict", "experimental")
                 .overwrite_output()
-                .run()
+                .run(cmd=get_ffmpeg_exe())
             )
             logger.info("Audio merge completed.")
         except ffmpeg.Error as e:

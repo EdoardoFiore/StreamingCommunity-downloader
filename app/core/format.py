@@ -5,6 +5,7 @@ import subprocess
 import requests
 import ffmpeg
 
+from app.core.ffmpeg_path import get_ffmpeg_exe
 from app.core.m3u8 import M3U8_Parser
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
     # OUTPUT options and MUST come after all -i inputs but before the output file.
     # (ffmpeg-python's .global_args put them after the output filename, where ffmpeg
     # silently ignores them — hence subtitle language tags never applied.)
-    cmd = ["ffmpeg", "-y", "-i", video_path]
+    cmd = [get_ffmpeg_exe(), "-y", "-i", video_path]
     for track in audio_tracks:
         cmd += ["-i", track["path"]]
     for track in subtitle_tracks:

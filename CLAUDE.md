@@ -23,7 +23,11 @@ pip install -r requirements-dev.txt   # tests only; kept out of the runtime imag
 pytest -q
 ```
 
-**Prerequisites:** FFmpeg on PATH (the Docker image installs it).
+**Prerequisites:** FFmpeg on PATH (the Docker image installs it). All ffmpeg invocations resolve
+their binary through `app.core.ffmpeg_path.get_ffmpeg_exe()` — never call `ffmpeg`/`ffmpeg-python`
+directly. Order: `FFMPEG_PATH` env override, then system PATH, then the static binary bundled by
+`imageio-ffmpeg`. The fallback exists because Windows has no `apt install ffmpeg` equivalent — users
+without it on PATH used to get an opaque `WinError 2` deep inside the Join step.
 
 **Single process only.** Download job state lives in memory in `JobManager`, so running uvicorn with
 `--workers > 1` or scaling the container would leave each worker blind to the others' downloads.
