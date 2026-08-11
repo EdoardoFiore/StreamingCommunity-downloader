@@ -1,0 +1,74 @@
+# SC Panel — deployment di prova (immagine -dev).
+#
+#   docker compose -f docker-compose.dev.template.yml pull
+#   docker compose -f docker-compose.dev.template.yml up -d
+#
+# Poi apri http://localhost:8001.
+#
+# Questa immagine viene ricostruita a ogni push su un branch diverso da main,
+# quindi contiene lavoro non ancora rilasciato. Il tag `dev` insegue sempre
+# l'ultimo build: per fissare una versione precisa usa il nome del branch
+# (`:feat-qualcosa`) o il tag corto del commit (`:sha-abc1234`), entrambi
+# pubblicati insieme a `dev`.
+#
+# IMPORTANTE — perché questo file usa porta e volumi propri:
+# le migrazioni del database vanno solo in avanti. Se punti questo pannello al
+# volume di configurazione della produzione, un'immagine dev applica le sue
+# migrazioni al database vero e non c'è modo di tornare indietro. Tienili
+# separati e prova con un database di prova.
+
+services:
+  web:
+    image: ghcr.io/edoardofiore/streamingcommunity-downloader-dev:dev
+    # Il tag `dev` è mobile: senza questo, `up -d` riusa l'immagine già scaricata
+    # e non vedresti mai le modifiche appena pushate.
+    pull_policy: always
+    container_name: scpanel-dev
+    ports:
+      # 8001 sull'host, così può convivere con la produzione sulla 8000.
+      - "8001:8000"
+    volumes:
+      - nfs_storage_dev:/app/videos
+      - panel_config_dev:/app/config
+    environment:
+      - VIDEOS_DIR=/app/videos
+      - DB_FILE=/app/config/panel.db
+      - DATA_FILE=/app/config/data.json
+      - SCHEDULE_FILE=/app/config/schedule.json
+      - HOST=0.0.0.0
+      - PORT=8000
+      # Le serie seguite e la coda richieste esistono solo con gli account
+      # collegati a Jellyfin: con AUTH_ENABLED=0 il pannello risponde 400 su
+      # /api/watches, perché non c'è un utente a cui intestare la serie.
+      - AUTH_ENABLED=1
+      - COOKIE_SECURE=0
+      - COOKIE_SAMESITE=lax
+      - TRUST_PROXY_HEADERS=0
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: unless-stopped
+
+    # Come in produzione: lo stato dei download vive in memoria in un solo
+    # processo, quindi una seconda replica non vedrebbe i download dell'altra.
+    deploy:
+      replicas: 1
+
+volumes:
+  nfs_storage_dev:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      # ← cartella dove finiscono i file scaricati dal pannello di prova.
+      # Puoi puntarla alla stessa libreria della produzione: il pannello scrive
+      # file nuovi e non tocca quelli esistenti.
+      device: /srv/nfs/storage
+  panel_config_dev:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      # ← DEVE essere diversa dalla cartella di configurazione della produzione.
+      # Creala prima: mkdir -p /srv/scpanel-dev/config
+      device: /srv/scpanel-dev/config

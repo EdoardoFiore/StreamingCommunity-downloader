@@ -65,6 +65,29 @@ The image is published to GitHub Container Registry on every push to `main`:
 ghcr.io/edoardofiore/streamingcommunity-downloader:latest
 ```
 
+### Trying a branch before it is released
+
+Every push to a branch other than `main` publishes to a **separate** package, so a work-in-progress
+build can never be pulled by a deployment pointing at the release image:
+
+```
+ghcr.io/edoardofiore/streamingcommunity-downloader-dev:dev          # the latest branch build
+ghcr.io/edoardofiore/streamingcommunity-downloader-dev:my-branch    # that branch only
+ghcr.io/edoardofiore/streamingcommunity-downloader-dev:sha-abc1234  # one exact commit
+```
+
+Tests have to pass first: a red `pytest -q` publishes nothing.
+
+```bash
+curl -O https://raw.githubusercontent.com/EdoardoFiore/StreamingCommunity-downloader/main/docker-compose.dev.template.yml
+# Point panel_config_dev at a NEW directory, then:
+docker compose -f docker-compose.dev.template.yml up -d
+```
+
+It listens on `http://localhost:8001` so it can run alongside the release panel. Give it its own
+config directory: **database migrations only run forwards**, so pointing a dev image at the
+production config volume upgrades the real database with no way back.
+
 ### From source
 
 ```bash
