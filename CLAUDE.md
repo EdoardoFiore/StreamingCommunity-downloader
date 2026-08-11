@@ -63,17 +63,23 @@ request before any route runs.
 - `models.py` — records, content key, allowed transitions
 - `resolver.py` — re-resolution at approval, track verification, library check
 - `service.py` — lifecycle and job wiring
-- `notify.py` — in-app notifications
+- `notify.py` — dispatch; `CHANNELS` is the list every delivery fans out to
+- `apprise_channel.py` — external channels (Discord, Telegram, ntfy, …) as Apprise URLs
 - `router.py` — endpoints
+
+**`app/watches/`** — followed series and anime
+- `models.py` — watch records, followers, the seen-episode ledger
+- `poller.py` — periodic enumeration, diff against what is seen, auto-download decision
+- `router.py` — follow, unfollow, status, manual check
 
 **`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `schedule.py`, `db.py`, `config.py`,
 `progress.py`, `routers/`, `templates/`, `static/`
 
 ### Persistence
 
-- `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications. Migrations are
-  the ordered `MIGRATIONS` list in `app/db.py`, applied against `PRAGMA user_version`. Never edit an
-  applied migration; append a new one.
+- `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications, notification
+  channels, followed series. Migrations are the ordered `MIGRATIONS` list in `app/db.py`, applied
+  against `PRAGMA user_version`. Never edit an applied migration; append a new one.
 - `data.json` — source domain, library paths, performance settings. Runtime state, not committed:
   a baked-in source domain ships stale, since the domain rotates. Tests get one from the
   `_configured_domain` autouse fixture in `tests/conftest.py`.
@@ -101,7 +107,18 @@ anything under a mounted static directory is readable by unauthenticated visitor
   the request queue.
 - **Never substitute an audio track.** `strict_audio=True` on the request path turns a missing
   language into an error and parks the request for a human.
-- Blocking work goes through `asyncio.to_thread` (routers) or the job pool.
+- **A watch never downloads anything itself.** `app/watches/poller.py` turns a new episode into an
+  ordinary request and lets `service.create_request` / `service.approve` do the rest, so dedup, the
+  library check and notifications keep working. Whether it is approved on the spot comes from the
+  owner's live `DOWNLOAD` permission or the per-series `auto_approve` flag — never from the client.
+- **Following a series seeds every episode already published.** Without that baseline the next
+  cycle treats the whole back catalogue as new; an empty enumeration is treated as a read failure
+  and the follow is rolled back.
+- **Anything user-owned is unavailable in open mode.** The implicit user has no `jf_user` row, so a
+  foreign key would fail. Check the user the middleware resolved (`is OPEN_MODE_USER`) rather than
+  binding `AUTH_ENABLED` in yet another module.
+- Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
+  are the exception by design: every caller of `notify()` is already off the loop.
 
 ### Output layout
 

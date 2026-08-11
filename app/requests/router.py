@@ -109,6 +109,15 @@ class BatchIdsRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=MAX_BATCH)
 
 
+class ApproveBatchRequest(BatchIdsRequest):
+    # Ids among `ids` whose followed series should stop asking from now on.
+    auto_approve_watch_ids: list[int] = Field(default_factory=list, max_length=MAX_BATCH)
+
+
+class ApproveRequestOptions(BaseModel):
+    auto_approve_watch: bool = False
+
+
 class BatchDenyRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=MAX_BATCH)
     reason: str | None = Field(default=None, max_length=500)
@@ -268,9 +277,11 @@ def get_request(request_id: int, http_request: HttpRequest):
 # endpoint (translate to an exception) and the batch endpoint (collect one
 # result per id and keep going after a failure).
 
-def _approve_one(request_id: int, user_id: int) -> tuple[bool, models.Request | None, str | None, int]:
+def _approve_one(
+    request_id: int, user_id: int, auto_approve_watch: bool = False
+) -> tuple[bool, models.Request | None, str | None, int]:
     try:
-        return True, service.approve(request_id, user_id), None, 202
+        return True, service.approve(request_id, user_id, auto_approve_watch), None, 202
     except LookupError:
         return False, None, "Richiesta non trovata", 404
     except models.InvalidTransition as exc:
@@ -323,10 +334,13 @@ def _batch_row(request_id: int, ok: bool, request: models.Request | None, error:
 
 
 @router.post("/{request_id}/approve", status_code=202, dependencies=CAN_MANAGE)
-def approve_request(request_id: int, http_request: HttpRequest):
+def approve_request(
+    request_id: int, http_request: HttpRequest,
+    body: ApproveRequestOptions = ApproveRequestOptions(),
+):
     """Approve and return at once — resolution and download run in the background."""
     user = current_user(http_request)
-    ok, request, error, status_code = _approve_one(request_id, user.id)
+    ok, request, error, status_code = _approve_one(request_id, user.id, body.auto_approve_watch)
     if not ok:
         raise HTTPException(status_code=status_code, detail=error)
     return _public(request)
@@ -350,11 +364,12 @@ def deny_request(request_id: int, body: DenyRequest, http_request: HttpRequest):
 # episodes and approving them together is exactly the "just queue them" case.
 
 @router.post("/approve-batch", status_code=202, dependencies=CAN_MANAGE)
-def approve_batch(body: BatchIdsRequest, http_request: HttpRequest):
+def approve_batch(body: ApproveBatchRequest, http_request: HttpRequest):
     user = current_user(http_request)
+    auto_ids = set(body.auto_approve_watch_ids)
     results = []
     for request_id in body.ids:
-        ok, request, error, _ = _approve_one(request_id, user.id)
+        ok, request, error, _ = _approve_one(request_id, user.id, request_id in auto_ids)
         results.append(_batch_row(request_id, ok, request, error))
     return {"results": results}
 

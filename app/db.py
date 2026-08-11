@@ -214,9 +214,87 @@ _V2_REQUESTS = [
 ]
 
 
+_V3_NOTIFICATION_CHANNELS = [
+    # One row per Apprise target. The URL carries the secret (bot token, webhook
+    # id), so it lives here rather than in data.json alongside the source domain.
+    """
+    CREATE TABLE jf_notification_channel (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT    NOT NULL,
+        apprise_url TEXT    NOT NULL,
+        events      TEXT    NOT NULL DEFAULT '[]',  -- JSON array; [] means every event
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        created_at  TEXT    NOT NULL,
+        updated_at  TEXT    NOT NULL
+    )
+    """,
+    "CREATE INDEX jf_notification_channel_enabled ON jf_notification_channel(enabled)",
+]
+
+
+_V4_SERIES_WATCH = [
+    # A followed series. Films are excluded by construction: there is no "next
+    # episode" to wait for.
+    """
+    CREATE TABLE jf_series_watch (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        source             TEXT    NOT NULL,   -- streamingcommunity | animeunity
+        media_type         TEXT    NOT NULL,   -- tv | anime
+        external_id        TEXT    NOT NULL,
+        slug               TEXT,
+        title              TEXT    NOT NULL,
+        year               TEXT,
+        poster             TEXT,
+        anime_type         TEXT,
+        audio_languages    TEXT    NOT NULL,   -- JSON array, sorted
+        subtitle_languages TEXT    NOT NULL,   -- JSON array, sorted
+        -- Whose DOWNLOAD permission decides whether new episodes skip the queue.
+        created_by         INTEGER NOT NULL REFERENCES jf_user(id),
+        auto_approve       INTEGER NOT NULL DEFAULT 0,
+        enabled            INTEGER NOT NULL DEFAULT 1,
+        last_checked_at    TEXT,
+        created_at         TEXT    NOT NULL,
+        updated_at         TEXT    NOT NULL
+    )
+    """,
+    # One active watch per series whoever asked for it: a second interested user
+    # subscribes instead. Partial, so an unfollowed series can be followed again.
+    """
+    CREATE UNIQUE INDEX jf_series_watch_open ON jf_series_watch(source, media_type, external_id)
+        WHERE enabled = 1
+    """,
+    "CREATE INDEX jf_series_watch_enabled ON jf_series_watch(enabled)",
+    """
+    CREATE TABLE jf_series_watch_subscriber (
+        watch_id   INTEGER NOT NULL REFERENCES jf_series_watch(id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL REFERENCES jf_user(id) ON DELETE CASCADE,
+        created_at TEXT    NOT NULL,
+        PRIMARY KEY (watch_id, user_id)
+    )
+    """,
+    # One row per episode already accounted for. A "highest episode seen" counter
+    # would be wrong here: both sources publish out of order (specials, OVAs
+    # numbered 0, dubs landing after later subs), and anything below the
+    # watermark would be lost for good.
+    """
+    CREATE TABLE jf_watch_seen_episode (
+        watch_id    INTEGER NOT NULL REFERENCES jf_series_watch(id) ON DELETE CASCADE,
+        episode_key TEXT    NOT NULL,   -- S01E03 (tv) | E12 (anime)
+        created_at  TEXT    NOT NULL,
+        PRIMARY KEY (watch_id, episode_key)
+    )
+    """,
+    # Links a request back to the watch that spawned it: drives the "approve once,
+    # automatic from then on" flow and tells the queue where the request came from.
+    "ALTER TABLE jf_request ADD COLUMN watch_id INTEGER REFERENCES jf_series_watch(id) ON DELETE SET NULL",
+]
+
+
 MIGRATIONS: list[list[str]] = [
     _V1_AUTH,
     _V2_REQUESTS,
+    _V3_NOTIFICATION_CHANNELS,
+    _V4_SERIES_WATCH,
 ]
 
 

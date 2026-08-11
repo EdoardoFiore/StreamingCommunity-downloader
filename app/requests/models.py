@@ -121,6 +121,8 @@ class Request:
     output_path: str | None
     created_at: str
     updated_at: str
+    # Set when a followed series produced this request; None for manual ones.
+    watch_id: int | None = None
 
     def to_public(self, requester: str = None, decider: str = None,
                   subscribers: list[str] = None) -> dict:
@@ -149,6 +151,7 @@ class Request:
             "subscribers": subscribers or [],
             "job_id": self.job_id,
             "output_path": self.output_path,
+            "watch_id": self.watch_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -181,6 +184,7 @@ def _row_to_request(row: sqlite3.Row) -> Request:
         output_path=row["output_path"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        watch_id=row["watch_id"],
     )
 
 
@@ -280,6 +284,7 @@ def create(
     anime_type: str = None,
     available_snapshot: dict = None,
     status: str = PENDING,
+    watch_id: int = None,
 ) -> tuple[Request, bool]:
     """Create a request, or join the open one with the same content key.
 
@@ -309,14 +314,15 @@ def create(
         cursor = conn.execute(
             "INSERT INTO jf_request(content_key, source, media_type, external_id, slug, title, "
             "year, poster, season, episode_number, anime_type, audio_languages, "
-            "subtitle_languages, available_snapshot, status, requested_by, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "subtitle_languages, available_snapshot, status, requested_by, watch_id, "
+            "created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 key, source, media_type, str(external_id), slug, title, year, poster,
                 season, episode_number, anime_type,
                 json.dumps(audio), json.dumps(subtitles),
                 json.dumps(available_snapshot) if available_snapshot else None,
-                status, requested_by, timestamp, timestamp,
+                status, requested_by, watch_id, timestamp, timestamp,
             ),
         )
         request_id = cursor.lastrowid

@@ -294,20 +294,215 @@ function showPage(page) {
   if (mobileMenu && mobileMenu.classList.contains('show')) {
     mobileMenu.classList.remove('show');
   }
-  ['search','downloads','files','requests','my-requests','users'].forEach(p => {
+  ['search','downloads','files','requests','my-requests','watches','users'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.style.display = p === page ? '' : 'none';
   });
   document.getElementById('page-title').textContent = {
     search:'Cerca', downloads:'Download', files:'File',
-    requests:'Coda richieste', 'my-requests':'Le mie richieste', users:'Utenti',
+    requests:'Coda richieste', 'my-requests':'Le mie richieste',
+    watches:'Serie seguite', users:'Utenti',
   }[page] || 'Cerca';
   document.querySelectorAll('.nav-link[data-page]').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
   if (page === 'files') loadFiles();
   if (page === 'requests') loadRequestQueue();
   if (page === 'my-requests') loadMyRequests();
+  if (page === 'watches') loadWatches();
   if (page === 'users') loadUsersPage();
+}
+
+// ── Serie seguite ────────────────────────────────────────────────────────────
+
+let _watches = [];
+
+function fmtLastChecked(iso) {
+  if (!iso) return 'mai controllata';
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return 'controllata ora';
+  if (minutes < 60) return `controllata ${minutes} min fa`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `controllata ${hours} h fa`;
+  return `controllata ${Math.round(hours / 24)} g fa`;
+}
+
+async function loadWatches() {
+  const c = document.getElementById('watches-list');
+  if (!c) return;
+  try {
+    const res = await fetch('/api/watches/mine');
+    if (!res.ok) { c.innerHTML = '<p class="text-muted">Impossibile caricare le serie seguite.</p>'; return; }
+    const data = await safeJson(res);
+    _watches = data.watches || [];
+    renderWatchesList();
+  } catch (e) {
+    c.innerHTML = '<p class="text-muted">Errore di rete.</p>';
+  }
+}
+
+function renderWatchesList() {
+  const c = document.getElementById('watches-list');
+  if (!c) return;
+  if (!_watches.length) {
+    c.innerHTML = `<div class="empty-panel">
+      <i class="ti ti-bell-off"></i>
+      <p>Nessuna serie seguita.</p>
+      <p class="text-muted" style="font-size:12px;margin-top:6px">
+        Apri una serie o un anime dalla ricerca e premi «Segui» per scaricare
+        i nuovi episodi appena escono.
+      </p>
+    </div>`;
+    return;
+  }
+  c.innerHTML = _watches.map(w => {
+    // The owner's DOWNLOAD permission is what the poller checks, so a follower
+    // without it must not be told the episode will just appear.
+    const auto = w.auto_approve || (!!_me && w.created_by === _me.user.id && can('DOWNLOAD'));
+    const badge = auto
+      ? '<span class="badge bg-green-lt">download automatico</span>'
+      : '<span class="badge bg-yellow-lt">passa dalla coda</span>';
+    const kind = w.media_type === 'anime' ? 'Anime' : 'Serie TV';
+    const audio = w.audio_languages.length ? w.audio_languages.join(', ') : 'originale';
+    return `
+      <div class="req-row">
+        <div class="req-main">
+          <div class="req-title">${escapeHtml(w.title)}${w.year ? ` <span class="text-muted">(${escapeHtml(w.year)})</span>` : ''}</div>
+          <div class="req-meta">
+            <i class="ti ti-device-tv"></i> ${kind}
+            <span class="req-dot">·</span>
+            <i class="ti ti-volume"></i> ${escapeHtml(audio)}
+            <span class="req-dot">·</span>
+            <i class="ti ti-refresh"></i> ${escapeHtml(fmtLastChecked(w.last_checked_at))}
+          </div>
+        </div>
+        <div class="req-side">
+          ${badge}
+          <div class="req-actions">
+            <button class="btn btn-sm btn-outline-secondary" onclick="unfollowWatch(${w.id})">
+              <i class="ti ti-bell-off me-1"></i>Non seguire più
+            </button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// The follow toggle lives in two modals whose contexts are shaped differently,
+// so both are flattened to the same shape here rather than in each caller.
+function _followTarget(kind) {
+  if (kind === 'anime') {
+    return {
+      btnId: 'follow-anime-btn',
+      source: 'animeunity',
+      media_type: 'anime',
+      external_id: String(_animeCtx.animeId ?? ''),
+      title: _animeCtx.animeName,
+      year: _animeCtx.animeYear,
+      anime_type: _animeCtx.animeType,
+      audio_languages: _animeCtx.audioLangs || [],
+      subtitle_languages: _animeCtx.subLangs || [],
+      // A one-shot anime film has no next episode to wait for.
+      followable: (_animeCtx.animeType || 'tv') !== 'movie',
+    };
+  }
+  return {
+    btnId: 'follow-tv-btn',
+    source: 'streamingcommunity',
+    media_type: 'tv',
+    external_id: String(_epCtx.tvId ?? ''),
+    title: _epCtx.tvName,
+    slug: _epCtx.slug,
+    year: _epCtx.year,
+    poster: _epCtx.poster,
+    audio_languages: _epCtx.audioLangs || [],
+    subtitle_languages: _epCtx.subLangs || [],
+    followable: true,
+  };
+}
+
+function _renderFollowButton(kind, following, busy = false) {
+  const target = _followTarget(kind);
+  const btn = document.getElementById(target.btnId);
+  if (!btn) return;
+  // Without Jellyfin there is no account to own a watch, so the backend refuses
+  // it — the button must not be offered either, DOWNLOAD permission or not.
+  if (!_authEnabled || !target.followable || !(can('REQUEST') || can('DOWNLOAD'))) {
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+  btn.disabled = busy;
+  btn.dataset.following = following ? '1' : '';
+  btn.className = 'btn btn-sm ms-auto me-2 ' + (following ? 'btn-success' : 'btn-outline-secondary');
+  btn.innerHTML = following
+    ? '<i class="ti ti-bell-check me-1"></i>Seguita'
+    : '<i class="ti ti-bell-plus me-1"></i>Segui';
+  btn.title = following
+    ? 'I nuovi episodi vengono cercati automaticamente. Premi per smettere.'
+    : 'Cerca automaticamente i nuovi episodi di questa serie';
+}
+
+async function checkWatchStatus(kind) {
+  const target = _followTarget(kind);
+  if (!target.followable || !target.external_id) { _renderFollowButton(kind, false); return; }
+  try {
+    const params = new URLSearchParams({
+      source: target.source, media_type: target.media_type, external_id: target.external_id,
+    });
+    const res = await fetch(`/api/watches/status?${params}`);
+    if (!res.ok) { _renderFollowButton(kind, false); return; }
+    const data = await safeJson(res);
+    _renderFollowButton(kind, !!data.followed_by_me);
+  } catch (e) { _renderFollowButton(kind, false); }
+}
+
+async function toggleFollowSeries(kind) {
+  const target = _followTarget(kind);
+  const btn = document.getElementById(target.btnId);
+  const following = !!(btn && btn.dataset.following);
+  _renderFollowButton(kind, following, true);
+
+  try {
+    if (following) {
+      const params = new URLSearchParams({
+        source: target.source, media_type: target.media_type, external_id: target.external_id,
+      });
+      const status = await safeJson(await fetch(`/api/watches/status?${params}`));
+      const res = await fetch(`/api/watches/${status.watch_id}`, {method: 'DELETE'});
+      if (!res.ok) throw new Error();
+      _renderFollowButton(kind, false);
+      showToast('Serie non più seguita', 'success');
+    } else {
+      const res = await fetch('/api/watches', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(target),
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        _renderFollowButton(kind, false);
+        showToast(data.detail || 'Impossibile seguire la serie', 'danger');
+        return;
+      }
+      _renderFollowButton(kind, true);
+      showToast('Serie seguita: i nuovi episodi arriveranno da soli', 'success');
+    }
+    if (document.getElementById('page-watches').style.display !== 'none') loadWatches();
+  } catch (e) {
+    _renderFollowButton(kind, following);
+    showToast('Errore di rete', 'danger');
+  }
+}
+
+async function unfollowWatch(watchId) {
+  const watch = _watches.find(w => w.id === watchId);
+  if (!confirm(`Smettere di seguire «${watch ? watch.title : watchId}»?`)) return;
+  try {
+    const res = await fetch(`/api/watches/${watchId}`, {method: 'DELETE'});
+    if (!res.ok) { showToast('Errore', 'danger'); return; }
+    showToast('Serie non più seguita', 'success');
+    await loadWatches();
+  } catch (e) { showToast('Errore di rete', 'danger'); }
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────────
@@ -316,7 +511,7 @@ function showPage(page) {
 // own feedback line rather than sharing one status area.
 const _SETTINGS_FEEDBACK_IDS = [
   'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
-  'jf-connect-feedback', 'jf-reconnect-feedback',
+  'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
 ];
 
 function _feedback(id, message = '', kind = 'muted') {
@@ -330,8 +525,185 @@ async function openSettings() {
   document.getElementById('domain-input').value = currentDomain;
   _SETTINGS_FEEDBACK_IDS.forEach(id => _feedback(id));
   renderLibrariesList();
-  await Promise.all([loadPerfSettings(), loadJellyfinSettings()]);
+  await Promise.all([
+    loadPerfSettings(), loadJellyfinSettings(), loadNotificationChannels(), loadDiskUsage(),
+  ]);
   showModal('settings-modal');
+}
+
+// ── Spazio disco ─────────────────────────────────────────────────────────────
+
+// formatSize() stops at GB and is used for file rows; volumes are routinely in
+// terabytes, so the disk readout gets its own scale.
+function fmtBytes(bytes) {
+  if (bytes == null) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let value = bytes, i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+  return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${units[i]}`;
+}
+
+const _LIB_TYPE_LABELS = {film: 'Film', tv: 'Serie TV', anime: 'Anime'};
+
+async function loadDiskUsage() {
+  try {
+    const res = await fetch('/api/domain/disk-usage');
+    if (!res.ok) return;
+    renderDiskUsageList(await safeJson(res));
+  } catch (e) { console.error('loadDiskUsage:', e); }
+}
+
+function renderDiskUsageList(data) {
+  const c = document.getElementById('disk-usage-list');
+  if (!c) return;
+  const entries = (data && data.libraries) || [];
+  if (!entries.length) { c.innerHTML = ''; return; }
+  c.innerHTML = entries.map(lib => {
+    const label = _LIB_TYPE_LABELS[lib.type] || lib.type || '—';
+    if (lib.error) {
+      return `<div class="form-text text-danger">
+        ${escapeHtml(label)}: percorso non leggibile (${escapeHtml(lib.error)})
+      </div>`;
+    }
+    const pct = lib.total ? Math.round((lib.used / lib.total) * 100) : 0;
+    // Amber past 80%, red past 92%: at that point a 4K season may not fit.
+    const color = pct >= 92 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-primary';
+    return `
+      <div class="mb-2">
+        <div class="d-flex justify-content-between" style="font-size:11px">
+          <span style="color:var(--text)">${escapeHtml(label)}</span>
+          <span class="text-muted">${fmtBytes(lib.free)} liberi su ${fmtBytes(lib.total)}</span>
+        </div>
+        <div class="progress" style="height:4px">
+          <div class="progress-bar ${color}" style="width:${pct}%"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── Canali di notifica (Apprise) ─────────────────────────────────────────────
+
+let _notifChannels = [];
+
+async function loadNotificationChannels() {
+  try {
+    const res = await fetch('/api/notification-channels');
+    if (!res.ok) return;
+    const data = await safeJson(res);
+    _notifChannels = data.channels || [];
+    renderNotificationChannelsList();
+  } catch (e) { console.error('loadNotificationChannels:', e); }
+}
+
+// The URL carries the bot token, so the list shows only enough of it to tell two
+// channels apart. The full value stays behind the MANAGE_SETTINGS endpoint.
+function _maskAppriseUrl(url) {
+  const scheme = url.split('://')[0];
+  return `${scheme}://…${url.slice(-4)}`;
+}
+
+function renderNotificationChannelsList() {
+  const c = document.getElementById('notif-channels-list');
+  if (!c) return;
+  if (!_notifChannels.length) {
+    c.innerHTML = '<p class="text-muted small mb-0">Nessun canale configurato.</p>';
+    return;
+  }
+  c.innerHTML = _notifChannels.map(ch => `
+    <div class="d-flex align-items-center gap-2 py-1">
+      <label class="form-check form-switch mb-0">
+        <input class="form-check-input" type="checkbox" ${ch.enabled ? 'checked' : ''}
+               onchange="toggleNotificationChannel(${ch.id}, this.checked)">
+      </label>
+      <div class="flex-fill text-truncate">
+        <span style="color:var(--text)">${escapeHtml(ch.name)}</span>
+        <span class="text-muted small ms-2">${escapeHtml(_maskAppriseUrl(ch.apprise_url))}</span>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testNotificationChannel(${ch.id})">
+        <i class="ti ti-send me-1"></i>Test
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteNotificationChannel(${ch.id})">
+        <i class="ti ti-trash"></i>
+      </button>
+    </div>`).join('');
+}
+
+function toggleNotificationChannelForm() {
+  const form = document.getElementById('notif-channel-form');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function saveNotificationChannel() {
+  const btn = document.getElementById('notif-channel-save-btn');
+  const nameEl = document.getElementById('notif-channel-name');
+  const urlEl = document.getElementById('notif-channel-url');
+  const name = nameEl.value.trim();
+  const apprise_url = urlEl.value.trim();
+  if (!name || !apprise_url) {
+    _feedback('notif-channels-feedback', 'Compila nome e URL.', 'danger');
+    return;
+  }
+  btn.disabled = true;
+  _feedback('notif-channels-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/notification-channels', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, apprise_url}),
+    });
+    if (res.ok) {
+      nameEl.value = '';
+      urlEl.value = '';
+      document.getElementById('notif-channel-form').style.display = 'none';
+      _feedback('notif-channels-feedback', 'Canale aggiunto.', 'success');
+      await loadNotificationChannels();
+    } else {
+      const d = await safeJson(res);
+      _feedback('notif-channels-feedback', d.detail || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('notif-channels-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function toggleNotificationChannel(id, enabled) {
+  try {
+    const res = await fetch(`/api/notification-channels/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled}),
+    });
+    if (!res.ok) throw new Error();
+    _feedback('notif-channels-feedback', enabled ? 'Canale attivo.' : 'Canale disattivato.', 'success');
+    await loadNotificationChannels();
+  } catch (e) {
+    _feedback('notif-channels-feedback', 'Errore aggiornamento.', 'danger');
+    await loadNotificationChannels();
+  }
+}
+
+async function deleteNotificationChannel(id) {
+  const channel = _notifChannels.find(c => c.id === id);
+  if (!confirm(`Eliminare il canale "${channel ? channel.name : id}"?`)) return;
+  try {
+    const res = await fetch(`/api/notification-channels/${id}`, {method: 'DELETE'});
+    if (!res.ok) throw new Error();
+    _feedback('notif-channels-feedback', 'Canale eliminato.', 'success');
+    await loadNotificationChannels();
+  } catch (e) { _feedback('notif-channels-feedback', 'Errore eliminazione.', 'danger'); }
+}
+
+async function testNotificationChannel(id) {
+  _feedback('notif-channels-feedback', 'Invio notifica di test...');
+  try {
+    const res = await fetch(`/api/notification-channels/${id}/test`, {method: 'POST'});
+    const data = await safeJson(res);
+    if (res.ok && data.ok) {
+      _feedback('notif-channels-feedback', 'Notifica di test inviata.', 'success');
+      showToast('Notifica di test inviata', 'success');
+    } else {
+      _feedback('notif-channels-feedback', data.detail || 'Invio fallito: controlla la URL.', 'danger');
+    }
+  } catch (e) { _feedback('notif-channels-feedback', 'Errore di rete.', 'danger'); }
 }
 
 // ── Jellyfin connection ──────────────────────────────────────────────────────
@@ -398,6 +770,8 @@ async function loadPerfSettings() {
     const data = await safeJson(res);
     document.getElementById('setting-max-concurrent').value = data.max_concurrent_downloads ?? 3;
     document.getElementById('setting-max-workers').value = data.max_segment_workers ?? 16;
+    document.getElementById('setting-watch-interval').value =
+      data.series_watch_interval_minutes ?? 240;
   } catch (e) { /* ignore */ }
 }
 
@@ -405,14 +779,21 @@ async function savePerfSettings() {
   const btn = document.getElementById('save-perf-btn');
   const concurrent = parseInt(document.getElementById('setting-max-concurrent').value, 10);
   const workers = parseInt(document.getElementById('setting-max-workers').value, 10);
-  if (!concurrent || !workers) { _feedback('perf-settings-feedback', 'Valori non validi.', 'danger'); return; }
+  const watchInterval = parseInt(document.getElementById('setting-watch-interval').value, 10);
+  if (!concurrent || !workers || !watchInterval) {
+    _feedback('perf-settings-feedback', 'Valori non validi.', 'danger'); return;
+  }
   btn.disabled = true;
   _feedback('perf-settings-feedback', 'Salvataggio...');
   try {
     const res = await fetch('/api/domain/settings', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({max_concurrent_downloads: concurrent, max_segment_workers: workers}),
+      body: JSON.stringify({
+        max_concurrent_downloads: concurrent,
+        max_segment_workers: workers,
+        series_watch_interval_minutes: watchInterval,
+      }),
     });
     if (res.ok) {
       _feedback('perf-settings-feedback', 'Salvato.', 'success');
@@ -857,6 +1238,7 @@ async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=nul
   document.getElementById('episode-modal-body').innerHTML =
     '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
   showModal('episode-modal');
+  checkWatchStatus('tv');
 
   try {
     const [tokenData, seasonsData] = await Promise.all([
@@ -1013,6 +1395,7 @@ async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null,
   document.getElementById('anime-modal-body').innerHTML =
     '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
   showModal('anime-modal');
+  checkWatchStatus('anime');
 
   try {
     const res = await fetch(`/api/anime/${encodeURIComponent(animeId)}/episodes`);

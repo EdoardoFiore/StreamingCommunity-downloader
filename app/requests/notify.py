@@ -1,8 +1,8 @@
 """Notification dispatch.
 
-In-app only, by requirement. The point of the indirection is that adding a
-channel later means appending to ``CHANNELS`` — business logic calls ``notify()``
-and knows nothing about how a message gets delivered.
+The point of the indirection is that adding a channel means appending to
+``CHANNELS`` — business logic calls ``notify()`` and knows nothing about how a
+message gets delivered.
 """
 
 import logging
@@ -10,6 +10,7 @@ import logging
 from app import db
 from app.auth.permissions import Permission
 from app.requests import models
+from app.requests.apprise_channel import AppriseChannel
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class InAppChannel:
         job_manager.broadcast({"type": "notification"})
 
 
-CHANNELS = [InAppChannel()]
+CHANNELS = [InAppChannel(), AppriseChannel()]
 
 
 def notify(event: str, message: str, user_ids: list[int], request_id: int | None = None):

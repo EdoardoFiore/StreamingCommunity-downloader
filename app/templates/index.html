@@ -1661,6 +1661,12 @@
               <span class="nav-link-title">Le mie richieste</span>
             </a>
           </li>
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD" data-requires-auth="1">
+            <a class="nav-link" href="#" data-page="watches" onclick="showPage('watches');return false">
+              <span class="nav-link-icon"><i class="ti ti-bell-ringing"></i></span>
+              <span class="nav-link-title">Serie seguite</span>
+            </a>
+          </li>
           <li class="nav-item" data-perm="VIEW_LIBRARY">
             <a class="nav-link" href="#" data-page="files" onclick="showPage('files');return false">
               <span class="nav-link-icon"><i class="ti ti-folder-filled"></i></span>
@@ -1876,6 +1882,18 @@
           <div id="my-requests-list"></div>
         </div>
 
+        <div id="page-watches" style="display:none">
+          <div class="queue-filters">
+            <span class="text-muted" style="font-size:11px">
+              I nuovi episodi delle serie seguite vengono cercati automaticamente.
+            </span>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadWatches()">
+              <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+          <div id="watches-list"></div>
+        </div>
+
         <!-- ── Users ───────────────────────────────────────────── -->
         <div id="page-users" style="display:none">
           <div class="card mb-3">
@@ -2003,6 +2021,7 @@
             Dove finiscono i file scaricati, una cartella per tipo di contenuto.
           </p>
           <div id="libraries-list" class="mb-2"></div>
+          <div id="disk-usage-list" class="mb-3"></div>
           <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
             <i class="ti ti-plus me-1"></i>Aggiungi libreria
           </button>
@@ -2039,6 +2058,14 @@
               </label>
               <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
               <div class="form-text">Suggerito: 8–32. Valori >64 raramente migliorano le prestazioni.</div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="setting-watch-interval">
+                Controllo serie seguite
+                <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(15–1440 min)</span>
+              </label>
+              <input type="number" id="setting-watch-interval" class="form-control" min="15" max="1440" value="240">
+              <div class="form-text">Ogni quanto cercare nuovi episodi. Suggerito: 240 (4 ore).</div>
             </div>
           </div>
           <div class="settings-actions">
@@ -2121,6 +2148,38 @@
           </div>
         </div>
 
+        <!-- ── Notifiche ─────────────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Notifiche</p>
+          <p class="settings-section-hint">
+            Inoltra le notifiche del pannello a Discord, Telegram, ntfy, email e altri servizi.
+            Un canale è una URL Apprise, ad esempio
+            <code>discord://id_webhook/token_webhook</code> oppure <code>tgram://token_bot/id_chat</code>.
+          </p>
+          <div id="notif-channels-list" class="mb-2"></div>
+
+          <div id="notif-channel-form" class="row g-2 mb-2" style="display:none">
+            <div class="col-sm-4">
+              <input type="text" id="notif-channel-name" class="form-control" placeholder="Nome (es. Discord admin)">
+            </div>
+            <div class="col-sm-6">
+              <input type="text" id="notif-channel-url" class="form-control" placeholder="discord://id_webhook/token_webhook">
+            </div>
+            <div class="col-sm-2 d-grid">
+              <button type="button" class="btn btn-primary btn-sm" onclick="saveNotificationChannel()"
+                      id="notif-channel-save-btn">Aggiungi</button>
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleNotificationChannelForm()"
+                  id="notif-channel-add-btn">
+            <i class="ti ti-plus me-1"></i>Aggiungi canale
+          </button>
+          <div class="settings-actions">
+            <div id="notif-channels-feedback" class="form-text"></div>
+          </div>
+        </div>
+
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Chiudi</button>
@@ -2173,6 +2232,8 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="episode-modal-title">Episodi</h5>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto me-2"
+                id="follow-tv-btn" style="display:none" onclick="toggleFollowSeries('tv')"></button>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -2198,6 +2259,8 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="anime-modal-title">Episodi</h5>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto me-2"
+                id="follow-anime-btn" style="display:none" onclick="toggleFollowSeries('anime')"></button>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
