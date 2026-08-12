@@ -1046,12 +1046,18 @@
 
     /* Every settings section owns its own save action: two of them (verifying a
        domain, connecting to Jellyfin) have side effects beyond writing a value,
-       so a single modal-wide save button would be a lie. */
+       so a single modal-wide save button would be a lie.
+
+       Sections are grouped into tabs, one per pane, so this divider only draws
+       when a pane holds more than one section. */
     .settings-section + .settings-section {
       border-top: 1px solid var(--border);
       padding-top: 20px;
       margin-top: 24px;
     }
+    .settings-pane { padding-top: 4px; }
+    /* Fixed floor so the dialog does not resize as you move between tabs. */
+    #settings-modal .modal-body { min-height: 340px; }
     .settings-section-hint {
       font-size: 12px;
       color: var(--text-muted);
@@ -1998,6 +2004,29 @@
       </div>
       <div class="modal-body">
 
+        <!-- Tabs are switched by hand (switchSettingsTab), like the season strip
+             and the modals themselves: this codebase does not use Bootstrap's JS
+             components. Panes stay in the DOM permanently — saving libraries
+             reads its inputs straight out of the document. -->
+        <ul class="nav nav-tabs mb-3" id="settings-tabs">
+          <li class="nav-item">
+            <a class="nav-link active" href="#" data-settings-tab="sorgente">Sorgente</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="librerie">Librerie</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="download">Download</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="accesso">Accesso</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="notifiche">Notifiche</a>
+          </li>
+        </ul>
+
+        <div class="settings-pane" data-settings-pane="sorgente">
         <!-- ── Sorgente ──────────────────────────────────────────────────── -->
         <div class="settings-section">
           <p class="settings-section-label">Sorgente</p>
@@ -2013,7 +2042,9 @@
             <div id="domain-feedback" class="form-text"></div>
           </div>
         </div>
+        </div>
 
+        <div class="settings-pane" data-settings-pane="librerie" style="display:none">
         <!-- ── Librerie e cartelle ───────────────────────────────────────── -->
         <div class="settings-section">
           <p class="settings-section-label">Librerie multimediali</p>
@@ -2038,10 +2069,12 @@
             <div id="libraries-feedback" class="form-text"></div>
           </div>
         </div>
+        </div>
 
+        <div class="settings-pane" data-settings-pane="download" style="display:none">
         <!-- ── Performance download ──────────────────────────────────────── -->
         <div class="settings-section">
-          <p class="settings-section-label">Performance download</p>
+          <p class="settings-section-label">Download</p>
           <div class="row g-3">
             <div class="col-sm-6">
               <label class="form-label" for="setting-max-concurrent">
@@ -2075,7 +2108,9 @@
             <div id="perf-settings-feedback" class="form-text"></div>
           </div>
         </div>
+        </div>
 
+        <div class="settings-pane" data-settings-pane="accesso" style="display:none">
         <!-- ── Accesso (Jellyfin SSO) ────────────────────────────────────── -->
         <div class="settings-section">
           <p class="settings-section-label">Accesso e utenti</p>
@@ -2148,6 +2183,9 @@
           </div>
         </div>
 
+        </div>
+
+        <div class="settings-pane" data-settings-pane="notifiche" style="display:none">
         <!-- ── Notifiche ─────────────────────────────────────────────────── -->
         <div class="settings-section">
           <p class="settings-section-label">Notifiche</p>
@@ -2178,6 +2216,7 @@
           <div class="settings-actions">
             <div id="notif-channels-feedback" class="form-text"></div>
           </div>
+        </div>
         </div>
 
       </div>

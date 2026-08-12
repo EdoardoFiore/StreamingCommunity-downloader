@@ -27,6 +27,12 @@ def _as(client, permissions: Permission | int, username="user"):
 CASES = [
     ((Permission.DOWNLOAD,), "POST", "/api/download/film",
      {"id": 1, "title": "x", "domain": "example.test"}),
+    ((Permission.DOWNLOAD,), "POST", "/api/download/season",
+     {"tv_id": 1, "slug": "x", "tv_name": "x", "season": 1}),
+    ((Permission.DOWNLOAD,), "POST", "/api/download/series",
+     {"tv_id": 1, "slug": "x", "tv_name": "x"}),
+    ((Permission.DOWNLOAD,), "POST", "/api/download/anime-all",
+     {"anime_id": "1", "anime_name": "x"}),
     ((Permission.REQUEST, Permission.DOWNLOAD), "GET",
      "/api/search?q=abc&domain=example.test", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/domain/settings", None),

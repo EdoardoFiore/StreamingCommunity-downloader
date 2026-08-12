@@ -25,13 +25,64 @@ REQUEST_FAILED = "request_failed"
 REQUEST_NEEDS_ATTENTION = "request_needs_attention"
 REQUEST_AVAILABLE = "request_available"
 
+# Direct downloads: the path that skips the request queue entirely. A season or
+# a series asked for in one go reports once, not once per episode.
+DOWNLOAD_COMPLETED = "download_completed"
+DOWNLOAD_FAILED = "download_failed"
+DOWNLOAD_BATCH_COMPLETED = "download_batch_completed"
+DOWNLOAD_BATCH_FAILED = "download_batch_failed"
+
+# The single vocabulary: the per-channel event picker, the server-side validator
+# and the bell's icon table all key off this.
+ALL_EVENTS = (
+    REQUEST_CREATED,
+    REQUEST_JOINED,
+    REQUEST_APPROVED,
+    REQUEST_DENIED,
+    REQUEST_DOWNLOADING,
+    REQUEST_COMPLETED,
+    REQUEST_FAILED,
+    REQUEST_NEEDS_ATTENTION,
+    REQUEST_AVAILABLE,
+    DOWNLOAD_COMPLETED,
+    DOWNLOAD_FAILED,
+    DOWNLOAD_BATCH_COMPLETED,
+    DOWNLOAD_BATCH_FAILED,
+)
+
+# Outcome vocabulary, kept as plain strings so this module never imports apprise.
+# External channels turn it into the colour of the message.
+SUCCESS = "success"
+FAILURE = "failure"
+WARNING = "warning"
+INFO = "info"
+
+EVENT_NOTIFY_TYPE = {
+    REQUEST_CREATED: INFO,
+    REQUEST_JOINED: INFO,
+    REQUEST_APPROVED: SUCCESS,
+    REQUEST_DENIED: WARNING,
+    REQUEST_DOWNLOADING: INFO,
+    REQUEST_COMPLETED: SUCCESS,
+    REQUEST_AVAILABLE: SUCCESS,
+    REQUEST_FAILED: FAILURE,
+    REQUEST_NEEDS_ATTENTION: WARNING,
+    DOWNLOAD_COMPLETED: SUCCESS,
+    DOWNLOAD_FAILED: FAILURE,
+    DOWNLOAD_BATCH_COMPLETED: SUCCESS,
+    DOWNLOAD_BATCH_FAILED: FAILURE,
+}
+
 
 class InAppChannel:
     """Stores the notification and pushes it over the existing SSE stream."""
 
     name = "in_app"
 
-    def deliver(self, event: str, user_ids: list[int], message: str, request_id: int | None):
+    def deliver(self, event: str, user_ids: list[int], message: str, request_id: int | None,
+                title: str | None = None, notify_type: str | None = None):
+        # title and notify_type are presentation for external channels; the bell
+        # shows the message and picks its own icon from the event.
         if not user_ids:
             return
         timestamp = models.now_iso()
@@ -53,11 +104,24 @@ class InAppChannel:
 CHANNELS = [InAppChannel(), AppriseChannel()]
 
 
-def notify(event: str, message: str, user_ids: list[int], request_id: int | None = None):
+def notify(event: str, message: str, user_ids: list[int], request_id: int | None = None,
+           *, markdown_message: str | None = None, title: str | None = None,
+           notify_type: str | None = None):
+    """Deliver one event to every channel.
+
+    ``message`` is the plain text stored on the bell; ``markdown_message`` is
+    what external channels render, defaulting to the same text. ``notify_type``
+    is resolved from the event unless a caller overrides it — a partly-failed
+    batch is neither a success nor a failure and says so explicitly.
+    """
     unique = list(dict.fromkeys(user_ids))
+    outcome = notify_type or EVENT_NOTIFY_TYPE.get(event, INFO)
+    external = markdown_message if markdown_message is not None else message
     for channel in CHANNELS:
         try:
-            channel.deliver(event, unique, message, request_id)
+            body = external if channel.name != "in_app" else message
+            channel.deliver(event, unique, body, request_id,
+                            title=title, notify_type=outcome)
         except Exception:
             logger.exception("Notification channel %s failed for %s", channel.name, event)
 

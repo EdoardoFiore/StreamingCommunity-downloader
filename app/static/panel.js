@@ -22,17 +22,9 @@ const REQUEST_STATUS_LABELS = {
 // "cancelled" in the state machine, so there is nothing to offer there.
 const MINE_ACTIVE_STATUSES = ['pending', 'approved', 'downloading', 'needs_attention'];
 
-const NOTIFICATION_ICONS = {
-  request_created: 'ti-inbox',
-  request_joined: 'ti-users',
-  request_approved: 'ti-circle-check',
-  request_denied: 'ti-circle-x',
-  request_downloading: 'ti-download',
-  request_completed: 'ti-device-tv',
-  request_failed: 'ti-alert-triangle',
-  request_needs_attention: 'ti-alert-circle',
-  request_available: 'ti-library',
-};
+// NOTIFICATION_ICONS and NOTIFICATION_LABELS live in app.js, which loads first:
+// the settings modal needs them as module constants to build the per-channel
+// event picker, and this file already depends on app.js's helpers.
 
 let _queue = [];
 let _myRequests = [];

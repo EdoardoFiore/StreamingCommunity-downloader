@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app import __version__, db
+from app import __version__, db, downloads_notify
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
@@ -88,6 +88,9 @@ async def lifespan(app: FastAPI):
     db.run_migrations()
     auth_session.purge_expired()
     requests_service.register_job_listener()
+    # Second listener, registered after the request one so a request's own row is
+    # updated first: this one only speaks up for jobs no request owns.
+    downloads_notify.register_batch_listener()
     # Before anything can approve or complete a request: any row still
     # "approved" or "downloading" from a previous run has no in-memory worker
     # left, and never will — it needs recovering before the app is reachable.

@@ -72,8 +72,9 @@ request before any route runs.
 - `poller.py` — periodic enumeration, diff against what is seen, auto-download decision
 - `router.py` — follow, unfollow, status, manual check
 
-**`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `schedule.py`, `db.py`, `config.py`,
-`progress.py`, `routers/`, `templates/`, `static/`
+**`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `downloads_notify.py` (notifications
+for downloads that skipped the queue, one summary per season/series), `schedule.py`, `db.py`,
+`config.py`, `progress.py`, `routers/`, `templates/`, `static/`
 
 ### Persistence
 
@@ -117,6 +118,17 @@ anything under a mounted static directory is readable by unauthenticated visitor
 - **Anything user-owned is unavailable in open mode.** The implicit user has no `jf_user` row, so a
   foreign key would fail. Check the user the middleware resolved (`is OPEN_MODE_USER`) rather than
   binding `AUTH_ENABLED` in yet another module.
+- **A batch's expected total is fixed before its first job is submitted**, and every job created
+  must reach a terminal listener exactly once — otherwise the batch never closes and its summary
+  never fires. That is why `jobs.py` notifies listeners on *every* path out of `_run_download`,
+  including the job cancelled before it started, and why `cancel()` notifies for a job still
+  `scheduled` that the executor never saw.
+- **External channels have no in-app recipient to wait for.** `AppriseChannel` fires with an empty
+  user list on purpose: a direct download in open mode has no account, but the webhook is still the
+  point. `InAppChannel` keeps the guard — with no recipients there is nothing to insert.
+- **An empty `events` array on a notification channel means *every* event**, not none. Any UI
+  offering a selection has to express "all" as its own state, or unchecking the last box silently
+  subscribes to everything.
 - Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
   are the exception by design: every caller of `notify()` is already off the loop.
 

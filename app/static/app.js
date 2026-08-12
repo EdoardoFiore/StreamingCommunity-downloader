@@ -242,6 +242,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setInterval(refreshNotifications, 60000);
   }
   if (can('VIEW_LIBRARY')) setupFileManager();
+  setupSettingsTabs();
   setupSearchDebounce();
   refreshNotifications();
   refreshQueueBadge();
@@ -505,6 +506,60 @@ async function unfollowWatch(watchId) {
   } catch (e) { showToast('Errore di rete', 'danger'); }
 }
 
+// ── Vocabolario notifiche ────────────────────────────────────────────────────
+//
+// Mirrors notify.ALL_EVENTS on the server. The bell reads the icons; the
+// per-channel picker in Impostazioni reads the labels and the grouping.
+
+const NOTIFICATION_ICONS = {
+  request_created: 'ti-inbox',
+  request_joined: 'ti-users',
+  request_approved: 'ti-circle-check',
+  request_denied: 'ti-circle-x',
+  request_downloading: 'ti-download',
+  request_completed: 'ti-device-tv',
+  request_failed: 'ti-alert-triangle',
+  request_needs_attention: 'ti-alert-circle',
+  request_available: 'ti-library',
+  download_completed: 'ti-circle-check',
+  download_failed: 'ti-alert-triangle',
+  download_batch_completed: 'ti-checkbox',
+  download_batch_failed: 'ti-alert-octagon',
+};
+
+const NOTIFICATION_LABELS = {
+  request_created: 'Nuova richiesta',
+  request_joined: 'Richiesta già presente',
+  request_approved: 'Richiesta approvata',
+  request_denied: 'Richiesta rifiutata',
+  request_downloading: 'Richiesta in download',
+  request_completed: 'Richiesta completata',
+  request_failed: 'Richiesta fallita',
+  request_needs_attention: 'Richiesta da verificare',
+  request_available: 'Già in libreria',
+  download_completed: 'Download completato',
+  download_failed: 'Download fallito',
+  download_batch_completed: 'Stagione o serie completata',
+  download_batch_failed: 'Stagione o serie fallita',
+};
+
+// Explicit order, so the picker does not depend on object key order.
+const NOTIFICATION_EVENT_GROUPS = [
+  {
+    label: 'Richieste',
+    events: ['request_created', 'request_joined', 'request_approved', 'request_denied',
+             'request_downloading', 'request_completed', 'request_failed',
+             'request_needs_attention', 'request_available'],
+  },
+  {
+    label: 'Download diretti',
+    events: ['download_completed', 'download_failed',
+             'download_batch_completed', 'download_batch_failed'],
+  },
+];
+
+const ALL_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_GROUPS.flatMap(g => g.events);
+
 // ── Settings ───────────────────────────────────────────────────────────────────
 
 // Every section in the settings modal saves itself, so each one reports into its
@@ -521,14 +576,74 @@ function _feedback(id, message = '', kind = 'muted') {
   el.className = 'form-text' + (message ? ` text-${kind}` : '');
 }
 
+// Each tab fetches its own data the first time it is opened, so opening the
+// modal no longer waits on the slowest section (disk usage stats every library
+// path, on an NFS mount that can be asleep).
+const _SETTINGS_TAB_LOADERS = {
+  librerie: () => loadDiskUsage(),
+  download: () => loadPerfSettings(),
+  accesso: () => loadJellyfinSettings(),
+  notifiche: () => loadNotificationChannels(),
+};
+
+// Tabs whose panes only talk to MANAGE_SETTINGS endpoints: without it they would
+// render as empty panes fed by 403s.
+const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'download', 'notifiche'];
+
+let _settingsTab = 'sorgente';
+const _settingsLoaded = new Set();
+
+function setupSettingsTabs() {
+  const tabs = document.getElementById('settings-tabs');
+  if (!tabs) return;
+  tabs.addEventListener('click', (e) => {
+    const link = e.target.closest('[data-settings-tab]');
+    if (!link) return;
+    e.preventDefault();
+    switchSettingsTab(link.dataset.settingsTab);
+  });
+}
+
+function _visibleSettingsTabs() {
+  return [...document.querySelectorAll('#settings-tabs [data-settings-tab]')]
+    .filter(a => a.closest('.nav-item').style.display !== 'none')
+    .map(a => a.dataset.settingsTab);
+}
+
+async function switchSettingsTab(name) {
+  document.querySelectorAll('#settings-tabs [data-settings-tab]').forEach(a =>
+    a.classList.toggle('active', a.dataset.settingsTab === name));
+  document.querySelectorAll('[data-settings-pane]').forEach(pane => {
+    pane.style.display = pane.dataset.settingsPane === name ? '' : 'none';
+  });
+  _settingsTab = name;
+  const body = document.querySelector('#settings-modal .modal-body');
+  if (body) body.scrollTop = 0;
+
+  // Marked before awaiting, so a double click cannot fire two fetches.
+  if (!_settingsLoaded.has(name)) {
+    _settingsLoaded.add(name);
+    await _SETTINGS_TAB_LOADERS[name]?.();
+  }
+}
+
 async function openSettings() {
   document.getElementById('domain-input').value = currentDomain;
   _SETTINGS_FEEDBACK_IDS.forEach(id => _feedback(id));
   renderLibrariesList();
-  await Promise.all([
-    loadPerfSettings(), loadJellyfinSettings(), loadNotificationChannels(), loadDiskUsage(),
-  ]);
+
+  const manage = can('MANAGE_SETTINGS');
+  document.querySelectorAll('#settings-tabs [data-settings-tab]').forEach(a => {
+    const restricted = _SETTINGS_TABS_NEED_MANAGE.includes(a.dataset.settingsTab);
+    a.closest('.nav-item').style.display = restricted && !manage ? 'none' : '';
+  });
+
+  // Cleared on every open so a value changed elsewhere is picked up; within one
+  // open, moving between tabs does not refetch.
+  _settingsLoaded.clear();
   showModal('settings-modal');
+  const tabs = _visibleSettingsTabs();
+  await switchSettingsTab(tabs.includes('sorgente') ? 'sorgente' : tabs[0]);
 }
 
 // ── Spazio disco ─────────────────────────────────────────────────────────────
@@ -602,6 +717,51 @@ function _maskAppriseUrl(url) {
   return `${scheme}://…${url.slice(-4)}`;
 }
 
+// Which channels have their event picker open. Kept outside the render so
+// rebuilding the list does not collapse what the user was editing.
+const _expandedChannels = new Set();
+
+// An empty list means "every event" on the server, so the picker needs a master
+// switch: without it, unchecking the last box would silently mean the opposite
+// of what it looks like.
+function _eventSummary(ch) {
+  if (!ch.events.length) return 'Tutti gli eventi';
+  return ch.events.length === 1 ? '1 evento' : `${ch.events.length} eventi`;
+}
+
+function _renderEventPicker(ch) {
+  const all = ch.events.length === 0;
+  const groups = NOTIFICATION_EVENT_GROUPS.map(group => {
+    const boxes = group.events.map(event => `
+      <label class="form-check form-check-inline" style="min-width:200px">
+        <input class="form-check-input" type="checkbox" value="${event}"
+               data-channel="${ch.id}"
+               ${all || ch.events.includes(event) ? 'checked' : ''}
+               ${all ? 'disabled' : ''}
+               onchange="updateChannelEvents(${ch.id})">
+        <span class="form-check-label" style="font-size:12px">
+          <i class="ti ${NOTIFICATION_ICONS[event] || 'ti-bell'} me-1"></i>${NOTIFICATION_LABELS[event]}
+        </span>
+      </label>`).join('');
+    return `
+      <div class="mb-2">
+        <p class="settings-section-label mb-1">${group.label}</p>
+        ${boxes}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="ps-4 pb-2" id="notif-events-${ch.id}">
+      <label class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" ${all ? 'checked' : ''}
+               id="notif-all-events-${ch.id}"
+               onchange="toggleAllChannelEvents(${ch.id}, this.checked)">
+        <span class="form-check-label" style="font-size:12px">Tutti gli eventi</span>
+      </label>
+      ${groups}
+    </div>`;
+}
+
 function renderNotificationChannelsList() {
   const c = document.getElementById('notif-channels-list');
   if (!c) return;
@@ -609,23 +769,85 @@ function renderNotificationChannelsList() {
     c.innerHTML = '<p class="text-muted small mb-0">Nessun canale configurato.</p>';
     return;
   }
-  c.innerHTML = _notifChannels.map(ch => `
-    <div class="d-flex align-items-center gap-2 py-1">
-      <label class="form-check form-switch mb-0">
-        <input class="form-check-input" type="checkbox" ${ch.enabled ? 'checked' : ''}
-               onchange="toggleNotificationChannel(${ch.id}, this.checked)">
-      </label>
-      <div class="flex-fill text-truncate">
-        <span style="color:var(--text)">${escapeHtml(ch.name)}</span>
-        <span class="text-muted small ms-2">${escapeHtml(_maskAppriseUrl(ch.apprise_url))}</span>
+  c.innerHTML = _notifChannels.map(ch => {
+    const open = _expandedChannels.has(ch.id);
+    return `
+    <div class="border-bottom pb-1 mb-1">
+      <div class="d-flex align-items-center gap-2 py-1">
+        <label class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" ${ch.enabled ? 'checked' : ''}
+                 onchange="toggleNotificationChannel(${ch.id}, this.checked)">
+        </label>
+        <div class="flex-fill text-truncate">
+          <span style="color:var(--text)">${escapeHtml(ch.name)}</span>
+          <span class="text-muted small ms-2">${escapeHtml(_maskAppriseUrl(ch.apprise_url))}</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-ghost-secondary"
+                onclick="toggleChannelEvents(${ch.id})" title="Scegli quali notifiche ricevere">
+          <i class="ti ti-${open ? 'chevron-up' : 'chevron-down'} me-1"></i>${_eventSummary(ch)}
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testNotificationChannel(${ch.id})">
+          <i class="ti ti-send me-1"></i>Test
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteNotificationChannel(${ch.id})">
+          <i class="ti ti-trash"></i>
+        </button>
       </div>
-      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testNotificationChannel(${ch.id})">
-        <i class="ti ti-send me-1"></i>Test
-      </button>
-      <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteNotificationChannel(${ch.id})">
-        <i class="ti ti-trash"></i>
-      </button>
-    </div>`).join('');
+      ${open ? _renderEventPicker(ch) : ''}
+    </div>`;
+  }).join('');
+}
+
+function toggleChannelEvents(id) {
+  if (_expandedChannels.has(id)) _expandedChannels.delete(id);
+  else _expandedChannels.add(id);
+  renderNotificationChannelsList();
+}
+
+function _checkedEvents(id) {
+  return [...document.querySelectorAll(`#notif-events-${id} input[data-channel="${id}"]`)]
+    .filter(box => box.checked).map(box => box.value);
+}
+
+async function toggleAllChannelEvents(id, all) {
+  // Turning "all" off pre-selects everything, so the user removes what they do
+  // not want rather than starting from nothing.
+  await _saveChannelEvents(id, all ? [] : ALL_NOTIFICATION_EVENTS.slice());
+}
+
+async function updateChannelEvents(id) {
+  const chosen = _checkedEvents(id);
+  if (!chosen.length) {
+    // [] would be stored as "every event" — the opposite of an empty selection.
+    _feedback('notif-channels-feedback', 'Seleziona almeno un evento, oppure attiva «Tutti gli eventi».', 'danger');
+    renderNotificationChannelsList();
+    return;
+  }
+  await _saveChannelEvents(id, chosen);
+}
+
+async function _saveChannelEvents(id, events) {
+  try {
+    const res = await fetch(`/api/notification-channels/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({events}),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) {
+      _feedback('notif-channels-feedback', data.detail || 'Errore aggiornamento eventi.', 'danger');
+      await loadNotificationChannels();
+      return;
+    }
+    // Patched locally instead of refetching: a full reload would rebuild the
+    // open picker under the cursor while the user is still clicking.
+    const channel = _notifChannels.find(c => c.id === id);
+    if (channel) channel.events = data.events || [];
+    _feedback('notif-channels-feedback', 'Eventi aggiornati.', 'success');
+    renderNotificationChannelsList();
+  } catch (e) {
+    _feedback('notif-channels-feedback', 'Errore di rete.', 'danger');
+  }
 }
 
 function toggleNotificationChannelForm() {
@@ -1349,37 +1571,49 @@ async function startEpisodeDownload(epIndex) {
   } catch(e) { showToast('Errore di rete','danger'); }
 }
 
-async function downloadWholeSeason(season) {
-  const { episodes, scheduledAt } = _epCtx;
-  const label = scheduledAt ? 'programmare' : 'aggiungere alla coda';
-  if (!await scConfirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutti i ${episodes.length} episodi della stagione ${season}?`)) return;
-  for (let i=0; i<episodes.length; i++) {
-    await startEpisodeDownload(i);
-    await new Promise(r=>setTimeout(r,150));
+// Whole seasons and whole series are one call: the server lists the episodes
+// itself and queues them as a batch. That is also what lets it report the season
+// once at the end instead of pinging for every episode.
+async function _startBatch(path, body, modalId) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await safeJson(res);
+  if (!res.ok) {
+    showToast(data.detail || 'Errore avviando i download', 'danger');
+    return false;
   }
-  showPage('downloads'); hideModal('episode-modal');
+  showToast(
+    body.scheduled_at ? `${data.count} episodi programmati` : `${data.count} episodi in coda`,
+    'success',
+  );
+  hideModal(modalId);
+  showPage('downloads');
+  return true;
+}
+
+async function downloadWholeSeason(season) {
+  const { tvId, slug, tvName, year, episodes, scheduledAt, audioLangs, subLangs } = _epCtx;
+  const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
+  if (!await scConfirm(`${label} tutti i ${episodes.length} episodi della stagione ${season}?`)) return;
+  await _startBatch('/api/download/season', {
+    tv_id: tvId, slug, tv_name: tvName, season, year,
+    audio_languages: audioLangs, subtitle_languages: subLangs,
+    scheduled_at: scheduledAt || null,
+  }, 'episode-modal');
 }
 
 async function downloadWholeSeries() {
-  const { tvId, slug, token, scheduledAt, seasonsCount } = _epCtx;
-  const label = scheduledAt ? 'programmare' : 'aggiungere alla coda';
-  if (!await scConfirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutte le ${seasonsCount} stagioni?`)) return;
-  hideModal('episode-modal');
-  showPage('downloads');
-  for (let s = 1; s <= seasonsCount; s++) {
-    try {
-      const res = await fetch(`/api/tv/${tvId}/seasons/${s}/episodes?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
-      const eps = await safeJson(res);
-      _epCtx.episodes = eps;
-      _epCtx.currentSeason = s;
-      for (let i = 0; i < eps.length; i++) {
-        await startEpisodeDownload(i);
-        await new Promise(r => setTimeout(r, 150));
-      }
-    } catch(e) {
-      showToast(`Errore stagione ${s}: ${e.message}`, 'danger');
-    }
-  }
+  const { tvId, slug, tvName, year, scheduledAt, seasonsCount, audioLangs, subLangs } = _epCtx;
+  const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
+  if (!await scConfirm(`${label} tutte le ${seasonsCount} stagioni?`)) return;
+  await _startBatch('/api/download/series', {
+    tv_id: tvId, slug, tv_name: tvName, year,
+    audio_languages: audioLangs, subtitle_languages: subLangs,
+    scheduled_at: scheduledAt || null,
+  }, 'episode-modal');
 }
 
 // ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
@@ -1514,14 +1748,16 @@ function toggleAnimeType(newType) {
 }
 
 async function downloadAllAnime() {
-  const { episodes, scheduledAt } = _animeCtx;
-  const label = scheduledAt ? 'programmare' : 'aggiungere alla coda';
-  if (!await scConfirm(`${label.charAt(0).toUpperCase()+label.slice(1)} tutti i ${episodes.length} episodi?`)) return;
-  for (let i = 0; i < episodes.length; i++) {
-    await startAnimeDownload(i);
-    await new Promise(r => setTimeout(r, 150));
-  }
-  showPage('downloads'); hideModal('anime-modal');
+  const { animeId, animeName, animeType, animeYear, episodes, scheduledAt,
+          audioLangs, subLangs } = _animeCtx;
+  const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
+  if (!await scConfirm(`${label} tutti i ${episodes.length} episodi?`)) return;
+  await _startBatch('/api/download/anime-all', {
+    anime_id: String(animeId), anime_name: animeName, anime_type: animeType,
+    year: animeYear,
+    audio_languages: audioLangs, subtitle_languages: subLangs,
+    scheduled_at: scheduledAt || null,
+  }, 'anime-modal');
 }
 
 // ── Global SSE stream ──────────────────────────────────────────────────────────

@@ -20,11 +20,19 @@ def admin(client, admin_credentials):
 
 @pytest.fixture
 def sent(monkeypatch):
-    """Record deliveries instead of reaching the network."""
-    calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        apprise_channel, "send", lambda url, message, title=None: calls.append((url, message)) or True
-    )
+    """Record deliveries instead of reaching the network.
+
+    Takes **kw so that adding a presentation argument to send() shows up as a
+    test that needs updating, not as a TypeError inside a swallowed exception.
+    """
+    calls: list[dict] = []
+
+    def record(url, message, title=None, notify_type=None, **kw):
+        calls.append({"url": url, "message": message, "title": title,
+                      "notify_type": notify_type, **kw})
+        return True
+
+    monkeypatch.setattr(apprise_channel, "send", record)
     monkeypatch.setattr(apprise_channel, "url_is_valid", lambda url: "://" in url)
     return calls
 
@@ -76,7 +84,7 @@ def test_notify_reaches_an_enabled_channel(client, admin, sent):
 
     notify.notify(notify.REQUEST_COMPLETED, "Film pronto.", [user.id])
 
-    assert sent == [(DISCORD_URL, "Film pronto.")]
+    assert [(c["url"], c["message"]) for c in sent] == [(DISCORD_URL, "Film pronto.")]
 
 
 def test_a_disabled_channel_is_skipped(client, admin, sent):
@@ -99,7 +107,135 @@ def test_a_channel_only_gets_the_events_it_subscribed_to(client, admin, sent):
     assert sent == []
 
     notify.notify(notify.REQUEST_COMPLETED, "Film pronto.", [user.id])
-    assert [message for _, message in sent] == ["Film pronto."]
+    assert [c["message"] for c in sent] == ["Film pronto."]
+
+
+def test_apprise_delivers_even_with_no_in_app_recipients(client, admin, sent):
+    """External channels belong to the panel, not to a user.
+
+    A direct download in open mode has no account to notify in the bell, which
+    is precisely the case a Discord webhook exists to report.
+    """
+    apprise_channel.create_channel(name="Discord", apprise_url=DISCORD_URL, events=[])
+
+    notify.notify(notify.REQUEST_COMPLETED, "Film pronto.", [])
+
+    assert [c["message"] for c in sent] == ["Film pronto."]
+
+
+def test_the_outcome_reaches_the_channel_as_a_colour(client, admin, sent):
+    user, _ = admin
+    apprise_channel.create_channel(name="Discord", apprise_url=DISCORD_URL, events=[])
+
+    notify.notify(notify.REQUEST_COMPLETED, "Pronto.", [user.id])
+    notify.notify(notify.REQUEST_FAILED, "Rotto.", [user.id])
+    notify.notify(notify.REQUEST_NEEDS_ATTENTION, "Da guardare.", [user.id])
+
+    assert [c["notify_type"] for c in sent] == ["success", "failure", "warning"]
+
+
+def test_a_caller_can_override_the_outcome(client, admin, sent):
+    user, _ = admin
+    apprise_channel.create_channel(name="Discord", apprise_url=DISCORD_URL, events=[])
+
+    notify.notify(notify.REQUEST_COMPLETED, "Parziale.", [user.id],
+                  notify_type=notify.WARNING)
+
+    assert sent[0]["notify_type"] == "warning"
+
+
+def test_external_channels_get_the_markdown_text(client, admin, sent):
+    user, _ = admin
+    apprise_channel.create_channel(name="Discord", apprise_url=DISCORD_URL, events=[])
+
+    notify.notify(notify.REQUEST_COMPLETED, "Film pronto.", [user.id],
+                  markdown_message="«**Film**» è pronto.", title="Download completato")
+
+    assert sent[0]["message"] == "«**Film**» è pronto."
+    assert sent[0]["title"] == "Download completato"
+    # The bell keeps the plain wording, without the markup.
+    assert notify.list_for_user(user.id)[0]["message"] == "Film pronto."
+
+
+def test_an_unknown_event_name_is_refused(client, admin, sent):
+    """A typo used to become a filter that silently never matched."""
+    _, csrf = admin
+    headers = {"X-CSRF-Token": csrf}
+
+    created = client.post(
+        "/api/notification-channels",
+        json={"name": "x", "apprise_url": DISCORD_URL, "events": ["request_inventato"]},
+        headers=headers,
+    )
+    assert created.status_code == 422
+
+    real = client.post(
+        "/api/notification-channels",
+        json={"name": "x", "apprise_url": DISCORD_URL, "events": [notify.REQUEST_COMPLETED]},
+        headers=headers,
+    ).json()
+    patched = client.patch(
+        f"/api/notification-channels/{real['id']}",
+        json={"events": ["non_esiste"]},
+        headers=headers,
+    )
+    assert patched.status_code == 422
+
+
+def test_events_are_deduplicated_and_ordered(client, admin, sent):
+    _, csrf = admin
+
+    created = client.post(
+        "/api/notification-channels",
+        json={
+            "name": "x", "apprise_url": DISCORD_URL,
+            "events": [notify.DOWNLOAD_FAILED, notify.REQUEST_CREATED, notify.DOWNLOAD_FAILED],
+        },
+        headers={"X-CSRF-Token": csrf},
+    ).json()
+
+    assert created["events"] == [notify.REQUEST_CREATED, notify.DOWNLOAD_FAILED]
+
+
+def test_a_channel_subscribed_to_downloads_ignores_requests(client, admin, sent):
+    user, _ = admin
+    apprise_channel.create_channel(
+        name="Solo download", apprise_url=DISCORD_URL,
+        events=[notify.DOWNLOAD_BATCH_COMPLETED],
+    )
+
+    notify.notify(notify.REQUEST_COMPLETED, "Richiesta pronta.", [user.id])
+    assert sent == []
+
+    notify.notify(notify.DOWNLOAD_BATCH_COMPLETED, "Stagione pronta.", [user.id])
+    assert [c["message"] for c in sent] == ["Stagione pronta."]
+
+
+class TestDecoratedUrl:
+    """Discord only renders a card when the URL asks for markdown."""
+
+    def test_a_discord_url_gains_the_embed_parameters(self):
+        decorated = apprise_channel._decorated_url(DISCORD_URL)
+        assert "format=markdown" in decorated
+        assert "fields=no" in decorated
+        assert decorated.startswith(DISCORD_URL)
+
+    def test_an_explicit_choice_is_left_alone(self):
+        chosen = DISCORD_URL + "?format=text"
+        decorated = apprise_channel._decorated_url(chosen)
+        assert "format=markdown" not in decorated
+        assert "format=text" in decorated
+
+    def test_a_discord_webhook_url_is_recognised(self):
+        raw = "https://discord.com/api/webhooks/123/abc"
+        assert "format=markdown" in apprise_channel._decorated_url(raw)
+
+    def test_other_services_are_untouched(self):
+        for url in ("tgram://token/12345", "ntfy://host/topic", "mailto://user:pw@host"):
+            assert apprise_channel._decorated_url(url) == url
+
+    def test_a_malformed_url_is_returned_unchanged(self):
+        assert apprise_channel._decorated_url("non-una-url") == "non-una-url"
 
 
 def test_a_failing_channel_does_not_break_the_notification(client, admin, monkeypatch):
