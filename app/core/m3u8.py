@@ -155,35 +155,49 @@ class M3U8_Segments:
             h["referer"] = self.referer
         return h
 
-    def get_info(self):
-        # Retry logic for transient failures like 403
-        max_retries = 3
-        retry_delay = 2  # seconds
-        current_url = self.url
-        tried_with_b1 = False
-        
+    def _fetch_m3u8(self, url: str, what: str, max_retries: int = 3, retry_delay: int = 2):
+        """Fetch one M3U8, riding out the errors this CDN hands out routinely.
+
+        Shared by both fetches in ``get_info()``. They used to be written out
+        separately and only the first one grew retries, so a transient 500 on
+        the rendition playlist killed the whole download while the identical
+        failure one request earlier would have been retried.
+
+        Handles three things the bare call did not: a transient non-2xx, the
+        ``?b=1`` quirk (some playlists are only served with it), and a
+        connection that never completes.
+        """
+        current = url
+        tried_with_b1 = "b=1" in url
+        response = None
+
         for attempt in range(max_retries):
-            response = requests.get(current_url, headers=self._headers(), timeout=15)
-            if response.ok:
-                break
-            # On 403, retry with &b1 parameter (some TV episodes require it)
-            if response.status_code == 403 and attempt < max_retries - 1:
-                if not tried_with_b1:
-                    logger.warning(f"M3U8 fetch returned HTTP 403, retrying with &b=1... (attempt {attempt+1}/{max_retries})")
-                    current_url = self.url + ("&b=1" if "?" in self.url else "?b=1")
+            last = attempt == max_retries - 1
+            try:
+                response = requests.get(current, headers=self._headers(), timeout=15)
+            except requests.RequestException as e:
+                response = None
+                logger.warning("%s M3U8 fetch failed (%s) — tentativo %d/%d",
+                               what, e, attempt + 1, max_retries)
+            else:
+                if response.ok:
+                    return response
+                if response.status_code == 403 and not tried_with_b1:
+                    # A different URL, so retry at once rather than waiting.
+                    logger.warning("%s M3U8 fetch returned 403, retrying with ?b=1: %s", what, current)
+                    current = current + ("&b=1" if "?" in current else "?b=1")
                     tried_with_b1 = True
-                    time.sleep(retry_delay)
                     continue
-                else:
-                    logger.warning(f"M3U8 fetch returned HTTP 403, retrying in {retry_delay}s... (attempt {attempt+1}/{max_retries})")
-                    time.sleep(retry_delay)
-                    continue
-            # Other errors: fail immediately
-            if not response.ok:
-                raise RuntimeError(f"Failed to fetch M3U8: HTTP {response.status_code}")
-        
-        if not response.ok:
-            raise RuntimeError(f"Failed to fetch M3U8: HTTP {response.status_code}")
+                logger.warning("%s M3U8 fetch returned HTTP %d — tentativo %d/%d",
+                               what, response.status_code, attempt + 1, max_retries)
+            if not last:
+                time.sleep(retry_delay)
+
+        status = response.status_code if response is not None else "nessuna risposta"
+        raise RuntimeError(f"Failed to fetch {what} M3U8: HTTP {status}")
+
+    def get_info(self):
+        response = self._fetch_m3u8(self.url, "playlist")
 
         parser = M3U8_Parser()
         parser.parse_data(response.text)
@@ -199,9 +213,7 @@ class M3U8_Segments:
             # Master playlist — resolve the best quality rendition
             best_url = parser.get_best_quality()
             logger.info("Master playlist detected (%d variants), fetching best rendition: %s", len(parser.video_playlist), best_url)
-            rendition_resp = requests.get(best_url, headers=self._headers(), timeout=15)
-            if not rendition_resp.ok:
-                raise RuntimeError(f"Failed to fetch rendition M3U8: HTTP {rendition_resp.status_code}")
+            rendition_resp = self._fetch_m3u8(best_url, "rendition")
             rp = M3U8_Parser()
             rp.parse_data(rendition_resp.text)
             if self.key is not None and rp.keys:
