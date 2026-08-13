@@ -249,6 +249,25 @@ def subscribers(request_id: int) -> list[int]:
     return [r["user_id"] for r in rows]
 
 
+def add_subscribers(request_id: int, user_ids: list[int]) -> None:
+    """Add people to a request's notification list.
+
+    Used for the followers of a series, who never asked for this episode
+    individually — the follow is the asking — and would otherwise watch it
+    download without being told.
+    """
+    if not user_ids:
+        return
+    timestamp = now_iso()
+    with db.tx() as conn:
+        for user_id in dict.fromkeys(user_ids):
+            conn.execute(
+                "INSERT OR IGNORE INTO jf_request_subscriber(request_id, user_id, created_at) "
+                "VALUES(?, ?, ?)",
+                (request_id, user_id, timestamp),
+            )
+
+
 def subscriber_names(request_id: int) -> list[str]:
     rows = db.query(
         "SELECT u.username FROM jf_request_subscriber s JOIN jf_user u ON u.id = s.user_id "

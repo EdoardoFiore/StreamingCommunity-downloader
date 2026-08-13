@@ -419,3 +419,104 @@ def test_arming_needs_the_permission(client, panel):
 
     assert response.status_code == 403
     assert watch_models.get(watch_id).auto_approve is False
+
+
+# ── Who hears about the episodes ───────────────────────────────────────────────
+
+def test_every_follower_hears_about_the_episode(client, panel, stub_jobs):
+    """Following is the asking. A second follower used to watch their series
+    download in silence: the request's notification list held its requester, and
+    the poller names the watch's owner as that, so nobody else was on it."""
+    bob = _user("bob", Permission.REQUEST)
+    carol = _user("carol", Permission.REQUEST)
+    _follow(client, _login(client, bob))
+    _follow(client, _login(client, carol))
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+
+    poller.run_poll_cycle()
+
+    request = request_models.list_all()[0]
+    assert sorted(request_models.subscribers(request.id)) == sorted([bob.id, carol.id])
+
+
+def test_a_second_follower_is_told_when_the_episode_downloads(client, panel, stub_jobs):
+    bob = _user("bob", Permission.REQUEST)
+    carol = _user("carol", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    _follow(client, _login(client, carol))
+
+    boss = _user("boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    client.post(f"/api/watches/{watch_id}/auto-approve",
+                json={"enabled": True}, headers={"X-CSRF-Token": csrf})
+
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+    poller.run_poll_cycle()
+
+    assert any("Test Series S01E4" in m for m in _bell(carol)), _bell(carol)
+
+
+def test_someone_who_stopped_following_is_not_told(client, panel, stub_jobs):
+    """The list is read when the episode appears, not frozen at follow time."""
+    bob = _user("bob", Permission.REQUEST)
+    carol = _user("carol", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    _follow(client, _login(client, carol))
+
+    csrf = _login(client, carol)
+    client.delete(f"/api/watches/{watch_id}", headers={"X-CSRF-Token": csrf})
+
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+    poller.run_poll_cycle()
+
+    request = request_models.list_all()[0]
+    assert request_models.subscribers(request.id) == [bob.id]
+
+
+# ── One of several followers leaving ──────────────────────────────────────────
+
+def test_one_follower_leaving_keeps_the_series_for_the_other(client, panel):
+    bob = _user("bob", Permission.REQUEST)
+    carol = _user("carol", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    _follow(client, _login(client, carol))
+
+    csrf = _login(client, bob)
+    response = client.delete(f"/api/watches/{watch_id}", headers={"X-CSRF-Token": csrf})
+
+    assert response.json() == {"ok": True, "stopped": False}
+    assert watch_models.get(watch_id).enabled is True
+    assert watch_models.followers(watch_id) == [carol.id]
+    assert [w.title for w in watch_models.list_for_user(carol.id)] == ["Test Series"]
+    assert watch_models.list_for_user(bob.id) == []
+
+
+def test_the_owner_leaving_hands_the_series_to_who_is_left(client, panel):
+    """Auto-download keys off the owner's permissions, so an owner who is no
+    longer involved would decide it for people still following."""
+    bob = _user("bob", Permission.REQUEST)
+    ann = _user("ann", Permission.REQUEST | Permission.DOWNLOAD)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    _follow(client, _login(client, ann))
+    assert watch_models.get(watch_id).created_by == bob.id
+
+    csrf = _login(client, bob)
+    client.delete(f"/api/watches/{watch_id}", headers={"X-CSRF-Token": csrf})
+
+    assert watch_models.get(watch_id).created_by == ann.id
+    # And the decision follows the new owner, who can download.
+    assert poller.may_auto_download(watch_models.get(watch_id)) is True
+
+
+def test_the_last_follower_leaving_stops_the_series(client, panel):
+    bob = _user("bob", Permission.REQUEST)
+    carol = _user("carol", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    _follow(client, _login(client, carol))
+
+    for user in (bob, carol):
+        csrf = _login(client, user)
+        response = client.delete(f"/api/watches/{watch_id}", headers={"X-CSRF-Token": csrf})
+
+    assert response.json()["stopped"] is True
+    assert watch_models.get(watch_id).enabled is False

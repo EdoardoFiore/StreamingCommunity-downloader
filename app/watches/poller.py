@@ -213,6 +213,16 @@ def process_episode(watch: models.Watch, key: str, episode: dict) -> str:
         watch_id=watch.id,
     )
 
+    # Everyone following the series is told about the episode, not just whoever
+    # started the watch. The two lists live in separate tables and nothing joined
+    # them, so a second follower saw their series download in silence: the
+    # request is subscribed to by its requester, and the poller names the owner
+    # as that. Done before approval, so the notifications from there on reach
+    # them.
+    request_models.add_subscribers(
+        request.id, [uid for uid in models.followers(watch.id) if uid != watch.created_by]
+    )
+
     outcome = "queued"
     if created and request.status == request_models.PENDING and may_auto_download(watch):
         try:
