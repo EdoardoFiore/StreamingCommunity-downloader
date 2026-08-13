@@ -1,5 +1,4 @@
 import logging
-import math
 import os
 import random
 import sys
@@ -35,12 +34,26 @@ DOWNLOAD_DEFAULT_LANGUAGE = False
 RETRIABLE_SEGMENT_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 MAX_SEGMENT_BACKOFF = 8
 
-# Give up once this many segments are lost for good. Retrying properly makes a
-# dead source far slower to fail than it used to be — every segment now costs
-# its full attempts and waits — so there has to be a point where the download
-# stops rather than grinding through thousands of them to reach the same end.
-MIN_FAILURE_BUDGET = 25
-FAILURE_BUDGET_RATIO = 0.05
+# When to stop rather than grind on against a source that is serving nothing.
+#
+# Counted as an unbroken run: any segment that arrives resets it. Losing some
+# segments is the ordinary case — sixteen workers provoke exactly the rate
+# limiting that produces it — and repairing them is what the sequential second
+# pass is for, so the breaker must only catch a source refusing outright.
+#
+# Two earlier shapes were wrong. A budget of 5% of the playlist aborted downloads
+# that used to complete, because it tripped before ever reaching the pass that
+# recovers them. A cumulative failure *ratio* then failed differently: refusals
+# clustered at the start of a playlist are all counted before a single success
+# is, so the ratio reads 100% on a source that is merely slow to warm up. A run
+# broken by any success is immune to both.
+#
+# Set well above any refusal run seen in practice — a report of this behaviour
+# involved 84 in a row on a source that was otherwise serving fine. The cost of
+# it being too high is bounded (a dead source takes a few more minutes to reach
+# the same error) while the cost of it being too low is a download that would
+# have completed.
+FAILURE_ABORT_STREAK = 200
 
 
 def _segment_backoff(attempt: int) -> float:
@@ -165,6 +178,8 @@ class M3U8_Segments:
         self.progress_timeout = 30
         self.max_retry = 3
         self._failed_segments = set()
+        self._saved_count = 0
+        self._failure_streak = 0
         self._failed_lock = threading.Lock()
         self._abort = threading.Event()
 
@@ -264,7 +279,7 @@ class M3U8_Segments:
         Returns the bytes, or None once the segment is given up on.
         """
         for attempt in range(self.max_retry):
-            if self._abort.is_set() or (self._cancel and self._cancel.is_set()):
+            if self._cancel and self._cancel.is_set():
                 return None
             try:
                 response = requests.get(ts_url, headers={"user-agent": get_headers()}, timeout=10)
@@ -279,6 +294,12 @@ class M3U8_Segments:
                 if response.status_code not in RETRIABLE_SEGMENT_STATUS:
                     return None
             if attempt < self.max_retry - 1:
+                # Waiting is pointless once the source has been written off, but
+                # the attempt already made still counts: bailing out before ever
+                # asking is what made an early abort cascade through every
+                # segment still in flight.
+                if self._abort.is_set():
+                    return None
                 time.sleep(_segment_backoff(attempt))
         return None
 
@@ -290,17 +311,35 @@ class M3U8_Segments:
             else:
                 ts_file.write(content)
 
+    def _record_success(self):
+        """One segment obtained. Breaks the failure run: the source is serving."""
+        with self._failed_lock:
+            self._saved_count += 1
+            self._failure_streak = 0
+
     def _record_failure(self, index, ts_url):
-        """Note a segment given up on, and trip the breaker once too many are."""
+        """Note a segment given up on, and stop if nothing is getting through.
+
+        Losing segments is not by itself a reason to abandon the download: the
+        sequential second pass exists to recover them, and it arrives later and
+        one request at a time, which is what a throttling source was asking for.
+        The breaker is for the other case — a source refusing outright — where
+        every remaining segment would cost its full attempts and waits to reach
+        a conclusion already visible.
+        """
         with self._failed_lock:
             self._failed_segments.add(index)
+            self._failure_streak += 1
+            streak = self._failure_streak
             lost = len(self._failed_segments)
-            over_budget = lost >= self._failure_budget
         logger.warning("Segment %d failed after all retries: ...%s", index, ts_url[-60:])
-        if over_budget and not self._abort.is_set():
-            self._abort.set()
-            logger.error("Aborting: %d segments lost out of %d, the source is not serving them",
-                         lost, len(self.segments))
+
+        if streak < FAILURE_ABORT_STREAK or self._abort.is_set():
+            return
+        self._abort.set()
+        logger.error("Aborting: %d segments in a row failed with none arriving between "
+                     "them (%d lost of %d) — the source is refusing, not throttling",
+                     streak, lost, len(self.segments))
 
     def save_ts(self, index, progress_counter, quit_event):
         if self._cancel and self._cancel.is_set():
@@ -326,6 +365,8 @@ class M3U8_Segments:
             except OSError:
                 pass
 
+        self._record_success()
+
         # Only a segment actually obtained counts. Counting attempts drove the
         # bar to 100% on a download that had saved barely half its segments,
         # and — worse — kept feeding the watchdog below, so a source failing
@@ -334,9 +375,9 @@ class M3U8_Segments:
 
     def download_ts(self):
         self._failed_segments = set()
+        self._saved_count = 0
+        self._failure_streak = 0
         self._abort.clear()
-        self._failure_budget = max(MIN_FAILURE_BUDGET,
-                                   math.ceil(len(self.segments) * FAILURE_BUDGET_RATIO))
         bar_factory = self.progress_factory or (lambda **kw: tqdm(**kw))
         progress_counter = bar_factory(total=len(self.segments), unit="seg", desc="Downloading", phase=self.phase)
         self._bar = progress_counter
@@ -387,9 +428,9 @@ class M3U8_Segments:
         # output file out of whatever had arrived.
         if self._abort.is_set():
             raise RuntimeError(
-                f"Download interrotto: {len(self._failed_segments)} segmenti su "
-                f"{len(self.segments)} non scaricati. La fonte sta rifiutando le "
-                f"richieste, riprova più tardi."
+                f"Download interrotto: la fonte ha rifiutato {len(self._failed_segments)} "
+                f"segmenti su {len(self.segments)} servendone quasi nessuno. "
+                f"Riprova più tardi."
             )
         if timeout_event.is_set():
             raise RuntimeError(

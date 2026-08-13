@@ -151,7 +151,6 @@ def test_a_failed_segment_does_not_advance_the_bar(tmp_path, segment_server, no_
     seg = _segments(tmp_path, count=1)
     bar = _Bar(total=1)
 
-    seg._failure_budget = 99
     seg.save_ts(0, bar, None)
 
     assert bar.n == 0
@@ -162,7 +161,6 @@ def test_a_saved_segment_advances_the_bar(tmp_path, segment_server, no_sleep):
     seg = _segments(tmp_path, count=1)
     bar = _Bar(total=1)
 
-    seg._failure_budget = 99
     seg.save_ts(0, bar, None)
 
     assert bar.n == 1
@@ -175,7 +173,6 @@ def test_empty_content_counts_as_a_failure(tmp_path, segment_server, no_sleep):
     replies, _ = segment_server
     replies.append(_Response(200, b""))
     seg = _segments(tmp_path, count=1)
-    seg._failure_budget = 99
 
     seg.save_ts(0, _Bar(total=1), None)
 
@@ -257,20 +254,62 @@ def test_a_dead_source_gives_up_early(tmp_path, segment_server, no_sleep):
     be, so there has to be a point where the download stops rather than grinding
     through thousands of segments to reach the same conclusion."""
     replies, calls = segment_server
-    replies.extend([_Response(503)] * 5000)
-    seg = _segments(tmp_path, count=400)
+    replies.extend([_Response(503)] * 20000)
+    seg = _segments(tmp_path, count=1000)
 
     with pytest.raises(RuntimeError, match="Download interrotto"):
         seg.download_ts()
 
     assert seg._abort.is_set()
-    # Budget is 5% of 400 = 20, floored at 25. Far short of attempting all 400.
-    assert len(calls) < 400 * seg.max_retry
+    assert len(calls) < 1000 * seg.max_retry
+
+
+def test_a_source_that_only_throttles_is_not_written_off(tmp_path, monkeypatch, no_sleep):
+    """The regression that mattered, at the scale it was reported: 1525 segments
+    of which 84 were refused on the first pass.
+
+    The first breaker aborted on a count alone — 5% of the playlist — so it
+    tripped before ever reaching the sequential pass that recovers those 84. A
+    download that used to complete stopped completing. The second shape counted
+    a cumulative failure ratio, which fails on this same case whenever the
+    refusals arrive before any success has been recorded, as they do here.
+    """
+    refused = set(range(84))
+    attempts: dict[str, int] = {}
+
+    def fake_get(url, *args, **kwargs):
+        attempts[url] = attempts.get(url, 0) + 1
+        index = int(url.rsplit("seg-", 1)[1].removesuffix(".ts"))
+        if index in refused and attempts[url] <= 3:
+            return _Response(503)
+        return _Response(200)
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    seg = _segments(tmp_path, count=1525)
+
+    seg.download_ts()
+
+    assert not seg._abort.is_set()
+    assert seg._missing_segments() == []
+    # Each refused segment really was asked three times before being written
+    # off, and once more on the sequential pass — where it succeeded.
+    assert attempts["https://cdn.example.test/seg-0.ts"] == 4
+
+
+def test_a_success_breaks_the_failure_run(tmp_path, segment_server, no_sleep):
+    """The counter is a run, not a total: anything arriving means the source is
+    serving, so the count of what it refused stops being evidence of death."""
+    seg = _segments(tmp_path, count=2)
+    seg._failure_streak = 7
+
+    seg._record_success()
+
+    assert seg._failure_streak == 0
 
 
 def test_a_short_playlist_still_reports_incompleteness(tmp_path, segment_server, no_sleep):
-    """Below the floor the breaker never trips, and the completeness gate is what
-    catches it — the two must not leave a gap between them."""
+    """Below the minimum the breaker never trips, and the completeness gate is
+    what catches it — the two must not leave a gap between them."""
     replies, _ = segment_server
     replies.extend([_Response(503)] * 500)
     seg = _segments(tmp_path, count=4)
