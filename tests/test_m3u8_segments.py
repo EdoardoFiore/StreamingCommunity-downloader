@@ -207,6 +207,9 @@ def test_a_download_that_recovers_on_the_second_pass_succeeds(
 
     assert seg._failed_segments == set()
     assert os.path.exists(os.path.join(seg.temp_folder, "0.ts"))
+    # A segment recovered here has to reach the bar too, or the phase stops
+    # short of its total and never emits the event that says it is finished.
+    assert seg._bar.n == 1
 
 
 def test_join_refuses_to_write_an_incomplete_file(tmp_path, segment_server, no_sleep):
@@ -294,6 +297,9 @@ def test_a_source_that_only_throttles_is_not_written_off(tmp_path, monkeypatch, 
     # Each refused segment really was asked three times before being written
     # off, and once more on the sequential pass — where it succeeded.
     assert attempts["https://cdn.example.test/seg-0.ts"] == 4
+    # And the bar reaches its total, counting the 84 recovered late. Stopping at
+    # 1441/1525 leaves the phase looking abandoned rather than finished.
+    assert seg._bar.n == 1525
 
 
 def test_a_success_breaks_the_failure_run(tmp_path, segment_server, no_sleep):

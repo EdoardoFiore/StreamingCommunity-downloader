@@ -416,49 +416,65 @@ class M3U8_Segments:
                         future.result()
                     except Exception as e:
                         logger.error(f"Segment error: {e}")
+
+            # Stop the watchdog before the sequential pass. It measures stalls
+            # against the parallel pass, and the retry below is deliberately
+            # slow and one request at a time.
+            quit_event.set()
+            timer_thread.join()
+
+            if cancelled:
+                raise DownloadCancelledError("Download annullato dall'utente")
+
+            # Both of these used to fall through to the join, which then wrote
+            # an output file out of whatever had arrived.
+            if self._abort.is_set():
+                raise RuntimeError(
+                    f"Download interrotto: la fonte ha rifiutato {len(self._failed_segments)} "
+                    f"segmenti su {len(self.segments)} servendone quasi nessuno. "
+                    f"Riprova più tardi."
+                )
+            if timeout_event.is_set():
+                raise RuntimeError(
+                    f"Download interrotto: nessun segmento scaricato per "
+                    f"{self.progress_timeout}s. La fonte non risponde, riprova più tardi."
+                )
+
+            self._retry_failed_sequentially(progress_counter)
+            self._require_every_segment()
         finally:
+            # Closed here and not before the retry pass: a segment recovered
+            # sequentially has to reach the bar, or a download that lost some
+            # segments early stops short of its total and never emits the event
+            # that says the phase is finished.
             progress_counter.close()
             quit_event.set()
             timer_thread.join()
 
-        if cancelled:
-            raise DownloadCancelledError("Download annullato dall'utente")
+    def _retry_failed_sequentially(self, progress_counter):
+        """Second pass over the segments the parallel pass gave up on.
 
-        # Both of these used to fall through to the join, which then wrote an
-        # output file out of whatever had arrived.
-        if self._abort.is_set():
-            raise RuntimeError(
-                f"Download interrotto: la fonte ha rifiutato {len(self._failed_segments)} "
-                f"segmenti su {len(self.segments)} servendone quasi nessuno. "
-                f"Riprova più tardi."
-            )
-        if timeout_event.is_set():
-            raise RuntimeError(
-                f"Download interrotto: nessun segmento scaricato per "
-                f"{self.progress_timeout}s. La fonte non risponde, riprova più tardi."
-            )
-
-        # Second pass: retry failed segments sequentially to avoid gaps in the TS
-        # stream. Worth a try even after the parallel attempts — this arrives
-        # later and one request at a time, which is exactly what a source
-        # shedding load was asking for.
-        if self._failed_segments:
-            logger.warning("Retrying %d failed segments sequentially...", len(self._failed_segments))
-            still_failed = set()
-            for index in sorted(self._failed_segments):
-                if self._cancel and self._cancel.is_set():
-                    raise DownloadCancelledError("Download annullato dall'utente")
-                time.sleep(0.5)
-                ts_content = self.get_req_ts(self.segments[index])
-                if ts_content:
-                    self._write_ts(index, ts_content)
-                    logger.info("Segment %d recovered on retry", index)
-                else:
-                    still_failed.add(index)
-                    logger.error("Segment %d permanently failed", index)
-            self._failed_segments = still_failed
-
-        self._require_every_segment()
+        Worth a try even after their attempts are exhausted: this arrives later
+        and one request at a time, which is what a source shedding load was
+        asking for.
+        """
+        if not self._failed_segments:
+            return
+        logger.warning("Retrying %d failed segments sequentially...", len(self._failed_segments))
+        still_failed = set()
+        for index in sorted(self._failed_segments):
+            if self._cancel and self._cancel.is_set():
+                raise DownloadCancelledError("Download annullato dall'utente")
+            time.sleep(0.5)
+            ts_content = self.get_req_ts(self.segments[index])
+            if ts_content:
+                self._write_ts(index, ts_content)
+                progress_counter.update(1, bytes=len(ts_content))
+                logger.info("Segment %d recovered on retry", index)
+            else:
+                still_failed.add(index)
+                logger.error("Segment %d permanently failed", index)
+        self._failed_segments = still_failed
 
     def _missing_segments(self) -> list[int]:
         """Which segments are not on disk.
@@ -625,10 +641,14 @@ class M3U8_Downloader:
                 audio_m3u8.join(audio_path)
                 self.audio_paths.append({"path": audio_path, "language": lang})
 
+        # The remux is the merge, so the phase is announced here rather than in
+        # the audio branch above. It used to be emitted only when separate audio
+        # tracks had been downloaded, which left a film whose audio is already
+        # muxed — remuxed all the same, to embed its subtitles — going straight
+        # from "joining" to finished with the step never lighting up.
+        if self.audio_paths or self.subtitle_track_urls or self.subtitle_languages:
             if bar and hasattr(bar, "emit_status"):
                 bar.emit_status("merging")
-
-        if self.audio_paths or self.subtitle_track_urls or self.subtitle_languages:
             from app.core.format import remux_to_mkv, LANG_MAP
             video_stem = os.path.splitext(os.path.basename(self.video_path))[0]
             subtitle_tracks = []
