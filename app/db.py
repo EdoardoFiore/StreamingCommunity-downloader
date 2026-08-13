@@ -214,9 +214,186 @@ _V2_REQUESTS = [
 ]
 
 
+_V3_NOTIFICATION_CHANNELS = [
+    # One row per Apprise target. The URL carries the secret (bot token, webhook
+    # id), so it lives here rather than in data.json alongside the source domain.
+    """
+    CREATE TABLE jf_notification_channel (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT    NOT NULL,
+        apprise_url TEXT    NOT NULL,
+        events      TEXT    NOT NULL DEFAULT '[]',  -- JSON array; [] means every event
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        created_at  TEXT    NOT NULL,
+        updated_at  TEXT    NOT NULL
+    )
+    """,
+    "CREATE INDEX jf_notification_channel_enabled ON jf_notification_channel(enabled)",
+]
+
+
+_V4_SERIES_WATCH = [
+    # A followed series. Films are excluded by construction: there is no "next
+    # episode" to wait for.
+    """
+    CREATE TABLE jf_series_watch (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        source             TEXT    NOT NULL,   -- streamingcommunity | animeunity
+        media_type         TEXT    NOT NULL,   -- tv | anime
+        external_id        TEXT    NOT NULL,
+        slug               TEXT,
+        title              TEXT    NOT NULL,
+        year               TEXT,
+        poster             TEXT,
+        anime_type         TEXT,
+        audio_languages    TEXT    NOT NULL,   -- JSON array, sorted
+        subtitle_languages TEXT    NOT NULL,   -- JSON array, sorted
+        -- Whose DOWNLOAD permission decides whether new episodes skip the queue.
+        created_by         INTEGER NOT NULL REFERENCES jf_user(id),
+        auto_approve       INTEGER NOT NULL DEFAULT 0,
+        enabled            INTEGER NOT NULL DEFAULT 1,
+        last_checked_at    TEXT,
+        created_at         TEXT    NOT NULL,
+        updated_at         TEXT    NOT NULL
+    )
+    """,
+    # One active watch per series whoever asked for it: a second interested user
+    # subscribes instead. Partial, so an unfollowed series can be followed again.
+    """
+    CREATE UNIQUE INDEX jf_series_watch_open ON jf_series_watch(source, media_type, external_id)
+        WHERE enabled = 1
+    """,
+    "CREATE INDEX jf_series_watch_enabled ON jf_series_watch(enabled)",
+    """
+    CREATE TABLE jf_series_watch_subscriber (
+        watch_id   INTEGER NOT NULL REFERENCES jf_series_watch(id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL REFERENCES jf_user(id) ON DELETE CASCADE,
+        created_at TEXT    NOT NULL,
+        PRIMARY KEY (watch_id, user_id)
+    )
+    """,
+    # One row per episode already accounted for. A "highest episode seen" counter
+    # would be wrong here: both sources publish out of order (specials, OVAs
+    # numbered 0, dubs landing after later subs), and anything below the
+    # watermark would be lost for good.
+    """
+    CREATE TABLE jf_watch_seen_episode (
+        watch_id    INTEGER NOT NULL REFERENCES jf_series_watch(id) ON DELETE CASCADE,
+        episode_key TEXT    NOT NULL,   -- S01E03 (tv) | E12 (anime)
+        created_at  TEXT    NOT NULL,
+        PRIMARY KEY (watch_id, episode_key)
+    )
+    """,
+    # Links a request back to the watch that spawned it: drives the "approve once,
+    # automatic from then on" flow and tells the queue where the request came from.
+    "ALTER TABLE jf_request ADD COLUMN watch_id INTEGER REFERENCES jf_series_watch(id) ON DELETE SET NULL",
+]
+
+
+# A watch used to require an account to own it, which made the whole feature
+# unavailable in open mode. It is now ownerless there: `created_by` is nullable
+# and NULL means "the panel itself".
+#
+# SQLite cannot relax NOT NULL in place, so the table is rebuilt — and the two
+# child tables with it, in this order. Dropping the old parent while children
+# still pointed at it would cascade their rows away; by the time it is dropped,
+# the copies already reference the new one and the originals are gone.
+_V5_WATCHES_WITHOUT_ACCOUNTS = [
+    """
+    CREATE TABLE jf_series_watch_v5 (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        source             TEXT    NOT NULL,
+        media_type         TEXT    NOT NULL,
+        external_id        TEXT    NOT NULL,
+        slug               TEXT,
+        title              TEXT    NOT NULL,
+        year               TEXT,
+        poster             TEXT,
+        anime_type         TEXT,
+        audio_languages    TEXT    NOT NULL,
+        subtitle_languages TEXT    NOT NULL,
+        -- NULL when the panel runs without accounts. Otherwise the owner, whose
+        -- DOWNLOAD permission decides if new episodes skip the queue.
+        created_by         INTEGER REFERENCES jf_user(id),
+        auto_approve       INTEGER NOT NULL DEFAULT 0,
+        enabled            INTEGER NOT NULL DEFAULT 1,
+        last_checked_at    TEXT,
+        created_at         TEXT    NOT NULL,
+        updated_at         TEXT    NOT NULL
+    )
+    """,
+    """
+    INSERT INTO jf_series_watch_v5
+        SELECT id, source, media_type, external_id, slug, title, year, poster, anime_type,
+               audio_languages, subtitle_languages, created_by, auto_approve, enabled,
+               last_checked_at, created_at, updated_at
+        FROM jf_series_watch
+    """,
+    """
+    CREATE TABLE jf_series_watch_subscriber_v5 (
+        watch_id   INTEGER NOT NULL REFERENCES jf_series_watch_v5(id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL REFERENCES jf_user(id) ON DELETE CASCADE,
+        created_at TEXT    NOT NULL,
+        PRIMARY KEY (watch_id, user_id)
+    )
+    """,
+    "INSERT INTO jf_series_watch_subscriber_v5 SELECT * FROM jf_series_watch_subscriber",
+    """
+    CREATE TABLE jf_watch_seen_episode_v5 (
+        watch_id    INTEGER NOT NULL REFERENCES jf_series_watch_v5(id) ON DELETE CASCADE,
+        episode_key TEXT    NOT NULL,
+        created_at  TEXT    NOT NULL,
+        PRIMARY KEY (watch_id, episode_key)
+    )
+    """,
+    "INSERT INTO jf_watch_seen_episode_v5 SELECT * FROM jf_watch_seen_episode",
+    "DROP TABLE jf_series_watch_subscriber",
+    "DROP TABLE jf_watch_seen_episode",
+    "DROP TABLE jf_series_watch",
+    "ALTER TABLE jf_series_watch_v5 RENAME TO jf_series_watch",
+    "ALTER TABLE jf_series_watch_subscriber_v5 RENAME TO jf_series_watch_subscriber",
+    "ALTER TABLE jf_watch_seen_episode_v5 RENAME TO jf_watch_seen_episode",
+    """
+    CREATE UNIQUE INDEX jf_series_watch_open ON jf_series_watch(source, media_type, external_id)
+        WHERE enabled = 1
+    """,
+    "CREATE INDEX jf_series_watch_enabled ON jf_series_watch(enabled)",
+]
+
+
+# The bell was per-user only, so a panel with no accounts had no bell at all —
+# and a download nobody requested had nowhere to be reported. A NULL user_id
+# means the notification belongs to the panel, and is what the implicit user
+# sees when there are no accounts.
+#
+# Rebuilt rather than altered: SQLite cannot relax NOT NULL in place. Nothing
+# references jf_notification, so no child tables are involved this time.
+_V6_PANEL_NOTIFICATIONS = [
+    """
+    CREATE TABLE jf_notification_v6 (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER REFERENCES jf_user(id) ON DELETE CASCADE,
+        request_id INTEGER REFERENCES jf_request(id) ON DELETE CASCADE,
+        event      TEXT    NOT NULL,
+        message    TEXT    NOT NULL,
+        read_at    TEXT,
+        created_at TEXT    NOT NULL
+    )
+    """,
+    "INSERT INTO jf_notification_v6 SELECT * FROM jf_notification",
+    "DROP TABLE jf_notification",
+    "ALTER TABLE jf_notification_v6 RENAME TO jf_notification",
+    "CREATE INDEX jf_notification_user ON jf_notification(user_id, read_at)",
+]
+
+
 MIGRATIONS: list[list[str]] = [
     _V1_AUTH,
     _V2_REQUESTS,
+    _V3_NOTIFICATION_CHANNELS,
+    _V4_SERIES_WATCH,
+    _V5_WATCHES_WITHOUT_ACCOUNTS,
+    _V6_PANEL_NOTIFICATIONS,
 ]
 
 

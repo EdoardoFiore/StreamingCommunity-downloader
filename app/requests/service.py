@@ -96,8 +96,13 @@ def create_request(*, requested_by: int, **fields) -> tuple[models.Request, bool
 
 # ── Approval ───────────────────────────────────────────────────────────────────
 
-def approve(request_id: int, decided_by: int) -> models.Request:
-    """Claim the request and hand the real work to a worker thread."""
+def approve(request_id: int, decided_by: int, auto_approve_watch: bool = False) -> models.Request:
+    """Claim the request and hand the real work to a worker thread.
+
+    ``auto_approve_watch`` is the "and the next ones too" answer: it only makes
+    sense for a request a followed series produced, and it applies to that series
+    alone.
+    """
     request = models.transition(
         request_id, models.APPROVED,
         decided_by=decided_by, decided_at=models.now_iso(), problem=None, denial_reason=None,
@@ -107,6 +112,10 @@ def approve(request_id: int, decided_by: int) -> models.Request:
         if current is None:
             raise LookupError("Richiesta non trovata")
         raise models.InvalidTransition(current.status, models.APPROVED)
+
+    if auto_approve_watch and request.watch_id:
+        from app.watches import models as watch_models
+        watch_models.set_auto_approve(request.watch_id, True)
 
     notify.notify_subscribers(
         notify.REQUEST_APPROVED,
@@ -205,6 +214,8 @@ def _park(request: models.Request, problem: str, exc: Exception):
         notify.REQUEST_NEEDS_ATTENTION,
         f"«{_label(parked)}» è in attesa di una verifica manuale.",
         parked,
+        # Approvers already carried this event outward, with the problem in it.
+        external=False,
     )
 
 
@@ -277,6 +288,7 @@ def on_job_finished(job):
             notify.REQUEST_FAILED,
             f"Download fallito per «{_label(failed)}»: {job.error or 'errore sconosciuto'}",
             failed,
+            external=False,
         )
 
 
@@ -340,6 +352,7 @@ def reconcile_orphaned_requests() -> int:
             notify.REQUEST_NEEDS_ATTENTION,
             f"«{_label(parked)}» è in attesa di una verifica: un riavvio del pannello ha interrotto l'elaborazione.",
             parked,
+            external=False,
         )
 
     for request in models.list_all((models.DOWNLOADING,)):
@@ -362,6 +375,7 @@ def reconcile_orphaned_requests() -> int:
             notify.REQUEST_FAILED,
             f"Download interrotto per «{_label(failed)}»: il pannello si è riavviato durante il download.",
             failed,
+            external=False,
         )
 
     if recovered:

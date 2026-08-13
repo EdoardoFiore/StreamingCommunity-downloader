@@ -42,6 +42,23 @@ class DownloadJob:
     progress_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
+    # Set when this job is one episode of a season or series asked for in one go,
+    # so the notification can be a single summary instead of one per episode.
+    batch_id: Optional[str] = None
+    batch_kind: Optional[str] = None    # "season" | "series" | "anime_all"
+    batch_label: Optional[str] = None   # computed once at submit, e.g. "Serie — Stagione 2"
+
+    # Who asked for it. None in open mode, where there is no account to notify.
+    user_id: Optional[int] = None
+
+    # Kept as separate fields rather than parsed back out of `title`, which is
+    # already a composed string ("Nome Serie S02E05") and would misparse the
+    # first time a title itself contains something like S01.
+    media_label: Optional[str] = None
+    year: Optional[str] = None
+    season: Optional[int] = None
+    episode_number: Optional[str] = None
+
 
 class JobManager:
     def __init__(self):
@@ -99,6 +116,13 @@ class JobManager:
             "output_path": job.output_path,
             "progress": job.progress,
             "phases": job.phases,
+            # user_id is deliberately absent: the jobs list is readable by anyone
+            # who can download, and the field has no use in the interface.
+            "batch_id": job.batch_id,
+            "batch_kind": job.batch_kind,
+            "season": job.season,
+            "episode_number": job.episode_number,
+            "year": job.year,
         }
 
     # ── Global pub/sub ─────────────────────────────────────────────────────────
@@ -154,14 +178,26 @@ class JobManager:
         self._broadcast({**event, "job_id": job.job_id})
 
     async def _fanout(self, event: dict):
-        dead = []
+        """Push an event to every subscriber, dropping the oldest under pressure.
+
+        A backgrounded tab, a slow proxy, or a season starting twenty downloads
+        at once can all fill a queue. Dropping the *subscriber* there — which is
+        what used to happen — left the browser holding an open connection nobody
+        would ever write to again: the page looked live and silently stopped
+        updating until it was reloaded. Discarding the oldest event instead
+        costs a stale frame of progress and lets the next one repair the view.
+        """
         for q in list(self._subscribers):
-            try:
-                q.put_nowait(event)
-            except asyncio.QueueFull:
-                dead.append(q)
-        for q in dead:
-            self.unsubscribe(q)
+            while True:
+                try:
+                    q.put_nowait(event)
+                    break
+                except asyncio.QueueFull:
+                    try:
+                        q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        # Drained from under us by its own reader; try again.
+                        continue
 
     # ── Progress factory ───────────────────────────────────────────────────────
 
@@ -276,9 +312,16 @@ class JobManager:
             job = self._jobs.get(job_id)
             if not job or job.status not in ("scheduled", "queued", "running"):
                 return False
+            # A scheduled job was never handed to the executor, so _run_download
+            # will never run for it and nothing else would ever tell listeners it
+            # is over. Queued and running ones go through _run_download, which
+            # notifies on every path.
+            was_scheduled = job.status == "scheduled"
             job.cancel_event.set()
             job.status = "cancelled"
         self._emit(job, {"type": "error", "message": "Annullato"})
+        if was_scheduled:
+            self._notify_listeners(job)
         return True
 
     def dismiss(self, job_id: str) -> bool:
@@ -294,34 +337,42 @@ class JobManager:
         return True
 
     def _run_download(self, job: DownloadJob, fn, *args, **kwargs):
-        with self._semaphore:
-            if job.cancel_event.is_set():
-                job.status = "cancelled"
-                self._emit(job, {"type": "error", "message": "Annullato"})
-                return
+        # Listeners fire outside the semaphore: a listener does DB writes and
+        # blocking HTTP (external notification channels), and holding a download
+        # slot for that would cost real throughput. The outer try/finally makes
+        # every path notify exactly once — including the job cancelled before it
+        # ever started, which used to return early and notify nobody, leaving
+        # anything counting completions waiting forever.
+        try:
+            with self._semaphore:
+                if job.cancel_event.is_set():
+                    job.status = "cancelled"
+                    self._emit(job, {"type": "error", "message": "Annullato"})
+                    return
 
-            job.status = "running"
-            self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
+                job.status = "running"
+                self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
 
-            try:
-                result = fn(*args, **kwargs)
-                job.status = "done"
-                job.output_path = result
-                self._emit(job, {"type": "done", "output_path": result})
-            except DownloadCancelledError:
-                job.status = "cancelled"
-                self._emit(job, {"type": "error", "message": "Annullato"})
-            except Exception as e:
-                logger.exception(f"Job {job.job_id} failed: {e}")
-                job.status = "error"
-                job.error = str(e)
-                self._emit(job, {"type": "error", "message": str(e)})
-            finally:
-                tmp_path = TMP_DIR / job.job_id
-                if tmp_path.exists():
-                    shutil.rmtree(tmp_path, ignore_errors=True)
-                    logger.info("Cleaned up temp dir: %s", tmp_path)
-                self._notify_listeners(job)
+                try:
+                    result = fn(*args, **kwargs)
+                    job.status = "done"
+                    job.output_path = result
+                    self._emit(job, {"type": "done", "output_path": result})
+                except DownloadCancelledError:
+                    job.status = "cancelled"
+                    self._emit(job, {"type": "error", "message": "Annullato"})
+                except Exception as e:
+                    logger.exception(f"Job {job.job_id} failed: {e}")
+                    job.status = "error"
+                    job.error = str(e)
+                    self._emit(job, {"type": "error", "message": str(e)})
+                finally:
+                    tmp_path = TMP_DIR / job.job_id
+                    if tmp_path.exists():
+                        shutil.rmtree(tmp_path, ignore_errors=True)
+                        logger.info("Cleaned up temp dir: %s", tmp_path)
+        finally:
+            self._notify_listeners(job)
 
     def _submit_job(self, job: DownloadJob, fn, *args, **kwargs) -> str:
         with self._lock:
@@ -331,7 +382,11 @@ class JobManager:
         return job.job_id
 
     def _make_job(self, title: str, type_: str, scheduled_at: Optional[datetime] = None,
-                  schedule_id: Optional[str] = None, phases: list = None) -> DownloadJob:
+                  schedule_id: Optional[str] = None, phases: list = None,
+                  **meta) -> DownloadJob:
+        """Build a job. ``meta`` carries the notification fields declared on
+        DownloadJob (batch_id, user_id, season, …); unknown keys raise, which is
+        the point — a typo must not silently vanish."""
         now = datetime.now(timezone.utc)
         sa = scheduled_at.replace(tzinfo=timezone.utc) if scheduled_at and scheduled_at.tzinfo is None else scheduled_at
         status = "scheduled" if sa and sa > now else "queued"
@@ -346,6 +401,7 @@ class JobManager:
             scheduled_at=scheduled_at,
             schedule_id=schedule_id,
             phases=phases or [],
+            **meta,
         )
 
     # ── Submit (immediate) ─────────────────────────────────────────────────────
@@ -354,11 +410,13 @@ class JobManager:
                     schedule_id: str = None,
                     audio_languages: list[str] = None,
                     subtitle_languages: list[str] = None,
-                    strict_audio: bool = False) -> str:
+                    strict_audio: bool = False,
+                    user_id: int = None) -> str:
         from app.core.film import download_film
 
         job = self._make_job(title, "film", schedule_id=schedule_id,
-                             phases=self._compute_phases(audio_languages or ["ita"]))
+                             phases=self._compute_phases(audio_languages or ["ita"]),
+                             user_id=user_id, media_label=title, year=year)
         return self._submit_job(
             job, download_film,
             id_film, title, domain,
@@ -377,13 +435,18 @@ class JobManager:
                        schedule_id: str = None,
                        audio_languages: list[str] = None,
                        subtitle_languages: list[str] = None,
-                       strict_audio: bool = False) -> str:
+                       strict_audio: bool = False,
+                       user_id: int = None, batch_id: str = None,
+                       batch_kind: str = None, batch_label: str = None) -> str:
         from app.core.tv import download_episode, fmt_ep
 
         ep = eps[ep_index]
         title = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
         job = self._make_job(title, "episode", schedule_id=schedule_id,
-                             phases=self._compute_phases(audio_languages or ["ita"]))
+                             phases=self._compute_phases(audio_languages or ["ita"]),
+                             user_id=user_id, batch_id=batch_id, batch_kind=batch_kind,
+                             batch_label=batch_label, media_label=tv_name, year=year,
+                             season=season, episode_number=str(ep["n"]))
         return self._submit_job(
             job, download_episode,
             tv_id, eps, ep_index, domain, token, tv_name, season,
@@ -402,13 +465,18 @@ class JobManager:
                              schedule_id: str = None,
                              audio_languages: list[str] = None,
                              subtitle_languages: list[str] = None,
-                             strict_audio: bool = False) -> str:
+                             strict_audio: bool = False,
+                             user_id: int = None, batch_id: str = None,
+                             batch_kind: str = None, batch_label: str = None) -> str:
         from app.core.animeunity import download_anime_episode
 
         ep_num = episode.get("number", "?")
         title = f"{anime_name} E{ep_num}"
         job = self._make_job(title, "anime", schedule_id=schedule_id,
-                             phases=self._compute_phases(audio_languages or ["ita"]))
+                             phases=self._compute_phases(audio_languages or ["ita"]),
+                             user_id=user_id, batch_id=batch_id, batch_kind=batch_kind,
+                             batch_label=batch_label, media_label=anime_name, year=year,
+                             episode_number=str(ep_num))
         return self._submit_job(
             job, download_anime_episode,
             anime_id, episode, anime_name, anime_type,
@@ -427,19 +495,23 @@ class JobManager:
     def schedule_film(self, id_film: int, title: str, domain: str,
                       scheduled_at: datetime, year: str = None,
                       audio_languages: list[str] = None,
-                      subtitle_languages: list[str] = None) -> str:
+                      subtitle_languages: list[str] = None,
+                      user_id: int = None) -> str:
         params = {
             "id": id_film, "title": title, "domain": domain, "year": year,
             "audio_languages": audio_languages or ["ita"],
             "subtitle_languages": subtitle_languages or ["ita", "eng"],
         }
-        return self._add_schedule("film", scheduled_at, params, title)
+        return self._add_schedule("film", scheduled_at, params, title,
+                                  user_id=user_id, media_label=title, year=year)
 
     def schedule_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
                          token: str, tv_name: str, season: int,
                          scheduled_at: datetime, year: str = None,
                          audio_languages: list[str] = None,
-                         subtitle_languages: list[str] = None) -> str:
+                         subtitle_languages: list[str] = None,
+                         user_id: int = None, batch_id: str = None,
+                         batch_kind: str = None, batch_label: str = None) -> str:
         from app.core.tv import fmt_ep
         ep = eps[ep_index]
         title = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
@@ -450,13 +522,18 @@ class JobManager:
             "audio_languages": audio_languages or ["ita"],
             "subtitle_languages": subtitle_languages or ["ita", "eng"],
         }
-        return self._add_schedule("episode", scheduled_at, params, title)
+        return self._add_schedule("episode", scheduled_at, params, title,
+                                  user_id=user_id, batch_id=batch_id, batch_kind=batch_kind,
+                                  batch_label=batch_label, media_label=tv_name, year=year,
+                                  season=season, episode_number=str(ep["n"]))
 
     def schedule_anime_episode(self, anime_id: str, episode: dict, anime_name: str,
                                scheduled_at: datetime, anime_type: str = "tv",
                                year: str = None,
                                audio_languages: list[str] = None,
-                               subtitle_languages: list[str] = None) -> str:
+                               subtitle_languages: list[str] = None,
+                               user_id: int = None, batch_id: str = None,
+                               batch_kind: str = None, batch_label: str = None) -> str:
         ep_num = episode.get("number", "?")
         title = f"{anime_name} E{ep_num}"
         params = {
@@ -465,14 +542,23 @@ class JobManager:
             "audio_languages": audio_languages or ["ita"],
             "subtitle_languages": subtitle_languages or ["ita", "eng"],
         }
-        return self._add_schedule("anime", scheduled_at, params, title)
+        return self._add_schedule("anime", scheduled_at, params, title,
+                                  user_id=user_id, batch_id=batch_id, batch_kind=batch_kind,
+                                  batch_label=batch_label, media_label=anime_name, year=year,
+                                  episode_number=str(ep_num))
 
-    def _add_schedule(self, type_: str, scheduled_at: datetime, params: dict, title: str) -> str:
+    def _add_schedule(self, type_: str, scheduled_at: datetime, params: dict, title: str,
+                      **meta) -> str:
         if self._schedule_store is None:
             raise RuntimeError("ScheduleStore not configured")
         schedule_id = self._schedule_store.add(type_, scheduled_at, params)
+        # Firing reuses this same job object, so notification metadata set here
+        # survives until the download actually runs. It does not survive a
+        # restart (load_scheduled_from_store rebuilds from the JSON params), and
+        # neither does the in-memory batch it would belong to.
         job = self._make_job(title, type_, scheduled_at=scheduled_at, schedule_id=schedule_id,
-                             phases=self._compute_phases(params.get("audio_languages") or ["ita"]))
+                             phases=self._compute_phases(params.get("audio_languages") or ["ita"]),
+                             **meta)
         with self._lock:
             self._jobs[job.job_id] = job
         self._schedule_store.set_job_id(schedule_id, job.job_id)

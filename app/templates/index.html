@@ -622,6 +622,30 @@
     .btn-close:hover { opacity: 1 !important; }
     .btn-close-white { filter: invert(1) !important; }
 
+    /* Tabler paints this glyph with background-color clipped by a CSS mask —
+       not with a background image — and its colour is currentColor, which on a
+       dark header is already light. The .btn-close-white filter above then
+       inverts it back to near-black, which is why it read as invisible.
+       Colour and size come from Tabler's own variables; the only structural
+       override is position, because it is otherwise floated into the corner
+       (absolute, 3.5rem, z-index 10) on top of the follow button. Never set
+       width/height here: the button has no content, so an auto size collapses
+       it to nothing. */
+    .modal-header > .btn-close {
+      position: static !important;
+      margin: 0 0 0 auto !important;
+      filter: none !important;
+      /* Tabler sizes it 3.5rem for the floating corner hit area; in the flow
+         that would set the header's height. A fixed 2rem keeps a comfortable
+         target without stretching the row. */
+      width: 2rem !important;
+      height: 2rem !important;
+      --tblr-btn-close-color: #fff;
+      --tblr-btn-close-size: 1.25rem;
+      --tblr-btn-close-opacity: .85;
+      --tblr-btn-close-hover-opacity: 1;
+    }
+
     /* ═══════════════════════════════════════════════════════
        CARDS
        ═══════════════════════════════════════════════════════ */
@@ -896,7 +920,12 @@
     .modal-header {
       border-bottom: 1px solid var(--border) !important;
       padding: 16px 20px !important;
+      /* Three children in some headers (title, follow button, close), and
+         space-between would spread them evenly instead of keeping the actions
+         together on the right. */
+      gap: 10px;
     }
+    .modal-header .modal-title { flex: 1 1 auto; min-width: 0; }
 
     .modal-title {
       font-family: var(--font-ui) !important;
@@ -1046,12 +1075,18 @@
 
     /* Every settings section owns its own save action: two of them (verifying a
        domain, connecting to Jellyfin) have side effects beyond writing a value,
-       so a single modal-wide save button would be a lie. */
+       so a single modal-wide save button would be a lie.
+
+       Sections are grouped into tabs, one per pane, so this divider only draws
+       when a pane holds more than one section. */
     .settings-section + .settings-section {
       border-top: 1px solid var(--border);
       padding-top: 20px;
       margin-top: 24px;
     }
+    .settings-pane { padding-top: 4px; }
+    /* Fixed floor so the dialog does not resize as you move between tabs. */
+    #settings-modal .modal-body { min-height: 340px; }
     .settings-section-hint {
       font-size: 12px;
       color: var(--text-muted);
@@ -1393,13 +1428,30 @@
       background: none; border: none; color: var(--blue);
       font-size: 11px; cursor: pointer; padding: 0;
     }
+    .btn-link-danger { color: var(--accent); }
+    .notif-actions { display: flex; gap: 11px; align-items: center; }
     .notif-item {
       display: flex; gap: 9px; padding: 10px 13px;
       border-bottom: 1px solid var(--border); font-size: 12.5px;
     }
-    .notif-item i { color: var(--text-muted); font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+    .notif-item > i { color: var(--text-muted); font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+    /* min-width:0 so a long message wraps instead of pushing the delete button
+       out of the panel. */
+    .notif-body { flex: 1; min-width: 0; }
+    /* Always visible rather than revealed on hover: on a touch screen there is
+       no hover, and a control that never appears is a control that is not there. */
+    .notif-del {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-dim); flex-shrink: 0; align-self: flex-start;
+      padding: 2px 3px; margin: -2px -4px 0 0; line-height: 1;
+      border-radius: var(--radius-sm);
+    }
+    .notif-del:hover { color: var(--accent); background: var(--bg-hover); }
+    .notif-del i { font-size: 13px; margin-top: 0; color: inherit; }
     .notif-unread { background: rgba(224,36,68,.06); }
-    .notif-unread i { color: var(--accent); }
+    /* Direct child only: this used to reach the delete button's icon too, which
+       made it accent-coloured on unread rows and read as the primary action. */
+    .notif-unread > i { color: var(--accent); }
     .notif-text { line-height: 1.4; }
     .notif-time { color: var(--text-dim); font-size: 10.5px; margin-top: 2px; }
     .notif-empty { padding: 22px; text-align: center; color: var(--text-muted); font-size: 12px; }
@@ -1661,6 +1713,14 @@
               <span class="nav-link-title">Le mie richieste</span>
             </a>
           </li>
+          <!-- No data-requires-auth: a followed series works without Jellyfin
+               too, it just belongs to the panel instead of to a user. -->
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
+            <a class="nav-link" href="#" data-page="watches" onclick="showPage('watches');return false">
+              <span class="nav-link-icon"><i class="ti ti-bell-ringing"></i></span>
+              <span class="nav-link-title">Serie seguite</span>
+            </a>
+          </li>
           <li class="nav-item" data-perm="VIEW_LIBRARY">
             <a class="nav-link" href="#" data-page="files" onclick="showPage('files');return false">
               <span class="nav-link-icon"><i class="ti ti-folder-filled"></i></span>
@@ -1675,7 +1735,12 @@
           </li>
         </ul>
         <div class="sidebar-footer">
-          <div id="stream-status">
+          <!-- Same permissions the stream itself requires (progress.py). Without
+               them app.js never opens the EventSource, so the indicator sat on
+               its initial "Connessione..." for good — reporting a connection
+               that was deliberately never attempted as one that never
+               succeeded. -->
+          <div id="stream-status" data-perm="DOWNLOAD|MANAGE_REQUESTS">
             <span class="stream-dot"></span>
             <span id="stream-label">Connessione...</span>
           </div>
@@ -1702,7 +1767,9 @@
             <div class="header-actions">
 
               <!-- Notification bell -->
-              <div class="notif-wrap" data-requires-auth="1">
+              <!-- No data-requires-auth: without accounts the bell shows the
+                   panel's own notifications rather than a user's. -->
+              <div class="notif-wrap">
                 <button class="header-icon-btn" id="notif-button" onclick="toggleNotifications()" title="Notifiche">
                   <i class="ti ti-bell"></i>
                   <span class="notif-badge" id="notif-badge" style="display:none"></span>
@@ -1710,7 +1777,10 @@
                 <div class="notif-panel" id="notif-panel" style="display:none">
                   <div class="notif-header">
                     <span>Notifiche</span>
-                    <button class="btn-link-sm" onclick="markAllNotificationsRead()">Segna lette</button>
+                    <span class="notif-actions" id="notif-actions">
+                      <button class="btn-link-sm" onclick="markAllNotificationsRead()">Segna lette</button>
+                      <button class="btn-link-sm btn-link-danger" onclick="clearAllNotifications()">Elimina tutte</button>
+                    </span>
                   </div>
                   <div id="notif-list"></div>
                 </div>
@@ -1767,7 +1837,11 @@
               <i class="ti ti-loader-2 ti-spin me-1" style="font-size:11px"></i>
               <span id="dl-active-count">0</span>&nbsp;attivi
             </span>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="clearFinished()">
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshJobs()"
+                    id="dl-refresh-btn" title="Rileggi i download dal server">
+              <i class="ti ti-refresh me-1"></i>Aggiorna
+            </button>
+            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="clearFinished()">
               <i class="ti ti-trash me-1"></i>Rimuovi completati
             </button>
           </div>
@@ -1787,6 +1861,8 @@
                 <i class="ti ti-folder-filled text-yellow me-2"></i>File scaricati
               </h3>
               <div class="card-options">
+                <span class="text-muted d-none d-lg-inline" id="fm-disk-usage"
+                      style="font-size:11px;margin-right:12px"></span>
                 <span class="text-muted d-none d-md-inline" style="font-size:11px;margin-right:8px">
                   Trascina per spostare
                 </span>
@@ -1874,6 +1950,18 @@
             </button>
           </div>
           <div id="my-requests-list"></div>
+        </div>
+
+        <div id="page-watches" style="display:none">
+          <div class="queue-filters">
+            <span class="text-muted" style="font-size:11px">
+              I nuovi episodi delle serie seguite vengono cercati automaticamente.
+            </span>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadWatches()">
+              <i class="ti ti-refresh"></i>
+            </button>
+          </div>
+          <div id="watches-list"></div>
         </div>
 
         <!-- ── Users ───────────────────────────────────────────── -->
@@ -1980,6 +2068,29 @@
       </div>
       <div class="modal-body">
 
+        <!-- Tabs are switched by hand (switchSettingsTab), like the season strip
+             and the modals themselves: this codebase does not use Bootstrap's JS
+             components. Panes stay in the DOM permanently — saving libraries
+             reads its inputs straight out of the document. -->
+        <ul class="nav nav-tabs mb-3" id="settings-tabs">
+          <li class="nav-item">
+            <a class="nav-link active" href="#" data-settings-tab="sorgente">Sorgente</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="librerie">Librerie</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="download">Download</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="accesso">Accesso</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="notifiche">Notifiche</a>
+          </li>
+        </ul>
+
+        <div class="settings-pane" data-settings-pane="sorgente">
         <!-- ── Sorgente ──────────────────────────────────────────────────── -->
         <div class="settings-section">
           <p class="settings-section-label">Sorgente</p>
@@ -1995,7 +2106,9 @@
             <div id="domain-feedback" class="form-text"></div>
           </div>
         </div>
+        </div>
 
+        <div class="settings-pane" data-settings-pane="librerie" style="display:none">
         <!-- ── Librerie e cartelle ───────────────────────────────────────── -->
         <div class="settings-section">
           <p class="settings-section-label">Librerie multimediali</p>
@@ -2019,10 +2132,12 @@
             <div id="libraries-feedback" class="form-text"></div>
           </div>
         </div>
+        </div>
 
+        <div class="settings-pane" data-settings-pane="download" style="display:none">
         <!-- ── Performance download ──────────────────────────────────────── -->
         <div class="settings-section">
-          <p class="settings-section-label">Performance download</p>
+          <p class="settings-section-label">Download</p>
           <div class="row g-3">
             <div class="col-sm-6">
               <label class="form-label" for="setting-max-concurrent">
@@ -2040,6 +2155,14 @@
               <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
               <div class="form-text">Suggerito: 8–32. Valori >64 raramente migliorano le prestazioni.</div>
             </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="setting-watch-interval">
+                Controllo serie seguite
+                <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(15–1440 min)</span>
+              </label>
+              <input type="number" id="setting-watch-interval" class="form-control" min="15" max="1440" value="240">
+              <div class="form-text">Ogni quanto cercare nuovi episodi. Suggerito: 240 (4 ore).</div>
+            </div>
           </div>
           <div class="settings-actions">
             <button type="button" class="btn btn-primary btn-sm" onclick="savePerfSettings()" id="save-perf-btn">
@@ -2048,7 +2171,9 @@
             <div id="perf-settings-feedback" class="form-text"></div>
           </div>
         </div>
+        </div>
 
+        <div class="settings-pane" data-settings-pane="accesso" style="display:none">
         <!-- ── Accesso (Jellyfin SSO) ────────────────────────────────────── -->
         <div class="settings-section">
           <p class="settings-section-label">Accesso e utenti</p>
@@ -2121,6 +2246,53 @@
           </div>
         </div>
 
+        </div>
+
+        <div class="settings-pane" data-settings-pane="notifiche" style="display:none">
+        <!-- ── Notifiche ─────────────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Notifiche</p>
+          <p class="settings-section-hint">
+            Inoltra le notifiche del pannello a Discord, Telegram, ntfy, email e altri servizi.
+            Un canale è una URL Apprise, ad esempio
+            <code>discord://id_webhook/token_webhook</code> oppure <code>tgram://token_bot/id_chat</code>.
+            <a href="https://github.com/caronc/apprise/wiki#notification-services" target="_blank"
+               rel="noopener noreferrer">Elenco completo dei servizi e formato delle URL</a>.
+          </p>
+          <p class="settings-section-hint" style="color:#e6a23c">
+            <i class="ti ti-alert-triangle me-1"></i>
+            Questi canali sono <strong>del pannello, non del singolo utente</strong>: ricevono gli
+            eventi di <em>tutti</em>, comprese le richieste e i download avviati da altri. Pensali
+            come un canale di amministrazione — un webhook su un canale Discord privato, non un
+            gruppo condiviso con chi usa il pannello. Con «Tutti gli eventi» attivo su una libreria
+            usata da più persone il volume può essere notevole: conviene scegliere solo gli eventi
+            che ti interessano davvero.
+          </p>
+          <div id="notif-channels-list" class="mb-2"></div>
+
+          <div id="notif-channel-form" class="row g-2 mb-2" style="display:none">
+            <div class="col-sm-4">
+              <input type="text" id="notif-channel-name" class="form-control" placeholder="Nome (es. Discord admin)">
+            </div>
+            <div class="col-sm-6">
+              <input type="text" id="notif-channel-url" class="form-control" placeholder="discord://id_webhook/token_webhook">
+            </div>
+            <div class="col-sm-2 d-grid">
+              <button type="button" class="btn btn-primary btn-sm" onclick="saveNotificationChannel()"
+                      id="notif-channel-save-btn">Aggiungi</button>
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleNotificationChannelForm()"
+                  id="notif-channel-add-btn">
+            <i class="ti ti-plus me-1"></i>Aggiungi canale
+          </button>
+          <div class="settings-actions">
+            <div id="notif-channels-feedback" class="form-text"></div>
+          </div>
+        </div>
+        </div>
+
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Chiudi</button>
@@ -2173,6 +2345,8 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="episode-modal-title">Episodi</h5>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto me-2"
+                id="follow-tv-btn" style="display:none" onclick="toggleFollowSeries('tv')"></button>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -2198,6 +2372,8 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="anime-modal-title">Episodi</h5>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto me-2"
+                id="follow-anime-btn" style="display:none" onclick="toggleFollowSeries('anime')"></button>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">

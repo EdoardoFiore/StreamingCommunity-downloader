@@ -13,3 +13,4 @@ fastapi
 uvicorn[standard]
 jinja2
 cloudscraper
+apprise

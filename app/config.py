@@ -89,6 +89,8 @@ AUTH_ENABLED = os.getenv("AUTH_ENABLED", "0") == "1"
 SETTINGS_DEFAULTS = {
     "max_concurrent_downloads": 3,
     "max_segment_workers": 16,
+    # How often followed series are checked for new episodes, in minutes.
+    "series_watch_interval_minutes": 240,
 }
 
 

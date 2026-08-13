@@ -2,7 +2,7 @@ name: Docker Publish
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -41,6 +41,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Release builds (main, v* tags) and work-in-progress builds go to two
+      # different GHCR packages. A branch build can then never be pulled by a
+      # deployment pointing at the release image, and the whole -dev package can
+      # be cleared out without touching release history.
+      - name: Choose the package for this ref
+        id: target
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-dev" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -53,12 +66,14 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.target.outputs.image }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=dev,enable=${{ github.ref_type == 'branch' && github.ref != 'refs/heads/main' }}
+            type=sha,format=short
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -72,3 +87,14 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Summarise what was published
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Immagine pubblicata"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

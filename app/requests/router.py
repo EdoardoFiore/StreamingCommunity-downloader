@@ -102,11 +102,26 @@ class MarkReadRequest(BaseModel):
     ids: list[int] | None = None
 
 
+class DeleteNotificationsRequest(BaseModel):
+    # Bounded because the ids go into an IN clause. No ids means "all of mine",
+    # which needs no list at all.
+    ids: list[int] | None = Field(default=None, max_length=200)
+
+
 MAX_BATCH = 200
 
 
 class BatchIdsRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=MAX_BATCH)
+
+
+class ApproveBatchRequest(BatchIdsRequest):
+    # Ids among `ids` whose followed series should stop asking from now on.
+    auto_approve_watch_ids: list[int] = Field(default_factory=list, max_length=MAX_BATCH)
+
+
+class ApproveRequestOptions(BaseModel):
+    auto_approve_watch: bool = False
 
 
 class BatchDenyRequest(BaseModel):
@@ -268,9 +283,11 @@ def get_request(request_id: int, http_request: HttpRequest):
 # endpoint (translate to an exception) and the batch endpoint (collect one
 # result per id and keep going after a failure).
 
-def _approve_one(request_id: int, user_id: int) -> tuple[bool, models.Request | None, str | None, int]:
+def _approve_one(
+    request_id: int, user_id: int, auto_approve_watch: bool = False
+) -> tuple[bool, models.Request | None, str | None, int]:
     try:
-        return True, service.approve(request_id, user_id), None, 202
+        return True, service.approve(request_id, user_id, auto_approve_watch), None, 202
     except LookupError:
         return False, None, "Richiesta non trovata", 404
     except models.InvalidTransition as exc:
@@ -323,10 +340,13 @@ def _batch_row(request_id: int, ok: bool, request: models.Request | None, error:
 
 
 @router.post("/{request_id}/approve", status_code=202, dependencies=CAN_MANAGE)
-def approve_request(request_id: int, http_request: HttpRequest):
+def approve_request(
+    request_id: int, http_request: HttpRequest,
+    body: ApproveRequestOptions = ApproveRequestOptions(),
+):
     """Approve and return at once — resolution and download run in the background."""
     user = current_user(http_request)
-    ok, request, error, status_code = _approve_one(request_id, user.id)
+    ok, request, error, status_code = _approve_one(request_id, user.id, body.auto_approve_watch)
     if not ok:
         raise HTTPException(status_code=status_code, detail=error)
     return _public(request)
@@ -350,11 +370,12 @@ def deny_request(request_id: int, body: DenyRequest, http_request: HttpRequest):
 # episodes and approving them together is exactly the "just queue them" case.
 
 @router.post("/approve-batch", status_code=202, dependencies=CAN_MANAGE)
-def approve_batch(body: BatchIdsRequest, http_request: HttpRequest):
+def approve_batch(body: ApproveBatchRequest, http_request: HttpRequest):
     user = current_user(http_request)
+    auto_ids = set(body.auto_approve_watch_ids)
     results = []
     for request_id in body.ids:
-        ok, request, error, _ = _approve_one(request_id, user.id)
+        ok, request, error, _ = _approve_one(request_id, user.id, request_id in auto_ids)
         results.append(_batch_row(request_id, ok, request, error))
     return {"results": results}
 
@@ -427,17 +448,39 @@ def cancel_request(request_id: int, http_request: HttpRequest):
 notifications_router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
+def _bell_owner(http_request: HttpRequest) -> int | None:
+    """Whose bell this is. None without accounts: the notifications belong to
+    the panel, and the implicit user has no row to own them."""
+    from app.auth.deps import OPEN_MODE_USER
+
+    user = current_user(http_request)
+    return None if user is OPEN_MODE_USER else user.id
+
+
 @notifications_router.get("", dependencies=CAN_SEE_OWN)
 def list_notifications(http_request: HttpRequest):
-    user = current_user(http_request)
+    owner = _bell_owner(http_request)
     return {
-        "items": notify.list_for_user(user.id),
-        "unread": notify.unread_count(user.id),
+        "items": notify.list_for_user(owner),
+        "unread": notify.unread_count(owner),
     }
 
 
 @notifications_router.post("/read", dependencies=CAN_SEE_OWN)
 def mark_notifications_read(body: MarkReadRequest, http_request: HttpRequest):
-    user = current_user(http_request)
-    notify.mark_read(user.id, body.ids)
-    return {"unread": notify.unread_count(user.id)}
+    owner = _bell_owner(http_request)
+    notify.mark_read(owner, body.ids)
+    return {"unread": notify.unread_count(owner)}
+
+
+@notifications_router.post("/delete", dependencies=CAN_SEE_OWN)
+def delete_notifications(body: DeleteNotificationsRequest, http_request: HttpRequest):
+    """Remove notifications. No ids clears the bell.
+
+    Scoped to the caller the same way marking read is, so ids belonging to
+    someone else are simply not matched rather than refused — the response says
+    how many actually went.
+    """
+    owner = _bell_owner(http_request)
+    deleted = notify.delete(owner, body.ids)
+    return {"deleted": deleted, "unread": notify.unread_count(owner)}

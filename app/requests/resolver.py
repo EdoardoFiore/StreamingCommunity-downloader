@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from app.config import DATA_FILE, VIDEOS_DIR
-from app.core import animeunity, paths
+from app.core import animeunity, paths, probe
 from app.requests import models
 
 logger = logging.getLogger(__name__)
@@ -97,13 +97,47 @@ def destination_path(request: models.Request) -> str:
     )
 
 
-def is_in_library(request: models.Request) -> bool:
-    """Whether the file is already there — checked before downloading anything."""
+def existing_file(request: models.Request) -> str | None:
+    """The file already occupying this request's destination, if any."""
     path = destination_path(request)
     if os.path.exists(path):
-        return True
+        return path
     # The downloader remuxes to .mkv when there are several audio tracks.
-    return os.path.exists(os.path.splitext(path)[0] + ".mkv")
+    mkv = os.path.splitext(path)[0] + ".mkv"
+    return mkv if os.path.exists(mkv) else None
+
+
+def library_gap(request: models.Request) -> dict | None:
+    """Which requested languages the file in the library does not carry.
+
+    ``None`` when there is no file, or when there is one that cannot be
+    inspected. Both mean "download it"; they differ only in what is already
+    there, which the caller sorts out with ``existing_file``.
+
+    This is why the check cannot simply ask whether the path exists. The
+    destination carries no language — two people asking for one film in
+    different audio make two requests that land on the same file — so an
+    existence test told the second of them their track was ready when what sat
+    there was the first one's.
+    """
+    path = existing_file(request)
+    if path is None:
+        return None
+    gap = probe.missing_languages(path, request.audio_languages, request.subtitle_languages)
+    if gap is None:
+        # Cannot look inside: ffprobe is optional and the bundled ffmpeg does
+        # not bring one. Treating an unreadable file as complete is the older
+        # behaviour, and the alternative — calling every track missing — would
+        # re-download the same file for ever.
+        logger.info("Cannot inspect %s; assuming it satisfies the request", path)
+        return {"audio": [], "subtitles": []}
+    return gap
+
+
+def is_in_library(request: models.Request) -> bool:
+    """Whether the request is already satisfied — the file *and* its tracks."""
+    gap = library_gap(request)
+    return gap is not None and not gap["audio"] and not gap["subtitles"]
 
 
 # ── Resolution ─────────────────────────────────────────────────────────────────
@@ -112,6 +146,52 @@ def is_in_library(request: models.Request) -> bool:
 class Resolution:
     available: dict
     submit: Callable[[], str]
+
+
+def _widen_to_everyone(common: dict, request: models.Request, available: dict):
+    """Download what everyone asked for, not only what this request asked for.
+
+    Requests for one title in different languages are kept apart on purpose, but
+    they all resolve to the same path, so whoever finished last decided what the
+    file held and quietly took the others' languages away. The union leaves a
+    file that satisfies all of them.
+
+    The extras are filtered against what the source offers *now*, and the
+    caller's own choice is never filtered. That difference is the point:
+    ``strict_audio`` must still fail loudly when the language this requester
+    chose has gone, while a language somebody else picked months ago must not
+    fail a download nobody else asked to be strict about.
+    """
+    audio, subtitles = models.wanted_languages(request)
+
+    # What the file already holds counts too. A re-download replaces it, so a
+    # track that is present but no longer named by any live request — the one
+    # request that asked for it was denied afterwards — would disappear without
+    # anyone being told. Untagged audio is skipped: it names no language, and
+    # asking the source for "und" would find nothing.
+    existing = existing_file(request)
+    if existing is not None:
+        present = probe.media_languages(existing)
+        if present is not None:
+            audio = sorted(set(audio) | (present["audio"] - {"und"}))
+            subtitles = sorted(set(subtitles) | (present["subtitles"] - {"und"}))
+
+    offered_audio = {str(c).lower() for c in (available.get("audio") or [])}
+    offered_subs = {str(c).lower() for c in (available.get("subtitles") or [])}
+
+    mine_audio, mine_subs = request.audio_languages, request.subtitle_languages
+    if offered_audio:
+        audio = [l for l in audio if l in mine_audio or l.lower() in offered_audio]
+    if offered_subs:
+        subtitles = [l for l in subtitles if l in mine_subs or l.lower() in offered_subs]
+
+    common["audio_languages"] = audio
+    common["subtitle_languages"] = subtitles
+    if audio != mine_audio or subtitles != mine_subs:
+        logger.info(
+            "Request %s widened to what everyone wants: audio %s, subtitles %s",
+            request.id, audio, subtitles,
+        )
 
 
 def _check_audio(request: models.Request, available: dict):
@@ -211,6 +291,7 @@ def resolve(request: models.Request) -> Resolution:
             episode = _find_anime_episode(request)
             available = animeunity.get_episode_languages(episode["id"])
             _check_audio(request, available)
+            _widen_to_everyone(common, request, available)
 
             def submit():
                 return job_manager.submit_anime_episode(
@@ -227,6 +308,7 @@ def resolve(request: models.Request) -> Resolution:
 
             available = get_film_languages(int(request.external_id), domain)
             _check_audio(request, available)
+            _widen_to_everyone(common, request, available)
 
             def submit():
                 return job_manager.submit_film(
@@ -246,6 +328,7 @@ def resolve(request: models.Request) -> Resolution:
             int(request.external_id), episodes[index]["id"], domain, token
         )
         _check_audio(request, available)
+        _widen_to_everyone(common, request, available)
 
         def submit():
             return job_manager.submit_episode(

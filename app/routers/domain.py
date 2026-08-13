@@ -90,6 +90,7 @@ def set_libraries(body: LibrariesUpdate):
 class SettingsUpdate(BaseModel):
     max_concurrent_downloads: int
     max_segment_workers: int
+    series_watch_interval_minutes: int | None = None
 
 
 @router.get("/settings", dependencies=CAN_MANAGE)
@@ -107,6 +108,17 @@ def set_app_settings(body: SettingsUpdate):
         "max_concurrent_downloads": body.max_concurrent_downloads,
         "max_segment_workers": body.max_segment_workers,
     }
+    if body.series_watch_interval_minutes is not None:
+        if not 15 <= body.series_watch_interval_minutes <= 1440:
+            raise HTTPException(
+                status_code=400,
+                detail="series_watch_interval_minutes must be between 15 and 1440",
+            )
+        new_settings["series_watch_interval_minutes"] = body.series_watch_interval_minutes
+    else:
+        new_settings["series_watch_interval_minutes"] = get_settings()[
+            "series_watch_interval_minutes"
+        ]
     save_settings(new_settings)
     from app.jobs import job_manager
     job_manager.update_max_concurrent(body.max_concurrent_downloads)

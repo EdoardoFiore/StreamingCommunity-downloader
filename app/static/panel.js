@@ -22,17 +22,9 @@ const REQUEST_STATUS_LABELS = {
 // "cancelled" in the state machine, so there is nothing to offer there.
 const MINE_ACTIVE_STATUSES = ['pending', 'approved', 'downloading', 'needs_attention'];
 
-const NOTIFICATION_ICONS = {
-  request_created: 'ti-inbox',
-  request_joined: 'ti-users',
-  request_approved: 'ti-circle-check',
-  request_denied: 'ti-circle-x',
-  request_downloading: 'ti-download',
-  request_completed: 'ti-device-tv',
-  request_failed: 'ti-alert-triangle',
-  request_needs_attention: 'ti-alert-circle',
-  request_available: 'ti-library',
-};
+// NOTIFICATION_ICONS and NOTIFICATION_LABELS live in app.js, which loads first:
+// the settings modal needs them as module constants to build the per-channel
+// event picker, and this file already depends on app.js's helpers.
 
 let _queue = [];
 let _myRequests = [];
@@ -236,6 +228,12 @@ function renderQueueRow(r, compact = false) {
       <div class="req-side">
         ${statusBadge(r.status)}
         <div class="req-actions">
+          ${r.watch_id && r.status === 'pending' ? `
+            <label class="form-check form-check-inline mb-0" style="font-size:11px"
+                   title="Approva anche i prossimi episodi di questa serie, senza ripassare dalla coda">
+              <input type="checkbox" class="form-check-input" id="watch-auto-${r.id}">
+              <span class="form-check-label">Auto i prossimi</span>
+            </label>` : ''}
           ${['pending', 'needs_attention'].includes(r.status) ? `
             <button class="btn btn-sm btn-success" onclick="approveRequests([${r.id}])">
               <i class="ti ti-check me-1"></i>${r.status === 'needs_attention' ? 'Riprova' : 'Approva'}</button>
@@ -311,9 +309,14 @@ function syncSelectionBar(page) {
 }
 
 async function approveRequests(ids) {
+  // Ticked only on requests a followed series produced: saying yes here means
+  // the rest of that series stops asking.
+  const auto_approve_watch_ids = ids.filter(
+    id => document.getElementById(`watch-auto-${id}`)?.checked
+  );
   const res = await fetch('/api/requests/approve-batch', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids }),
+    body: JSON.stringify({ ids, auto_approve_watch_ids }),
   });
   const data = await safeJson(res);
   if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
@@ -742,12 +745,20 @@ async function refreshNotifications() {
       ? payload.items.map(n => `
           <div class="notif-item ${n.read_at ? '' : 'notif-unread'}">
             <i class="ti ${NOTIFICATION_ICONS[n.event] || 'ti-bell'}"></i>
-            <div>
+            <div class="notif-body">
               <div class="notif-text">${escapeHtml(n.message)}</div>
               <div class="notif-time">${fmtDate(n.created_at)}</div>
             </div>
+            <button class="notif-del" onclick="deleteNotification(${n.id})"
+                    title="Elimina questa notifica" aria-label="Elimina">
+              <i class="ti ti-x"></i>
+            </button>
           </div>`).join('')
       : '<div class="notif-empty">Nessuna notifica.</div>';
+
+    // Nothing to act on means nothing to offer.
+    const actions = document.getElementById('notif-actions');
+    if (actions) actions.style.display = payload.items.length ? '' : 'none';
   } catch (e) { /* the bell just stays as it was */ }
 }
 
@@ -764,6 +775,31 @@ async function markAllNotificationsRead() {
     body: JSON.stringify({}),
   });
   refreshNotifications();
+}
+
+async function _deleteNotifications(body) {
+  const res = await fetch('/api/notifications/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    showToast('Eliminazione fallita', 'danger');
+    return null;
+  }
+  await refreshNotifications();
+  return res.json();
+}
+
+// One row: no confirmation. It is a single line of history, and asking every
+// time would cost more than the mistake.
+async function deleteNotification(id) {
+  await _deleteNotifications({ ids: [id] });
+}
+
+async function clearAllNotifications() {
+  if (!await scConfirm('Eliminare tutte le notifiche?')) return;
+  const result = await _deleteNotifications({});
+  if (result) showToast('Notifiche eliminate', 'info');
 }
 
 document.addEventListener('click', event => {

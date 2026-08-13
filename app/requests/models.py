@@ -121,6 +121,8 @@ class Request:
     output_path: str | None
     created_at: str
     updated_at: str
+    # Set when a followed series produced this request; None for manual ones.
+    watch_id: int | None = None
 
     def to_public(self, requester: str = None, decider: str = None,
                   subscribers: list[str] = None) -> dict:
@@ -149,6 +151,7 @@ class Request:
             "subscribers": subscribers or [],
             "job_id": self.job_id,
             "output_path": self.output_path,
+            "watch_id": self.watch_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -181,6 +184,7 @@ def _row_to_request(row: sqlite3.Row) -> Request:
         output_path=row["output_path"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        watch_id=row["watch_id"],
     )
 
 
@@ -245,6 +249,64 @@ def subscribers(request_id: int) -> list[int]:
     return [r["user_id"] for r in rows]
 
 
+# Statuses whose chosen tracks still describe what somebody expects to find in
+# the file. A denied or cancelled request asked for nothing; a failed one was
+# told so. The rest — including the ones already satisfied — are people who will
+# open this file expecting their language.
+LIVE_STATUSES = OPEN_STATUSES + (COMPLETED, AVAILABLE)
+
+
+def wanted_languages(request: "Request") -> tuple[list[str], list[str]]:
+    """Every audio and subtitle language anyone wants in this exact file.
+
+    Requests for one title in different languages are kept apart on purpose, but
+    they all resolve to the same path, so the last one to finish used to decide
+    what the file contained and quietly take the others' languages away.
+    Downloading the union instead leaves a file that satisfies all of them.
+
+    Identity here is the content *without* the tracks — the same thing the
+    destination path is built from — which is exactly the collision being
+    resolved.
+    """
+    rows = db.query(
+        "SELECT audio_languages, subtitle_languages FROM jf_request "
+        "WHERE source = ? AND media_type = ? AND external_id = ? "
+        "AND IFNULL(season, -1) = ? AND IFNULL(episode_number, '') = ? "
+        f"AND status IN ({','.join('?' * len(LIVE_STATUSES))})",
+        (
+            request.source, request.media_type, str(request.external_id),
+            -1 if request.season is None else request.season,
+            "" if request.episode_number is None else str(request.episode_number),
+            *LIVE_STATUSES,
+        ),
+    )
+
+    audio, subtitles = set(request.audio_languages), set(request.subtitle_languages)
+    for row in rows:
+        audio.update(json.loads(row["audio_languages"] or "[]"))
+        subtitles.update(json.loads(row["subtitle_languages"] or "[]"))
+    return sorted(audio), sorted(subtitles)
+
+
+def add_subscribers(request_id: int, user_ids: list[int]) -> None:
+    """Add people to a request's notification list.
+
+    Used for the followers of a series, who never asked for this episode
+    individually — the follow is the asking — and would otherwise watch it
+    download without being told.
+    """
+    if not user_ids:
+        return
+    timestamp = now_iso()
+    with db.tx() as conn:
+        for user_id in dict.fromkeys(user_ids):
+            conn.execute(
+                "INSERT OR IGNORE INTO jf_request_subscriber(request_id, user_id, created_at) "
+                "VALUES(?, ?, ?)",
+                (request_id, user_id, timestamp),
+            )
+
+
 def subscriber_names(request_id: int) -> list[str]:
     rows = db.query(
         "SELECT u.username FROM jf_request_subscriber s JOIN jf_user u ON u.id = s.user_id "
@@ -280,6 +342,7 @@ def create(
     anime_type: str = None,
     available_snapshot: dict = None,
     status: str = PENDING,
+    watch_id: int = None,
 ) -> tuple[Request, bool]:
     """Create a request, or join the open one with the same content key.
 
@@ -309,14 +372,15 @@ def create(
         cursor = conn.execute(
             "INSERT INTO jf_request(content_key, source, media_type, external_id, slug, title, "
             "year, poster, season, episode_number, anime_type, audio_languages, "
-            "subtitle_languages, available_snapshot, status, requested_by, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "subtitle_languages, available_snapshot, status, requested_by, watch_id, "
+            "created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 key, source, media_type, str(external_id), slug, title, year, poster,
                 season, episode_number, anime_type,
                 json.dumps(audio), json.dumps(subtitles),
                 json.dumps(available_snapshot) if available_snapshot else None,
-                status, requested_by, timestamp, timestamp,
+                status, requested_by, watch_id, timestamp, timestamp,
             ),
         )
         request_id = cursor.lastrowid

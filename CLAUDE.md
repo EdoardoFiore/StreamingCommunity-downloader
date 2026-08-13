@@ -63,17 +63,24 @@ request before any route runs.
 - `models.py` — records, content key, allowed transitions
 - `resolver.py` — re-resolution at approval, track verification, library check
 - `service.py` — lifecycle and job wiring
-- `notify.py` — in-app notifications
+- `notify.py` — dispatch; `CHANNELS` is the list every delivery fans out to
+- `apprise_channel.py` — external channels (Discord, Telegram, ntfy, …) as Apprise URLs
 - `router.py` — endpoints
 
-**`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `schedule.py`, `db.py`, `config.py`,
-`progress.py`, `routers/`, `templates/`, `static/`
+**`app/watches/`** — followed series and anime
+- `models.py` — watch records, followers, the seen-episode ledger
+- `poller.py` — periodic enumeration, diff against what is seen, auto-download decision
+- `router.py` — follow, unfollow, status, manual check
+
+**`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `downloads_notify.py` (notifications
+for downloads that skipped the queue, one summary per season/series), `schedule.py`, `db.py`,
+`config.py`, `progress.py`, `routers/`, `templates/`, `static/`
 
 ### Persistence
 
-- `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications. Migrations are
-  the ordered `MIGRATIONS` list in `app/db.py`, applied against `PRAGMA user_version`. Never edit an
-  applied migration; append a new one.
+- `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications, notification
+  channels, followed series. Migrations are the ordered `MIGRATIONS` list in `app/db.py`, applied
+  against `PRAGMA user_version`. Never edit an applied migration; append a new one.
 - `data.json` — source domain, library paths, performance settings. Runtime state, not committed:
   a baked-in source domain ships stale, since the domain rotates. Tests get one from the
   `_configured_domain` autouse fixture in `tests/conftest.py`.
@@ -101,7 +108,42 @@ anything under a mounted static directory is readable by unauthenticated visitor
   the request queue.
 - **Never substitute an audio track.** `strict_audio=True` on the request path turns a missing
   language into an error and parks the request for a human.
-- Blocking work goes through `asyncio.to_thread` (routers) or the job pool.
+- **A watch never downloads anything itself.** `app/watches/poller.py` turns a new episode into an
+  ordinary request and lets `service.create_request` / `service.approve` do the rest, so dedup, the
+  library check and notifications keep working. Whether it is approved on the spot comes from the
+  owner's live `DOWNLOAD` permission or the per-series `auto_approve` flag — never from the client.
+- **Following a series seeds every episode already published.** Without that baseline the next
+  cycle treats the whole back catalogue as new; an empty enumeration is treated as a read failure
+  and the follow is rolled back.
+- **Anything user-owned is unavailable in open mode.** The implicit user has no `jf_user` row, so a
+  foreign key would fail. Check the user the middleware resolved (`is OPEN_MODE_USER`) rather than
+  binding `AUTH_ENABLED` in yet another module.
+- **A batch's expected total is fixed before its first job is submitted**, and every job created
+  must reach a terminal listener exactly once — otherwise the batch never closes and its summary
+  never fires. That is why `jobs.py` notifies listeners on *every* path out of `_run_download`,
+  including the job cancelled before it started, and why `cancel()` notifies for a job still
+  `scheduled` that the executor never saw.
+- **External channels have no in-app recipient to wait for.** `AppriseChannel` fires with an empty
+  user list on purpose: a direct download in open mode has no account, but the webhook is still the
+  point. `InAppChannel` keeps the guard — with no recipients there is nothing to insert.
+- **Never `confirm()`, `alert()` or `prompt()` in the frontend.** Confirmations go through
+  `scConfirm()` and text entry through `scPrompt()` in `app/static/app.js`, which resolve a Promise
+  from a Tabler modal. A browser dialog ignores the panel's theme, cannot be styled, and on mobile
+  reads as a page-level warning rather than as part of the interface.
+- **An empty `events` array on a notification channel means *every* event**, not none. Any UI
+  offering a selection has to express "all" as its own state, or unchecking the last box silently
+  subscribes to everything.
+- **A download with a missing segment must fail, never join.** TS concatenated with gaps produces a
+  file that opens, plays, and is wrong — and lands in the library looking like a good one. Failing
+  is recoverable because the download can be run again; a silently truncated film is not, because
+  nobody knows to. `_require_every_segment()` reads the *filesystem*, not `_failed_segments`: a run
+  cut short by the watchdog never attempts the rest, so the bookkeeping is emptiest exactly when
+  most of the download is absent.
+- **The progress bar counts segments obtained, not attempts made.** It is also the input to the
+  stall watchdog (`timer()`), so counting failures as progress does not just misreport — it stops a
+  source failing every single request from ever tripping the timeout.
+- Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
+  are the exception by design: every caller of `notify()` is already off the loop.
 
 ### Output layout
 

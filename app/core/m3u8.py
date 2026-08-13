@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import sys
 import shutil
 import time
@@ -26,6 +27,66 @@ warnings.filterwarnings("ignore", category=UserWarning, module="cryptography")
 logger = logging.getLogger(__name__)
 DOWNLOAD_SUB = True
 DOWNLOAD_DEFAULT_LANGUAGE = False
+
+# Segment failures worth another attempt. A 4xx that is not one of these is a
+# verdict rather than congestion: repeating it across a few thousand segments
+# only delays the error without changing it.
+RETRIABLE_SEGMENT_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+MAX_SEGMENT_BACKOFF = 8
+
+# When to stop rather than grind on against a source that is serving nothing.
+#
+# Counted as an unbroken run: any segment that arrives resets it. Losing some
+# segments is the ordinary case — sixteen workers provoke exactly the rate
+# limiting that produces it — and repairing them is what the sequential second
+# pass is for, so the breaker must only catch a source refusing outright.
+#
+# Two earlier shapes were wrong. A budget of 5% of the playlist aborted downloads
+# that used to complete, because it tripped before ever reaching the pass that
+# recovers them. A cumulative failure *ratio* then failed differently: refusals
+# clustered at the start of a playlist are all counted before a single success
+# is, so the ratio reads 100% on a source that is merely slow to warm up. A run
+# broken by any success is immune to both.
+#
+# Set well above any refusal run seen in practice — a report of this behaviour
+# involved 84 in a row on a source that was otherwise serving fine. The cost of
+# it being too high is bounded (a dead source takes a few more minutes to reach
+# the same error) while the cost of it being too low is a download that would
+# have completed.
+FAILURE_ABORT_STREAK = 200
+
+
+# One writer per destination file.
+#
+# Two requests for the same title in different languages are two requests on
+# purpose, but they resolve to the same path — the layout carries no language —
+# so downloading both at once had them writing the same file concurrently and
+# left it corrupt. The lock is held for the whole download, so the second waits
+# and then overwrites cleanly with its own complete file.
+#
+# In memory, which is the same assumption the rest of the panel makes: job state
+# lives in JobManager and the process is single by design.
+_destination_locks: dict[str, threading.Lock] = {}
+_destination_locks_guard = threading.Lock()
+
+
+def _destination_lock(path: str) -> threading.Lock:
+    key = os.path.normcase(os.path.abspath(path))
+    with _destination_locks_guard:
+        lock = _destination_locks.get(key)
+        if lock is None:
+            lock = _destination_locks[key] = threading.Lock()
+        return lock
+
+
+def _segment_backoff(attempt: int) -> float:
+    """Exponential, capped, and jittered.
+
+    Sixteen worker threads back off in lockstep otherwise, and arrive back at a
+    struggling CDN together — which is what produced the 503s in the first
+    place.
+    """
+    return min(2 ** attempt, MAX_SEGMENT_BACKOFF) * (0.5 + random.random())
 
 
 class Decryption:
@@ -139,6 +200,11 @@ class M3U8_Segments:
         self.progress_factory = progress_factory
         self.progress_timeout = 30
         self.max_retry = 3
+        self._failed_segments = set()
+        self._saved_count = 0
+        self._failure_streak = 0
+        self._failed_lock = threading.Lock()
+        self._abort = threading.Event()
 
     def parse_data(self, m3u8_content):
         m3u8_parser = M3U8_Parser()
@@ -155,35 +221,49 @@ class M3U8_Segments:
             h["referer"] = self.referer
         return h
 
-    def get_info(self):
-        # Retry logic for transient failures like 403
-        max_retries = 3
-        retry_delay = 2  # seconds
-        current_url = self.url
-        tried_with_b1 = False
-        
+    def _fetch_m3u8(self, url: str, what: str, max_retries: int = 3, retry_delay: int = 2):
+        """Fetch one M3U8, riding out the errors this CDN hands out routinely.
+
+        Shared by both fetches in ``get_info()``. They used to be written out
+        separately and only the first one grew retries, so a transient 500 on
+        the rendition playlist killed the whole download while the identical
+        failure one request earlier would have been retried.
+
+        Handles three things the bare call did not: a transient non-2xx, the
+        ``?b=1`` quirk (some playlists are only served with it), and a
+        connection that never completes.
+        """
+        current = url
+        tried_with_b1 = "b=1" in url
+        response = None
+
         for attempt in range(max_retries):
-            response = requests.get(current_url, headers=self._headers(), timeout=15)
-            if response.ok:
-                break
-            # On 403, retry with &b1 parameter (some TV episodes require it)
-            if response.status_code == 403 and attempt < max_retries - 1:
-                if not tried_with_b1:
-                    logger.warning(f"M3U8 fetch returned HTTP 403, retrying with &b=1... (attempt {attempt+1}/{max_retries})")
-                    current_url = self.url + ("&b=1" if "?" in self.url else "?b=1")
+            last = attempt == max_retries - 1
+            try:
+                response = requests.get(current, headers=self._headers(), timeout=15)
+            except requests.RequestException as e:
+                response = None
+                logger.warning("%s M3U8 fetch failed (%s) — tentativo %d/%d",
+                               what, e, attempt + 1, max_retries)
+            else:
+                if response.ok:
+                    return response
+                if response.status_code == 403 and not tried_with_b1:
+                    # A different URL, so retry at once rather than waiting.
+                    logger.warning("%s M3U8 fetch returned 403, retrying with ?b=1: %s", what, current)
+                    current = current + ("&b=1" if "?" in current else "?b=1")
                     tried_with_b1 = True
-                    time.sleep(retry_delay)
                     continue
-                else:
-                    logger.warning(f"M3U8 fetch returned HTTP 403, retrying in {retry_delay}s... (attempt {attempt+1}/{max_retries})")
-                    time.sleep(retry_delay)
-                    continue
-            # Other errors: fail immediately
-            if not response.ok:
-                raise RuntimeError(f"Failed to fetch M3U8: HTTP {response.status_code}")
-        
-        if not response.ok:
-            raise RuntimeError(f"Failed to fetch M3U8: HTTP {response.status_code}")
+                logger.warning("%s M3U8 fetch returned HTTP %d — tentativo %d/%d",
+                               what, response.status_code, attempt + 1, max_retries)
+            if not last:
+                time.sleep(retry_delay)
+
+        status = response.status_code if response is not None else "nessuna risposta"
+        raise RuntimeError(f"Failed to fetch {what} M3U8: HTTP {status}")
+
+    def get_info(self):
+        response = self._fetch_m3u8(self.url, "playlist")
 
         parser = M3U8_Parser()
         parser.parse_data(response.text)
@@ -199,9 +279,7 @@ class M3U8_Segments:
             # Master playlist — resolve the best quality rendition
             best_url = parser.get_best_quality()
             logger.info("Master playlist detected (%d variants), fetching best rendition: %s", len(parser.video_playlist), best_url)
-            rendition_resp = requests.get(best_url, headers=self._headers(), timeout=15)
-            if not rendition_resp.ok:
-                raise RuntimeError(f"Failed to fetch rendition M3U8: HTTP {rendition_resp.status_code}")
+            rendition_resp = self._fetch_m3u8(best_url, "rendition")
             rp = M3U8_Parser()
             rp.parse_data(rendition_resp.text)
             if self.key is not None and rp.keys:
@@ -212,19 +290,40 @@ class M3U8_Segments:
             raise RuntimeError(f"M3U8 has no segments and no variant playlists. Content: {response.text[:200]!r}")
 
     def get_req_ts(self, ts_url):
-        for attempt in range(3):
+        """Fetch one segment, retrying what is worth retrying.
+
+        The loop ran three times but only a 429 ever reached the second
+        iteration: every other status returned on the first attempt, so a CDN
+        shedding load with 503s lost segments it would have served a moment
+        later. An *exception* did retry, which meant the same outage was
+        handled differently depending on whether the server answered badly or
+        did not answer at all.
+
+        Returns the bytes, or None once the segment is given up on.
+        """
+        for attempt in range(self.max_retry):
+            if self._cancel and self._cancel.is_set():
+                return None
             try:
                 response = requests.get(ts_url, headers={"user-agent": get_headers()}, timeout=10)
+            except Exception as e:
+                logger.warning("Segment exception (attempt %d/%d): %s",
+                               attempt + 1, self.max_retry, e)
+            else:
                 if response.status_code == 200:
                     return response.content
-                logger.warning("Segment HTTP %d (attempt %d): ...%s", response.status_code, attempt + 1, ts_url[-60:])
-                if response.status_code == 429:
-                    time.sleep(2 ** attempt)
-                    continue
-                return None
-            except Exception as e:
-                logger.warning("Segment exception (attempt %d): %s", attempt + 1, e)
-                time.sleep(1)
+                logger.warning("Segment HTTP %d (attempt %d/%d): ...%s", response.status_code,
+                               attempt + 1, self.max_retry, ts_url[-60:])
+                if response.status_code not in RETRIABLE_SEGMENT_STATUS:
+                    return None
+            if attempt < self.max_retry - 1:
+                # Waiting is pointless once the source has been written off, but
+                # the attempt already made still counts: bailing out before ever
+                # asking is what made an early abort cascade through every
+                # segment still in flight.
+                if self._abort.is_set():
+                    return None
+                time.sleep(_segment_backoff(attempt))
         return None
 
     def _write_ts(self, index, content):
@@ -235,8 +334,40 @@ class M3U8_Segments:
             else:
                 ts_file.write(content)
 
+    def _record_success(self):
+        """One segment obtained. Breaks the failure run: the source is serving."""
+        with self._failed_lock:
+            self._saved_count += 1
+            self._failure_streak = 0
+
+    def _record_failure(self, index, ts_url):
+        """Note a segment given up on, and stop if nothing is getting through.
+
+        Losing segments is not by itself a reason to abandon the download: the
+        sequential second pass exists to recover them, and it arrives later and
+        one request at a time, which is what a throttling source was asking for.
+        The breaker is for the other case — a source refusing outright — where
+        every remaining segment would cost its full attempts and waits to reach
+        a conclusion already visible.
+        """
+        with self._failed_lock:
+            self._failed_segments.add(index)
+            self._failure_streak += 1
+            streak = self._failure_streak
+            lost = len(self._failed_segments)
+        logger.warning("Segment %d failed after all retries: ...%s", index, ts_url[-60:])
+
+        if streak < FAILURE_ABORT_STREAK or self._abort.is_set():
+            return
+        self._abort.set()
+        logger.error("Aborting: %d segments in a row failed with none arriving between "
+                     "them (%d lost of %d) — the source is refusing, not throttling",
+                     streak, lost, len(self.segments))
+
     def save_ts(self, index, progress_counter, quit_event):
         if self._cancel and self._cancel.is_set():
+            return
+        if self._abort.is_set():
             return
         ts_url = self.segments[index]
         ts_filename = os.path.join(self.temp_folder, f"{index}.ts")
@@ -244,22 +375,32 @@ class M3U8_Segments:
         downloaded_bytes = 0
         if not os.path.exists(ts_filename):
             ts_content = self.get_req_ts(ts_url)
-            if ts_content is not None:
-                self._write_ts(index, ts_content)
-                downloaded_bytes = len(ts_content)
-            else:
-                self._failed_segments.add(index)
-                logger.warning("Segment %d failed after all retries: ...%s", index, ts_url[-60:])
+            # Empty content counts as a failure: it would otherwise write a
+            # zero-byte file, which then looks like a segment that is present.
+            if not ts_content:
+                self._record_failure(index, ts_url)
+                return
+            self._write_ts(index, ts_content)
+            downloaded_bytes = len(ts_content)
         else:
             try:
                 downloaded_bytes = os.path.getsize(ts_filename)
             except OSError:
                 pass
 
+        self._record_success()
+
+        # Only a segment actually obtained counts. Counting attempts drove the
+        # bar to 100% on a download that had saved barely half its segments,
+        # and — worse — kept feeding the watchdog below, so a source failing
+        # every single request still looked like it was making progress.
         progress_counter.update(1, bytes=downloaded_bytes)
 
     def download_ts(self):
         self._failed_segments = set()
+        self._saved_count = 0
+        self._failure_streak = 0
+        self._abort.clear()
         bar_factory = self.progress_factory or (lambda **kw: tqdm(**kw))
         progress_counter = bar_factory(total=len(self.segments), unit="seg", desc="Downloading", phase=self.phase)
         self._bar = progress_counter
@@ -277,7 +418,7 @@ class M3U8_Segments:
             with ThreadPoolExecutor(max_workers=get_settings().get("max_segment_workers", 16)) as executor:
                 futures = []
                 for index in range(len(self.segments)):
-                    if timeout_event.is_set():
+                    if timeout_event.is_set() or self._abort.is_set():
                         break
                     if self._cancel and self._cancel.is_set():
                         cancelled = True
@@ -285,7 +426,7 @@ class M3U8_Segments:
                     futures.append(executor.submit(self.save_ts, index, progress_counter, quit_event))
 
                 for future in as_completed(futures):
-                    if timeout_event.is_set():
+                    if timeout_event.is_set() or self._abort.is_set():
                         for f in futures:
                             f.cancel()
                         break
@@ -298,30 +439,106 @@ class M3U8_Segments:
                         future.result()
                     except Exception as e:
                         logger.error(f"Segment error: {e}")
+
+            # Stop the watchdog before the sequential pass. It measures stalls
+            # against the parallel pass, and the retry below is deliberately
+            # slow and one request at a time.
+            quit_event.set()
+            timer_thread.join()
+
+            if cancelled:
+                raise DownloadCancelledError("Download annullato dall'utente")
+
+            # Both of these used to fall through to the join, which then wrote
+            # an output file out of whatever had arrived.
+            if self._abort.is_set():
+                raise RuntimeError(
+                    f"Download interrotto: la fonte ha rifiutato {len(self._failed_segments)} "
+                    f"segmenti su {len(self.segments)} servendone quasi nessuno. "
+                    f"Riprova più tardi."
+                )
+            if timeout_event.is_set():
+                raise RuntimeError(
+                    f"Download interrotto: nessun segmento scaricato per "
+                    f"{self.progress_timeout}s. La fonte non risponde, riprova più tardi."
+                )
+
+            self._retry_failed_sequentially(progress_counter)
+            self._require_every_segment()
         finally:
+            # Closed here and not before the retry pass: a segment recovered
+            # sequentially has to reach the bar, or a download that lost some
+            # segments early stops short of its total and never emits the event
+            # that says the phase is finished.
             progress_counter.close()
             quit_event.set()
             timer_thread.join()
 
-        if cancelled:
-            raise DownloadCancelledError("Download annullato dall'utente")
+    def _retry_failed_sequentially(self, progress_counter):
+        """Second pass over the segments the parallel pass gave up on.
 
-        # Second pass: retry failed segments sequentially to avoid gaps in the TS stream
-        if self._failed_segments:
-            logger.warning("Retrying %d failed segments sequentially...", len(self._failed_segments))
-            still_failed = set()
-            for index in sorted(self._failed_segments):
-                if self._cancel and self._cancel.is_set():
-                    raise DownloadCancelledError("Download annullato dall'utente")
-                time.sleep(0.5)
-                ts_content = self.get_req_ts(self.segments[index])
-                if ts_content is not None:
-                    self._write_ts(index, ts_content)
-                    logger.info("Segment %d recovered on retry", index)
-                else:
-                    still_failed.add(index)
-                    logger.error("Segment %d permanently failed", index)
-            self._failed_segments = still_failed
+        Worth a try even after their attempts are exhausted: this arrives later
+        and one request at a time, which is what a source shedding load was
+        asking for.
+        """
+        if not self._failed_segments:
+            return
+        logger.warning("Retrying %d failed segments sequentially...", len(self._failed_segments))
+        still_failed = set()
+        for index in sorted(self._failed_segments):
+            if self._cancel and self._cancel.is_set():
+                raise DownloadCancelledError("Download annullato dall'utente")
+            time.sleep(0.5)
+            ts_content = self.get_req_ts(self.segments[index])
+            if ts_content:
+                self._write_ts(index, ts_content)
+                progress_counter.update(1, bytes=len(ts_content))
+                logger.info("Segment %d recovered on retry", index)
+            else:
+                still_failed.add(index)
+                logger.error("Segment %d permanently failed", index)
+        self._failed_segments = still_failed
+
+    def _missing_segments(self) -> list[int]:
+        """Which segments are not on disk.
+
+        Asks the filesystem rather than trusting ``_failed_segments``, which
+        only knows about segments that were attempted. A run cut short by the
+        watchdog never submits the rest, so the bookkeeping would call a
+        download whole precisely when most of it is absent.
+        """
+        present = set()
+        try:
+            names = os.listdir(self.temp_folder)
+        except OSError:
+            names = []
+        for name in names:
+            stem, ext = os.path.splitext(name)
+            if ext == ".ts" and stem.isdigit():
+                present.add(int(stem))
+        return [i for i in range(len(self.segments)) if i not in present]
+
+    def _require_every_segment(self):
+        """Refuse to hand on an incomplete set of segments.
+
+        A gap here is not a glitch to be logged: TS concatenated with segments
+        missing produces a file that opens, plays, and is wrong — and lands in
+        the library looking exactly like a good one. Failing is recoverable,
+        because the download can be run again; a silently truncated film is not,
+        because nobody knows to.
+        """
+        missing = self._missing_segments()
+        if not missing:
+            return
+        preview = ", ".join(str(i) for i in missing[:10])
+        if len(missing) > 10:
+            preview += ", …"
+        logger.error("Incomplete download: %d/%d segments missing (%s)",
+                     len(missing), len(self.segments), preview)
+        raise RuntimeError(
+            f"Download incompleto: {len(missing)} segmenti su {len(self.segments)} "
+            f"non scaricati. Il file non è stato creato per non salvarlo corrotto."
+        )
 
     def timer(self, progress_counter, quit_event, timeout_checker):
         start_time = time.time()
@@ -346,10 +563,20 @@ class M3U8_Segments:
     def join(self, output_filename):
         if self._cancel and self._cancel.is_set():
             raise DownloadCancelledError("Download annullato dall'utente")
-        ts_files = sorted(
-            [f for f in os.listdir(self.temp_folder) if f.endswith(".ts")],
-            key=lambda f: int("".join(filter(str.isdigit, f))),
+        # Checked before anything is written, not after. This used to warn about
+        # missing segments on the line *following* the concatenation, so the
+        # warning described a file that had already been assembled from a
+        # partial set — and the download still ended as "done".
+        self._require_every_segment()
+
+        # "_combined.ts" is excluded by name: it has no digits, so it used to
+        # raise ValueError out of the sort key if a previous attempt left one
+        # behind. Reachable now that a failed join can leave the folder in place.
+        indexed = sorted(
+            ((int(os.path.splitext(f)[0]), f) for f in os.listdir(self.temp_folder)
+             if f.endswith(".ts") and os.path.splitext(f)[0].isdigit()),
         )
+        ts_files = [name for _, name in indexed]
 
         # Byte-level concatenation: TS is a continuous stream format,
         # joining at byte level lets FFmpeg's TS demuxer handle PCR/PTS
@@ -359,10 +586,6 @@ class M3U8_Segments:
             for ts_file in ts_files:
                 with open(os.path.join(self.temp_folder, ts_file), "rb") as seg:
                     out.write(seg.read())
-
-        still_failed = getattr(self, "_failed_segments", set())
-        if still_failed:
-            logger.warning("%d segments permanently missing from output: %s", len(still_failed), sorted(still_failed))
 
         logger.info("Joining %d / %d segments...", len(ts_files), len(self.segments))
         if self.emit_join_phase and hasattr(self, '_bar') and hasattr(self._bar, 'emit_status'):
@@ -441,10 +664,14 @@ class M3U8_Downloader:
                 audio_m3u8.join(audio_path)
                 self.audio_paths.append({"path": audio_path, "language": lang})
 
+        # The remux is the merge, so the phase is announced here rather than in
+        # the audio branch above. It used to be emitted only when separate audio
+        # tracks had been downloaded, which left a film whose audio is already
+        # muxed — remuxed all the same, to embed its subtitles — going straight
+        # from "joining" to finished with the step never lighting up.
+        if self.audio_paths or self.subtitle_track_urls or self.subtitle_languages:
             if bar and hasattr(bar, "emit_status"):
                 bar.emit_status("merging")
-
-        if self.audio_paths or self.subtitle_track_urls or self.subtitle_languages:
             from app.core.format import remux_to_mkv, LANG_MAP
             video_stem = os.path.splitext(os.path.basename(self.video_path))[0]
             subtitle_tracks = []
@@ -548,7 +775,35 @@ def fetch_master_languages(m3u8_url: str, referer: str) -> dict:
     return parser.available_languages()
 
 
-def download_m3u8(
+def download_m3u8(**kwargs):
+    """Download one title, with nobody else writing the same file meanwhile.
+
+    Two requests for the same title in different languages are deliberately kept
+    apart — the content key includes the chosen tracks — but they resolve to the
+    same path, because the library layout carries no language. Approving both
+    therefore had two downloads writing one file at the same time, and the
+    result was a corrupt film that still looked like a film.
+
+    Serialising them means the second waits and then writes its own complete
+    file over the first. Combined with resolving every request to the union of
+    what has been asked for, the file left behind is the one that satisfies
+    everybody rather than whoever finished last.
+
+    Every caller passes keyword arguments, which is what lets this wrap the real
+    body without restating its signature.
+    """
+    destination = kwargs.get("output_filename") or os.path.join("videos", "output.mp4")
+    lock = _destination_lock(destination)
+    if not lock.acquire(blocking=False):
+        logger.info("Waiting for another download to finish writing %s", destination)
+        lock.acquire()
+    try:
+        return _download_m3u8(**kwargs)
+    finally:
+        lock.release()
+
+
+def _download_m3u8(
     m3u8_playlist=None,
     m3u8_index=None,
     m3u8_audio=None,

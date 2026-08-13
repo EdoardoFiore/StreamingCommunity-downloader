@@ -78,3 +78,39 @@ def test_me_reports_the_version(client, admin_credentials):
 def test_public_status_does_not_leak_the_version(client):
     """An unauthenticated visitor has no use for it."""
     assert "version" not in client.get("/api/auth/status").json()
+
+
+# ── The stream indicator and the stream it describes ───────────────────────────
+
+def _read(*parts) -> str:
+    from pathlib import Path
+
+    return (Path(__file__).parent.parent / "app").joinpath(*parts).read_text(encoding="utf-8")
+
+
+def test_the_stream_indicator_is_shown_exactly_when_the_stream_is_opened():
+    """Three files state the same rule, and they drifted apart once already.
+
+    progress.py requires DOWNLOAD or MANAGE_REQUESTS; app.js opens the
+    EventSource under the same test; the indicator itself had no gate at all, so
+    a user who can only make requests watched it say "Connessione..." forever —
+    a connection deliberately never attempted, reported as one that failed.
+    """
+    import re
+
+    html = _read("templates", "index.html")
+    match = re.search(r'id="stream-status"[^>]*data-perm="([^"]+)"', html)
+    assert match, "the stream indicator must be gated by the stream's own permissions"
+    shown_for = set(match.group(1).split("|"))
+
+    # The endpoint's requirement.
+    router = _read("routers", "progress.py")
+    required = set(re.findall(r"Permission\.(\w+)", router))
+    assert shown_for == required
+
+    # And the client only connects under the same condition.
+    app_js = _read("static", "app.js")
+    # Kept on one line so the match cannot wander back to an earlier if().
+    guard = re.search(r"if \(([^{\n]*)\)\s*\{\s*connectGlobalStream\(\);", app_js)
+    assert guard, "connectGlobalStream must stay behind a permission check"
+    assert set(re.findall(r"can\('(\w+)'\)", guard.group(1))) == required

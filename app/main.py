@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app import __version__, db
+from app import __version__, db, downloads_notify
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
@@ -19,9 +19,12 @@ from app.auth import users_router
 from app.auth.deps import AuthMiddleware
 from app.jobs import job_manager
 from app.requests import router as requests_router, service as requests_service
+from app.watches import poller as watch_poller, router as watches_router
 from app.schedule import ScheduleStore
 from app.config import AUTH_ENABLED, SCHEDULE_FILE
-from app.routers import domain, search, tv, downloads, progress, files, images, anime
+from app.routers import (
+    domain, search, tv, downloads, progress, files, images, anime, notification_channels,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,6 +88,9 @@ async def lifespan(app: FastAPI):
     db.run_migrations()
     auth_session.purge_expired()
     requests_service.register_job_listener()
+    # Second listener, registered after the request one so a request's own row is
+    # updated first: this one only speaks up for jobs no request owns.
+    downloads_notify.register_batch_listener()
     # Before anything can approve or complete a request: any row still
     # "approved" or "downloading" from a previous run has no in-memory worker
     # left, and never will — it needs recovering before the app is reachable.
@@ -93,7 +99,13 @@ async def lifespan(app: FastAPI):
     job_manager.set_schedule_store(store)
     job_manager.load_scheduled_from_store()
     job_manager.set_loop(asyncio.get_event_loop())
-    yield
+    # Started last: a new episode found by the poller becomes an approval, which
+    # submits a job, so the job manager has to be fully wired first.
+    poller_task = asyncio.create_task(watch_poller.watch_poller_loop())
+    try:
+        yield
+    finally:
+        poller_task.cancel()
 
 
 app = FastAPI(title="StreamingCommunity Web Panel", version=__version__, lifespan=lifespan)
@@ -111,6 +123,8 @@ app.include_router(users_router.router)
 app.include_router(requests_router.router)
 app.include_router(requests_router.notifications_router)
 app.include_router(domain.router)
+app.include_router(notification_channels.router)
+app.include_router(watches_router.router)
 app.include_router(search.router)
 app.include_router(tv.router)
 app.include_router(downloads.router)

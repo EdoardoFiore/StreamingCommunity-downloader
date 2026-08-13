@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import os
 import shutil
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -49,6 +51,53 @@ def _read_data() -> dict:
             return json.load(f)
     except FileNotFoundError:
         return {}
+
+
+# ── Disk usage ─────────────────────────────────────────────────────────────────
+#
+# Reported per *volume*, not per library: in practice all three libraries are
+# folders on the same mount, and three identical figures said nothing useful
+# while costing three stats of a possibly sleeping NFS share.
+
+_DISK_USAGE_TTL = 20  # seconds; the file manager reloads on every navigation
+_disk_usage_cache: dict = {"at": 0.0, "data": None}
+
+
+def _library_paths() -> list[str]:
+    paths = [lib["path"] for lib in _read_data().get("libraries", []) if lib.get("path")]
+    return paths or [str(VIDEOS_DIR)]
+
+
+def _compute_disk_usage() -> dict:
+    now = time.monotonic()
+    if _disk_usage_cache["data"] is not None and now - _disk_usage_cache["at"] < _DISK_USAGE_TTL:
+        return _disk_usage_cache["data"]
+
+    volumes: dict[int, dict] = {}
+    errors: list[str] = []
+    for path in _library_paths():
+        try:
+            device = os.stat(path).st_dev
+        except OSError as e:
+            # An unmounted or mistyped library path is an expected failure mode
+            # and must not blank out the volumes that are fine.
+            errors.append(str(e))
+            continue
+        if device in volumes:
+            volumes[device]["paths"].append(path)
+            continue
+        total, used, free = shutil.disk_usage(path)
+        volumes[device] = {"total": total, "used": used, "free": free, "paths": [path]}
+
+    result = {"volumes": list(volumes.values()), "errors": errors}
+    _disk_usage_cache["at"] = now
+    _disk_usage_cache["data"] = result
+    return result
+
+
+@router.get("/disk-usage", dependencies=CAN_VIEW)
+async def get_disk_usage():
+    return await asyncio.to_thread(_compute_disk_usage)
 
 
 def _build_tree(directory: Path, base: Path, excluded: set) -> list[dict]:
