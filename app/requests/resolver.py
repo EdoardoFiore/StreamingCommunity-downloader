@@ -148,6 +148,39 @@ class Resolution:
     submit: Callable[[], str]
 
 
+def _widen_to_everyone(common: dict, request: models.Request, available: dict):
+    """Download what everyone asked for, not only what this request asked for.
+
+    Requests for one title in different languages are kept apart on purpose, but
+    they all resolve to the same path, so whoever finished last decided what the
+    file held and quietly took the others' languages away. The union leaves a
+    file that satisfies all of them.
+
+    The extras are filtered against what the source offers *now*, and the
+    caller's own choice is never filtered. That difference is the point:
+    ``strict_audio`` must still fail loudly when the language this requester
+    chose has gone, while a language somebody else picked months ago must not
+    fail a download nobody else asked to be strict about.
+    """
+    audio, subtitles = models.wanted_languages(request)
+    offered_audio = {str(c).lower() for c in (available.get("audio") or [])}
+    offered_subs = {str(c).lower() for c in (available.get("subtitles") or [])}
+
+    mine_audio, mine_subs = request.audio_languages, request.subtitle_languages
+    if offered_audio:
+        audio = [l for l in audio if l in mine_audio or l.lower() in offered_audio]
+    if offered_subs:
+        subtitles = [l for l in subtitles if l in mine_subs or l.lower() in offered_subs]
+
+    common["audio_languages"] = audio
+    common["subtitle_languages"] = subtitles
+    if audio != mine_audio or subtitles != mine_subs:
+        logger.info(
+            "Request %s widened to what everyone wants: audio %s, subtitles %s",
+            request.id, audio, subtitles,
+        )
+
+
 def _check_audio(request: models.Request, available: dict):
     """Refuse to proceed when a requested audio track is gone.
 
@@ -245,6 +278,7 @@ def resolve(request: models.Request) -> Resolution:
             episode = _find_anime_episode(request)
             available = animeunity.get_episode_languages(episode["id"])
             _check_audio(request, available)
+            _widen_to_everyone(common, request, available)
 
             def submit():
                 return job_manager.submit_anime_episode(
@@ -261,6 +295,7 @@ def resolve(request: models.Request) -> Resolution:
 
             available = get_film_languages(int(request.external_id), domain)
             _check_audio(request, available)
+            _widen_to_everyone(common, request, available)
 
             def submit():
                 return job_manager.submit_film(
@@ -280,6 +315,7 @@ def resolve(request: models.Request) -> Resolution:
             int(request.external_id), episodes[index]["id"], domain, token
         )
         _check_audio(request, available)
+        _widen_to_everyone(common, request, available)
 
         def submit():
             return job_manager.submit_episode(

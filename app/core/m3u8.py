@@ -56,6 +56,29 @@ MAX_SEGMENT_BACKOFF = 8
 FAILURE_ABORT_STREAK = 200
 
 
+# One writer per destination file.
+#
+# Two requests for the same title in different languages are two requests on
+# purpose, but they resolve to the same path — the layout carries no language —
+# so downloading both at once had them writing the same file concurrently and
+# left it corrupt. The lock is held for the whole download, so the second waits
+# and then overwrites cleanly with its own complete file.
+#
+# In memory, which is the same assumption the rest of the panel makes: job state
+# lives in JobManager and the process is single by design.
+_destination_locks: dict[str, threading.Lock] = {}
+_destination_locks_guard = threading.Lock()
+
+
+def _destination_lock(path: str) -> threading.Lock:
+    key = os.path.normcase(os.path.abspath(path))
+    with _destination_locks_guard:
+        lock = _destination_locks.get(key)
+        if lock is None:
+            lock = _destination_locks[key] = threading.Lock()
+        return lock
+
+
 def _segment_backoff(attempt: int) -> float:
     """Exponential, capped, and jittered.
 
@@ -752,7 +775,35 @@ def fetch_master_languages(m3u8_url: str, referer: str) -> dict:
     return parser.available_languages()
 
 
-def download_m3u8(
+def download_m3u8(**kwargs):
+    """Download one title, with nobody else writing the same file meanwhile.
+
+    Two requests for the same title in different languages are deliberately kept
+    apart — the content key includes the chosen tracks — but they resolve to the
+    same path, because the library layout carries no language. Approving both
+    therefore had two downloads writing one file at the same time, and the
+    result was a corrupt film that still looked like a film.
+
+    Serialising them means the second waits and then writes its own complete
+    file over the first. Combined with resolving every request to the union of
+    what has been asked for, the file left behind is the one that satisfies
+    everybody rather than whoever finished last.
+
+    Every caller passes keyword arguments, which is what lets this wrap the real
+    body without restating its signature.
+    """
+    destination = kwargs.get("output_filename") or os.path.join("videos", "output.mp4")
+    lock = _destination_lock(destination)
+    if not lock.acquire(blocking=False):
+        logger.info("Waiting for another download to finish writing %s", destination)
+        lock.acquire()
+    try:
+        return _download_m3u8(**kwargs)
+    finally:
+        lock.release()
+
+
+def _download_m3u8(
     m3u8_playlist=None,
     m3u8_index=None,
     m3u8_audio=None,

@@ -249,6 +249,45 @@ def subscribers(request_id: int) -> list[int]:
     return [r["user_id"] for r in rows]
 
 
+# Statuses whose chosen tracks still describe what somebody expects to find in
+# the file. A denied or cancelled request asked for nothing; a failed one was
+# told so. The rest — including the ones already satisfied — are people who will
+# open this file expecting their language.
+LIVE_STATUSES = OPEN_STATUSES + (COMPLETED, AVAILABLE)
+
+
+def wanted_languages(request: "Request") -> tuple[list[str], list[str]]:
+    """Every audio and subtitle language anyone wants in this exact file.
+
+    Requests for one title in different languages are kept apart on purpose, but
+    they all resolve to the same path, so the last one to finish used to decide
+    what the file contained and quietly take the others' languages away.
+    Downloading the union instead leaves a file that satisfies all of them.
+
+    Identity here is the content *without* the tracks — the same thing the
+    destination path is built from — which is exactly the collision being
+    resolved.
+    """
+    rows = db.query(
+        "SELECT audio_languages, subtitle_languages FROM jf_request "
+        "WHERE source = ? AND media_type = ? AND external_id = ? "
+        "AND IFNULL(season, -1) = ? AND IFNULL(episode_number, '') = ? "
+        f"AND status IN ({','.join('?' * len(LIVE_STATUSES))})",
+        (
+            request.source, request.media_type, str(request.external_id),
+            -1 if request.season is None else request.season,
+            "" if request.episode_number is None else str(request.episode_number),
+            *LIVE_STATUSES,
+        ),
+    )
+
+    audio, subtitles = set(request.audio_languages), set(request.subtitle_languages)
+    for row in rows:
+        audio.update(json.loads(row["audio_languages"] or "[]"))
+        subtitles.update(json.loads(row["subtitle_languages"] or "[]"))
+    return sorted(audio), sorted(subtitles)
+
+
 def add_subscribers(request_id: int, user_ids: list[int]) -> None:
     """Add people to a request's notification list.
 
