@@ -32,6 +32,13 @@ DOWNLOAD_FAILED = "download_failed"
 DOWNLOAD_BATCH_COMPLETED = "download_batch_completed"
 DOWNLOAD_BATCH_FAILED = "download_batch_failed"
 
+# Followed series. A follow by someone who cannot start downloads asks a
+# question at the moment it is made, rather than staying silent until the source
+# happens to publish — which can be weeks, and left the follower with nothing to
+# look at and the approver with nothing to decide.
+WATCH_NEEDS_APPROVAL = "watch_needs_approval"
+WATCH_AUTO_APPROVED = "watch_auto_approved"
+
 # The single vocabulary: the per-channel event picker, the server-side validator
 # and the bell's icon table all key off this.
 ALL_EVENTS = (
@@ -48,6 +55,8 @@ ALL_EVENTS = (
     DOWNLOAD_FAILED,
     DOWNLOAD_BATCH_COMPLETED,
     DOWNLOAD_BATCH_FAILED,
+    WATCH_NEEDS_APPROVAL,
+    WATCH_AUTO_APPROVED,
 )
 
 # Outcome vocabulary, kept as plain strings so this module never imports apprise.
@@ -71,6 +80,8 @@ EVENT_NOTIFY_TYPE = {
     DOWNLOAD_FAILED: FAILURE,
     DOWNLOAD_BATCH_COMPLETED: SUCCESS,
     DOWNLOAD_BATCH_FAILED: FAILURE,
+    WATCH_NEEDS_APPROVAL: WARNING,
+    WATCH_AUTO_APPROVED: SUCCESS,
 }
 
 

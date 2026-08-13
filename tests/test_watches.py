@@ -314,3 +314,108 @@ def test_an_approver_can_check_a_watch_they_do_not_follow(client, panel):
                            headers={"X-CSRF-Token": csrf})
 
     assert response.status_code == 200, response.text
+
+
+# ── Arming a series before an episode exists ───────────────────────────────────
+
+def _bell(user):
+    from app.requests import notify
+
+    return [n["message"] for n in notify.list_for_user(user.id)]
+
+
+def test_following_asks_the_approvers_straight_away(client, panel):
+    """The question used to be asked only when the source published, which for a
+    series between seasons is weeks later and invisible until then."""
+    boss = _user("boss", ALL_PERMISSIONS)
+    bob = _user("bob", Permission.REQUEST)
+
+    _follow(client, _login(client, bob))
+
+    assert any("bob segue «Test Series»" in m for m in _bell(boss)), _bell(boss)
+
+
+def test_a_follower_who_can_download_asks_nobody(client, panel):
+    """Their episodes download by themselves, so there is no decision to ask
+    for and no reason to put one on an approver's bell."""
+    boss = _user("boss", ALL_PERMISSIONS)
+    ann = _user("ann", Permission.REQUEST | Permission.DOWNLOAD)
+
+    _follow(client, _login(client, ann))
+
+    assert not any("segue" in m for m in _bell(boss)), _bell(boss)
+
+
+def test_a_second_follower_does_not_ask_again(client, panel):
+    """One series, one decision."""
+    boss = _user("boss", ALL_PERMISSIONS)
+    bob = _user("bob", Permission.REQUEST)
+    carol = _user("carol", Permission.REQUEST)
+
+    _follow(client, _login(client, bob))
+    _follow(client, _login(client, carol))
+
+    assert len([m for m in _bell(boss) if "segue «Test Series»" in m]) == 1
+
+
+def test_an_approver_can_arm_a_series_before_any_episode_exists(client, panel, stub_jobs):
+    """The whole point: arm it now, and the first episode the source publishes
+    downloads on its own instead of waiting in the queue."""
+    bob = _user("bob", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+
+    boss = _user("boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    response = client.post(f"/api/watches/{watch_id}/auto-approve",
+                           json={"enabled": True}, headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["auto_approve"] is True
+    assert watch_models.get(watch_id).auto_approve is True
+
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+    poller.run_poll_cycle()
+
+    created = request_models.list_all()[0]
+    assert created.status == request_models.DOWNLOADING
+    assert stub_jobs, "the download must actually have been submitted"
+
+
+def test_arming_tells_the_followers(client, panel):
+    bob = _user("bob", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+
+    boss = _user("boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    client.post(f"/api/watches/{watch_id}/auto-approve",
+                json={"enabled": True}, headers={"X-CSRF-Token": csrf})
+
+    assert any("verranno scaricati automaticamente" in m for m in _bell(bob)), _bell(bob)
+
+
+def test_disarming_sends_the_series_back_to_the_queue(client, panel, stub_jobs):
+    bob = _user("bob", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    boss = _user("boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    headers = {"X-CSRF-Token": csrf}
+
+    client.post(f"/api/watches/{watch_id}/auto-approve", json={"enabled": True}, headers=headers)
+    client.post(f"/api/watches/{watch_id}/auto-approve", json={"enabled": False}, headers=headers)
+
+    assert watch_models.get(watch_id).auto_approve is False
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+    poller.run_poll_cycle()
+    assert request_models.list_all()[0].status == request_models.PENDING
+
+
+def test_arming_needs_the_permission(client, panel):
+    bob = _user("bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    watch_id = _follow(client, csrf).json()["id"]
+
+    response = client.post(f"/api/watches/{watch_id}/auto-approve",
+                           json={"enabled": True}, headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 403
+    assert watch_models.get(watch_id).auto_approve is False

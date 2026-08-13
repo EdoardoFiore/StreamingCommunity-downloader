@@ -126,7 +126,65 @@ async def follow_series(body: WatchCreate, http_request: HttpRequest):
                 detail="Impossibile leggere gli episodi dalla fonte: serie non seguita",
             )
 
+        # Asked once per series, not once per follower: a second person joining
+        # an unarmed watch does not create a second decision.
+        await asyncio.to_thread(_ask_for_arming, watch, user_id)
+
     return _public(watch)
+
+
+def _ask_for_arming(watch: models.Watch, user_id: int | None) -> None:
+    """Tell approvers about a follow that will need them, at the moment it is made.
+
+    Without this the question was only asked when the source published, because
+    that is when the first request appears — weeks later for a series between
+    seasons, and invisible until then. Arming the series in advance means the
+    first new episode downloads on its own instead of waiting in a queue.
+
+    Nothing is sent when the series already downloads by itself: the owner can
+    start downloads, or an approver has armed it before. There is no decision to
+    ask for.
+    """
+    from app.requests import notify
+    from app.watches import poller
+
+    if user_id is None or poller.may_auto_download(watch):
+        return
+    who = request_models.username(user_id) or "un utente"
+    notify.notify(
+        notify.WATCH_NEEDS_APPROVAL,
+        f"{who} segue «{watch.title}»: approva la serie per scaricare i nuovi "
+        f"episodi automaticamente, altrimenti ognuno passerà dalla coda.",
+        notify.approver_ids(),
+    )
+
+
+class AutoApproveBody(BaseModel):
+    enabled: bool = True
+
+
+@router.post("/{watch_id}/auto-approve", dependencies=CAN_MANAGE)
+async def set_auto_approve(watch_id: int, body: AutoApproveBody):
+    """Arm or disarm a followed series.
+
+    The same flag the "Auto i prossimi" checkbox sets when approving a request,
+    reachable without waiting for a request to exist.
+    """
+    watch = models.get(watch_id)
+    if watch is None or not watch.enabled:
+        raise HTTPException(status_code=404, detail="Serie non trovata")
+
+    updated = await asyncio.to_thread(models.set_auto_approve, watch_id, body.enabled)
+    if body.enabled and not watch.auto_approve:
+        from app.requests import notify
+
+        await asyncio.to_thread(
+            notify.notify,
+            notify.WATCH_AUTO_APPROVED,
+            f"«{watch.title}»: i nuovi episodi verranno scaricati automaticamente.",
+            models.followers(watch_id),
+        )
+    return _public(updated)
 
 
 @router.delete("/{watch_id}", dependencies=CAN_FOLLOW)

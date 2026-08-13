@@ -106,7 +106,7 @@ def _draft_request(watch: models.Watch, season, episode_number) -> request_model
     )
 
 
-def _may_auto_download(watch: models.Watch) -> bool:
+def may_auto_download(watch: models.Watch) -> bool:
     """Whether new episodes of this series skip the approval queue.
 
     Either the owner can start downloads on their own anyway, or an approver has
@@ -214,7 +214,7 @@ def process_episode(watch: models.Watch, key: str, episode: dict) -> str:
     )
 
     outcome = "queued"
-    if created and request.status == request_models.PENDING and _may_auto_download(watch):
+    if created and request.status == request_models.PENDING and may_auto_download(watch):
         try:
             service.approve(request.id, decided_by=watch.created_by)
             outcome = "auto_approved"

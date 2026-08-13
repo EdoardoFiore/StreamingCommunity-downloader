@@ -332,7 +332,10 @@ async function loadWatches() {
   const c = document.getElementById('watches-list');
   if (!c) return;
   try {
-    const res = await fetch('/api/watches/mine');
+    // An approver sees every followed series, not only their own: arming a
+    // series is their decision, and they cannot make it on a list that hides
+    // the follows waiting for it.
+    const res = await fetch(can('MANAGE_REQUESTS') ? '/api/watches' : '/api/watches/mine');
     if (!res.ok) { c.innerHTML = '<p class="text-muted">Impossibile caricare le serie seguite.</p>'; return; }
     const data = await safeJson(res);
     _watches = data.watches || [];
@@ -367,6 +370,22 @@ function renderWatchesList() {
       : '<span class="badge bg-yellow-lt">passa dalla coda</span>';
     const kind = w.media_type === 'anime' ? 'Anime' : 'Serie TV';
     const audio = w.audio_languages.length ? w.audio_languages.join(', ') : 'originale';
+    // Arming is the approver's decision, and only worth offering where it would
+    // change something: a series that already downloads by itself has nothing
+    // to approve.
+    const canArm = can('MANAGE_REQUESTS') && w.created_by !== null;
+    const armButton = !canArm ? '' : w.auto_approve
+      ? `<button class="btn btn-sm btn-outline-secondary" onclick="setWatchAutoApprove(${w.id}, false)"
+                 title="I nuovi episodi torneranno a passare dalla coda di approvazione">
+           <i class="ti ti-bell-x me-1"></i>Togli automatico
+         </button>`
+      : `<button class="btn btn-sm btn-outline-success" onclick="setWatchAutoApprove(${w.id}, true)"
+                 title="Approva la serie una volta: i nuovi episodi verranno scaricati senza passare dalla coda">
+           <i class="ti ti-bell-check me-1"></i>Approva automatico
+         </button>`;
+    const who = can('MANAGE_REQUESTS') && w.followers && w.followers.length
+      ? `<span class="req-dot">·</span><i class="ti ti-user"></i> ${escapeHtml(w.followers.join(', '))}`
+      : '';
     return `
       <div class="req-row">
         <div class="req-main">
@@ -377,11 +396,13 @@ function renderWatchesList() {
             <i class="ti ti-volume"></i> ${escapeHtml(audio)}
             <span class="req-dot">·</span>
             <i class="ti ti-refresh"></i> ${escapeHtml(fmtLastChecked(w.last_checked_at))}
+            ${who}
           </div>
         </div>
         <div class="req-side">
           ${badge}
           <div class="req-actions">
+            ${armButton}
             <button class="btn btn-sm btn-outline-secondary" id="watch-check-${w.id}"
                     onclick="checkWatchNow(${w.id})"
                     title="Cerca subito nuovi episodi, senza aspettare il controllo automatico">
@@ -539,6 +560,29 @@ async function checkWatchNow(watchId) {
   }
 }
 
+// Arming a series before an episode exists, which is the whole point: waiting
+// for the first request means waiting for the source to publish.
+async function setWatchAutoApprove(watchId, enabled) {
+  const watch = _watches.find(w => w.id === watchId);
+  const name = watch ? watch.title : watchId;
+  if (!enabled && !await scConfirm(`I nuovi episodi di «${name}» torneranno in coda. Procedere?`)) return;
+  try {
+    const res = await fetch(`/api/watches/${watchId}/auto-approve`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled}),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) { showToast(data.detail || 'Operazione fallita', 'danger'); return; }
+    showToast(enabled
+      ? `«${name}»: i nuovi episodi verranno scaricati automaticamente`
+      : `«${name}»: i nuovi episodi torneranno in coda`, 'success');
+    await loadWatches();
+  } catch (e) {
+    showToast('Errore di rete', 'danger');
+  }
+}
+
 async function unfollowWatch(watchId) {
   const watch = _watches.find(w => w.id === watchId);
   if (!await scConfirm(`Smettere di seguire «${watch ? watch.title : watchId}»?`)) return;
@@ -569,6 +613,8 @@ const NOTIFICATION_ICONS = {
   download_failed: 'ti-alert-triangle',
   download_batch_completed: 'ti-checkbox',
   download_batch_failed: 'ti-alert-octagon',
+  watch_needs_approval: 'ti-bell-question',
+  watch_auto_approved: 'ti-bell-check',
 };
 
 const NOTIFICATION_LABELS = {
@@ -585,6 +631,8 @@ const NOTIFICATION_LABELS = {
   download_failed: 'Download fallito',
   download_batch_completed: 'Stagione o serie completata',
   download_batch_failed: 'Stagione o serie fallita',
+  watch_needs_approval: 'Serie seguita da approvare',
+  watch_auto_approved: 'Serie approvata',
 };
 
 // Explicit order, so the picker does not depend on object key order.
@@ -599,6 +647,10 @@ const NOTIFICATION_EVENT_GROUPS = [
     label: 'Download diretti',
     events: ['download_completed', 'download_failed',
              'download_batch_completed', 'download_batch_failed'],
+  },
+  {
+    label: 'Serie seguite',
+    events: ['watch_needs_approval', 'watch_auto_approved'],
   },
 ];
 
