@@ -502,7 +502,7 @@ async function toggleFollowSeries(kind) {
 
 async function unfollowWatch(watchId) {
   const watch = _watches.find(w => w.id === watchId);
-  if (!confirm(`Smettere di seguire «${watch ? watch.title : watchId}»?`)) return;
+  if (!await scConfirm(`Smettere di seguire «${watch ? watch.title : watchId}»?`)) return;
   try {
     const res = await fetch(`/api/watches/${watchId}`, {method: 'DELETE'});
     if (!res.ok) { showToast('Errore', 'danger'); return; }
@@ -904,7 +904,7 @@ async function toggleNotificationChannel(id, enabled) {
 
 async function deleteNotificationChannel(id) {
   const channel = _notifChannels.find(c => c.id === id);
-  if (!confirm(`Eliminare il canale "${channel ? channel.name : id}"?`)) return;
+  if (!await scConfirm(`Eliminare il canale «${channel ? channel.name : id}»?`)) return;
   try {
     const res = await fetch(`/api/notification-channels/${id}`, {method: 'DELETE'});
     if (!res.ok) throw new Error();

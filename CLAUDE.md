@@ -126,6 +126,10 @@ anything under a mounted static directory is readable by unauthenticated visitor
 - **External channels have no in-app recipient to wait for.** `AppriseChannel` fires with an empty
   user list on purpose: a direct download in open mode has no account, but the webhook is still the
   point. `InAppChannel` keeps the guard — with no recipients there is nothing to insert.
+- **Never `confirm()`, `alert()` or `prompt()` in the frontend.** Confirmations go through
+  `scConfirm()` and text entry through `scPrompt()` in `app/static/app.js`, which resolve a Promise
+  from a Tabler modal. A browser dialog ignores the panel's theme, cannot be styled, and on mobile
+  reads as a page-level warning rather than as part of the interface.
 - **An empty `events` array on a notification channel means *every* event**, not none. Any UI
   offering a selection has to express "all" as its own state, or unchecking the last box silently
   subscribes to everything.

@@ -632,6 +632,15 @@
        glyph gets inverted with it and turns into a dark blob — the opposite of
        the intent. The glyph is supplied white here instead, and the filter is
        switched off so the chip stays a chip. */
+    /* Tabler floats it in the corner (position:absolute, 3.5rem, z-index 10),
+       so it lands on top of anything else placed at the right of the header —
+       the follow button, in the episode browser. Put back in the flow so the
+       header can lay its children out as a row. */
+    .modal-header > .btn-close {
+      position: static !important;
+      width: auto !important;
+      height: auto !important;
+    }
     .modal-header .btn-close {
       filter: none !important;
       opacity: .85 !important;
