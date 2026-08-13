@@ -229,3 +229,55 @@ def test_an_untagged_track_is_not_asked_for_by_name(monkeypatch, tmp_path):
                                 {"audio": ["eng"], "subtitles": []})
 
     assert common["audio_languages"] == ["eng"]
+
+
+def test_approving_both_at_once_still_downloads_the_union(
+    client, admin_credentials, source, stub_jobs
+):
+    """The question the field asks: two requests for one film, different tracks,
+    approved together. Both are live when either resolves, so both compute the
+    same union and whichever writes second writes the same complete file."""
+    from app.auth.permissions import ALL_PERMISSIONS
+
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    carol = _user(client, "carol", Permission.REQUEST)
+    _create(client, _login(client, bob),
+            {**FILM_BODY, "audio_languages": ["ita"], "subtitle_languages": []})
+    _create(client, _login(client, carol),
+            {**FILM_BODY, "audio_languages": ["eng"], "subtitle_languages": ["ita"]})
+
+    boss = _user(client, "boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    ids = [r.id for r in request_models.list_all()]
+    response = client.post("/api/requests/approve-batch", json={"ids": ids},
+                           headers={"X-CSRF-Token": csrf})
+    assert response.status_code == 202, response.text
+
+    assert len(stub_jobs) == 2
+    for _, _, kwargs in stub_jobs:
+        assert kwargs["audio_languages"] == ["eng", "ita"]
+        assert kwargs["subtitle_languages"] == ["ita"]
+
+
+def test_a_pending_request_already_counts(client, admin_credentials, source, stub_jobs):
+    """Approving one while the other is still waiting downloads both languages,
+    so the second approval finds its track already there."""
+    from app.auth.permissions import ALL_PERMISSIONS
+
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    carol = _user(client, "carol", Permission.REQUEST)
+    _create(client, _login(client, bob),
+            {**FILM_BODY, "audio_languages": ["ita"], "subtitle_languages": []})
+    _create(client, _login(client, carol),
+            {**FILM_BODY, "audio_languages": ["eng"], "subtitle_languages": []})
+
+    boss = _user(client, "boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    italian = [r for r in request_models.list_all() if r.audio_languages == ["ita"]][0]
+    client.post(f"/api/requests/{italian.id}/approve", json={},
+                headers={"X-CSRF-Token": csrf})
+
+    assert len(stub_jobs) == 1
+    assert stub_jobs[0][2]["audio_languages"] == ["eng", "ita"]
