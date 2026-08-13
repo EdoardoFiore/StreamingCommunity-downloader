@@ -121,6 +121,56 @@ def _may_auto_download(watch: models.Watch) -> bool:
     return bool(permissions & int(Permission.DOWNLOAD))
 
 
+def _submit_direct(watch: models.Watch, season, number) -> str:
+    """Download a new episode straight away, with no request behind it.
+
+    The path taken when the panel runs without accounts: there is no queue to
+    put anything in and nobody to approve it, which is the same reason open mode
+    downloads directly everywhere else. The source is re-read here rather than
+    reusing what the poll enumerated, for the reason the approval path re-reads
+    it too — tokens are short-lived and links die.
+
+    ``strict_audio`` stays on: a missing language must fail loudly, never be
+    quietly swapped for another.
+    """
+    from app.jobs import job_manager
+
+    common = dict(
+        year=watch.year,
+        audio_languages=watch.audio_languages,
+        subtitle_languages=watch.subtitle_languages,
+        strict_audio=True,
+        user_id=None,
+    )
+
+    if watch.media_type == models.ANIME:
+        from app.core import animeunity
+
+        wanted = str(number)
+        for episode in animeunity.get_episodes(watch.external_id):
+            if str(episode.get("number")) == wanted:
+                return job_manager.submit_anime_episode(
+                    watch.external_id, episode, watch.title,
+                    anime_type=watch.anime_type or "tv", **common,
+                )
+        raise RuntimeError(f"episodio {wanted} non più presente su AnimeUnity")
+
+    from app.core.page import get_domain_version
+    from app.core.tv import get_info_season, get_token
+
+    tv_id = int(watch.external_id)
+    domain = resolver.current_domain()
+    version = get_domain_version(domain) or ""
+    token = get_token(tv_id, domain)
+    episodes = get_info_season(tv_id, watch.slug or "", domain, version, token, season or 1)
+    for index, episode in enumerate(episodes or []):
+        if str(episode["n"]) == str(number):
+            return job_manager.submit_episode(
+                tv_id, episodes, index, domain, token, watch.title, season or 1, **common,
+            )
+    raise RuntimeError(f"episodio S{season}E{number} non più presente sulla fonte")
+
+
 def process_episode(watch: models.Watch, key: str, episode: dict) -> str:
     """Handle one not-yet-seen episode. Returns what was done, for the log."""
     season = episode.get("season") if watch.media_type == models.TV else None
@@ -133,6 +183,18 @@ def process_episode(watch: models.Watch, key: str, episode: dict) -> str:
             return "already_in_library"
     except Exception:
         logger.exception("Library check failed for watch %s episode %s", watch.id, key)
+
+    if watch.created_by is None:
+        # No accounts: no queue to put this in and nobody to approve it, so it
+        # downloads the way everything else does in open mode.
+        try:
+            _submit_direct(watch, season, number)
+            outcome = "downloading"
+        except Exception:
+            logger.exception("Direct download failed for watch %s episode %s", watch.id, key)
+            outcome = "submit_failed"
+        models.mark_seen(watch.id, key)
+        return outcome
 
     request, created = service.create_request(
         requested_by=watch.created_by,

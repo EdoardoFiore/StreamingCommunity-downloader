@@ -13,36 +13,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/watches", tags=["watches"])
 
 
-def require_accounts(http_request: HttpRequest):
-    """Refuse in open mode, where there is no account to own a watch.
-
-    A watch is stored against a user: they own it, they are notified about it,
-    and their DOWNLOAD permission decides whether new episodes skip the queue.
-    Open mode has one implicit user with no row in ``jf_user``, so following a
-    series would fail on the foreign key — the same reasoning that keeps the
-    request queue out of open mode.
+def acting_user_id(http_request: HttpRequest) -> int | None:
+    """Who owns the watch, or None when the panel runs without accounts.
 
     The check is on the user the middleware resolved rather than on
     ``AUTH_ENABLED``: that constant is read at import time, and binding it in a
     fourth module would be a fourth place to patch. Both routes into open mode
-    end at this same sentinel user anyway.
+    end at this same sentinel user, which has no row in ``jf_user``.
     """
-    if current_user(http_request) is OPEN_MODE_USER:
-        raise HTTPException(
-            status_code=400,
-            detail="Le serie seguite richiedono il collegamento a Jellyfin",
-        )
-    return current_user(http_request)
+    user = current_user(http_request)
+    return None if user is OPEN_MODE_USER else user.id
 
 
-# Following a series only ever produces requests, so whoever may ask for content
-# may follow it; the permission check that matters happens later, when the poller
-# decides whether a new episode skips the queue.
-CAN_FOLLOW = [
-    Depends(require(Permission.REQUEST, Permission.DOWNLOAD, mode="or")),
-    Depends(require_accounts),
+# Following a series only ever produces downloads the caller could start anyway,
+# so whoever may ask for content may follow it. What that follow then does — go
+# through the queue or download straight away — is decided by the poller.
+CAN_FOLLOW = [Depends(require(Permission.REQUEST, Permission.DOWNLOAD, mode="or"))]
+# Without accounts there are no approvers, and the single implicit user holds
+# DOWNLOAD: the admin-side views stay reachable rather than locking everyone out.
+CAN_MANAGE = [
+    Depends(require(Permission.MANAGE_REQUESTS, Permission.DOWNLOAD, mode="or"))
 ]
-CAN_MANAGE = [Depends(require(Permission.MANAGE_REQUESTS)), Depends(require_accounts)]
 
 
 class WatchCreate(BaseModel):
@@ -67,8 +58,7 @@ def _public(watch: models.Watch) -> dict:
 
 @router.get("/mine", dependencies=CAN_FOLLOW)
 def list_my_watches(http_request: HttpRequest):
-    user = current_user(http_request)
-    return {"watches": [_public(w) for w in models.list_for_user(user.id)]}
+    return {"watches": [_public(w) for w in models.list_for_user(acting_user_id(http_request))]}
 
 
 @router.get("", dependencies=CAN_MANAGE)
@@ -79,14 +69,16 @@ def list_watches():
 @router.get("/status", dependencies=CAN_FOLLOW)
 def watch_status(source: str, media_type: str, external_id: str, http_request: HttpRequest):
     """Whether this series is followed, for the toggle's initial state."""
-    user = current_user(http_request)
+    user_id = acting_user_id(http_request)
     watch = models.find_open(source, media_type, external_id)
     if watch is None:
         return {"following": False, "watch_id": None, "followed_by_me": False}
     return {
         "following": True,
         "watch_id": watch.id,
-        "followed_by_me": user.id in models.followers(watch.id),
+        # Without accounts there is one audience, so a followed series is
+        # followed by whoever is looking.
+        "followed_by_me": user_id is None or user_id in models.followers(watch.id),
         "auto_approve": watch.auto_approve,
     }
 
@@ -95,7 +87,7 @@ def watch_status(source: str, media_type: str, external_id: str, http_request: H
 async def follow_series(body: WatchCreate, http_request: HttpRequest):
     if body.media_type not in (models.TV, models.ANIME):
         raise HTTPException(status_code=400, detail="Si possono seguire solo serie e anime")
-    user = current_user(http_request)
+    user_id = acting_user_id(http_request)
 
     watch, created = await asyncio.to_thread(
         models.create,
@@ -109,7 +101,7 @@ async def follow_series(body: WatchCreate, http_request: HttpRequest):
         anime_type=body.anime_type,
         audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,
-        created_by=user.id,
+        created_by=user_id,
     )
 
     if created:
@@ -140,16 +132,18 @@ async def follow_series(body: WatchCreate, http_request: HttpRequest):
 @router.delete("/{watch_id}", dependencies=CAN_FOLLOW)
 async def unfollow_series(watch_id: int, http_request: HttpRequest):
     user = current_user(http_request)
+    user_id = acting_user_id(http_request)
     watch = models.get(watch_id)
     if watch is None or not watch.enabled:
         raise HTTPException(status_code=404, detail="Serie non trovata")
 
-    if user.has(Permission.MANAGE_REQUESTS) and user.id not in models.followers(watch_id):
+    if user_id is not None and user.has(Permission.MANAGE_REQUESTS) \
+            and user_id not in models.followers(watch_id):
         # An approver stopping someone else's watch stops it for everyone.
         await asyncio.to_thread(models.disable, watch_id)
         return {"ok": True, "stopped": True}
 
-    stopped = await asyncio.to_thread(models.unfollow, watch_id, user.id)
+    stopped = await asyncio.to_thread(models.unfollow, watch_id, user_id)
     return {"ok": True, "stopped": stopped}
 
 

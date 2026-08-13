@@ -290,11 +290,83 @@ _V4_SERIES_WATCH = [
 ]
 
 
+# A watch used to require an account to own it, which made the whole feature
+# unavailable in open mode. It is now ownerless there: `created_by` is nullable
+# and NULL means "the panel itself".
+#
+# SQLite cannot relax NOT NULL in place, so the table is rebuilt — and the two
+# child tables with it, in this order. Dropping the old parent while children
+# still pointed at it would cascade their rows away; by the time it is dropped,
+# the copies already reference the new one and the originals are gone.
+_V5_WATCHES_WITHOUT_ACCOUNTS = [
+    """
+    CREATE TABLE jf_series_watch_v5 (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        source             TEXT    NOT NULL,
+        media_type         TEXT    NOT NULL,
+        external_id        TEXT    NOT NULL,
+        slug               TEXT,
+        title              TEXT    NOT NULL,
+        year               TEXT,
+        poster             TEXT,
+        anime_type         TEXT,
+        audio_languages    TEXT    NOT NULL,
+        subtitle_languages TEXT    NOT NULL,
+        -- NULL when the panel runs without accounts. Otherwise the owner, whose
+        -- DOWNLOAD permission decides if new episodes skip the queue.
+        created_by         INTEGER REFERENCES jf_user(id),
+        auto_approve       INTEGER NOT NULL DEFAULT 0,
+        enabled            INTEGER NOT NULL DEFAULT 1,
+        last_checked_at    TEXT,
+        created_at         TEXT    NOT NULL,
+        updated_at         TEXT    NOT NULL
+    )
+    """,
+    """
+    INSERT INTO jf_series_watch_v5
+        SELECT id, source, media_type, external_id, slug, title, year, poster, anime_type,
+               audio_languages, subtitle_languages, created_by, auto_approve, enabled,
+               last_checked_at, created_at, updated_at
+        FROM jf_series_watch
+    """,
+    """
+    CREATE TABLE jf_series_watch_subscriber_v5 (
+        watch_id   INTEGER NOT NULL REFERENCES jf_series_watch_v5(id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL REFERENCES jf_user(id) ON DELETE CASCADE,
+        created_at TEXT    NOT NULL,
+        PRIMARY KEY (watch_id, user_id)
+    )
+    """,
+    "INSERT INTO jf_series_watch_subscriber_v5 SELECT * FROM jf_series_watch_subscriber",
+    """
+    CREATE TABLE jf_watch_seen_episode_v5 (
+        watch_id    INTEGER NOT NULL REFERENCES jf_series_watch_v5(id) ON DELETE CASCADE,
+        episode_key TEXT    NOT NULL,
+        created_at  TEXT    NOT NULL,
+        PRIMARY KEY (watch_id, episode_key)
+    )
+    """,
+    "INSERT INTO jf_watch_seen_episode_v5 SELECT * FROM jf_watch_seen_episode",
+    "DROP TABLE jf_series_watch_subscriber",
+    "DROP TABLE jf_watch_seen_episode",
+    "DROP TABLE jf_series_watch",
+    "ALTER TABLE jf_series_watch_v5 RENAME TO jf_series_watch",
+    "ALTER TABLE jf_series_watch_subscriber_v5 RENAME TO jf_series_watch_subscriber",
+    "ALTER TABLE jf_watch_seen_episode_v5 RENAME TO jf_watch_seen_episode",
+    """
+    CREATE UNIQUE INDEX jf_series_watch_open ON jf_series_watch(source, media_type, external_id)
+        WHERE enabled = 1
+    """,
+    "CREATE INDEX jf_series_watch_enabled ON jf_series_watch(enabled)",
+]
+
+
 MIGRATIONS: list[list[str]] = [
     _V1_AUTH,
     _V2_REQUESTS,
     _V3_NOTIFICATION_CHANNELS,
     _V4_SERIES_WATCH,
+    _V5_WATCHES_WITHOUT_ACCOUNTS,
 ]
 
 

@@ -103,8 +103,14 @@ def list_all(enabled_only: bool = True) -> list[Watch]:
     return [_row_to_watch(r) for r in db.query(sql)]
 
 
-def list_for_user(user_id: int) -> list[Watch]:
-    """Every active watch the user follows, whether or not they started it."""
+def list_for_user(user_id: int | None) -> list[Watch]:
+    """Every active watch the user follows, whether or not they started it.
+
+    Without accounts there is nobody to scope to and only one audience, so the
+    panel's own watches are the list.
+    """
+    if user_id is None:
+        return list_all()
     rows = db.query(
         "SELECT w.* FROM jf_series_watch w "
         "JOIN jf_series_watch_subscriber s ON s.watch_id = w.id "
@@ -132,7 +138,7 @@ def follower_names(watch_id: int) -> list[str]:
 
 
 def owner_permissions(watch_id: int) -> int | None:
-    """The owner's current permission bits.
+    """The owner's current permission bits, or None for an ownerless watch.
 
     Read live on every poll rather than frozen on the watch: revoking someone's
     DOWNLOAD permission has to send their followed series back through the queue.
@@ -155,7 +161,7 @@ def create(
     title: str,
     audio_languages: list[str],
     subtitle_languages: list[str],
-    created_by: int,
+    created_by: int | None,
     slug: str = None,
     year: str = None,
     poster: str = None,
@@ -166,6 +172,9 @@ def create(
     Returns ``(watch, created)``. A second user asking for the same series does
     not get a second poller: they subscribe to the one that already exists, and
     the original follower stays the owner whose permission decides auto-download.
+
+    ``created_by`` is None when the panel runs without accounts: the watch then
+    belongs to the panel, and there is no subscriber row to write.
     """
     timestamp = now_iso()
     with db.tx() as conn:
@@ -175,11 +184,12 @@ def create(
             (source, media_type, str(external_id)),
         ).fetchone()
         if existing is not None:
-            conn.execute(
-                "INSERT OR IGNORE INTO jf_series_watch_subscriber(watch_id, user_id, created_at) "
-                "VALUES(?, ?, ?)",
-                (existing["id"], created_by, timestamp),
-            )
+            if created_by is not None:
+                conn.execute(
+                    "INSERT OR IGNORE INTO jf_series_watch_subscriber(watch_id, user_id, created_at) "
+                    "VALUES(?, ?, ?)",
+                    (existing["id"], created_by, timestamp),
+                )
             return _row_to_watch(existing), False
 
         cursor = conn.execute(
@@ -193,21 +203,28 @@ def create(
             ),
         )
         watch_id = cursor.lastrowid
-        conn.execute(
-            "INSERT INTO jf_series_watch_subscriber(watch_id, user_id, created_at) VALUES(?,?,?)",
-            (watch_id, created_by, timestamp),
-        )
+        if created_by is not None:
+            conn.execute(
+                "INSERT INTO jf_series_watch_subscriber(watch_id, user_id, created_at) VALUES(?,?,?)",
+                (watch_id, created_by, timestamp),
+            )
         row = conn.execute("SELECT * FROM jf_series_watch WHERE id = ?", (watch_id,)).fetchone()
     return _row_to_watch(row), True
 
 
-def unfollow(watch_id: int, user_id: int) -> bool:
+def unfollow(watch_id: int, user_id: int | None) -> bool:
     """Drop one follower; disable the watch once the last one leaves.
 
     Kept as a soft delete so the seen-episode ledger survives: re-following later
     would otherwise re-seed from scratch, which is harmless, but the history of
     what the panel already handled is worth keeping.
+
+    Without accounts there are no followers to drop: unfollowing is simply
+    stopping the watch.
     """
+    if user_id is None:
+        disable(watch_id)
+        return True
     with db.tx() as conn:
         conn.execute(
             "DELETE FROM jf_series_watch_subscriber WHERE watch_id = ? AND user_id = ?",
