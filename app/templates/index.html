@@ -622,6 +622,28 @@
     .btn-close:hover { opacity: 1 !important; }
     .btn-close-white { filter: invert(1) !important; }
 
+    /* Bootstrap's close glyph is a dark SVG meant for light backgrounds. Even
+       inverted, at .5 opacity it all but vanishes against a dark modal header,
+       so in modals it gets full contrast and a faint chip to read as a target.
+       Scoped to modals: the toast close button sits on a coloured alert and has
+       its own rule below. */
+    .modal-header .btn-close {
+      opacity: .8 !important;
+      background-color: rgba(255,255,255,.07) !important;
+      border-radius: 6px !important;
+      padding: 9px !important;
+      transition: opacity .12s ease, background-color .12s ease !important;
+    }
+    .modal-header .btn-close:hover {
+      opacity: 1 !important;
+      background-color: rgba(255,255,255,.16) !important;
+    }
+    .modal-header .btn-close:focus-visible {
+      outline: 2px solid var(--accent) !important;
+      outline-offset: 2px;
+      box-shadow: none !important;
+    }
+
     /* ═══════════════════════════════════════════════════════
        CARDS
        ═══════════════════════════════════════════════════════ */
@@ -1667,7 +1689,9 @@
               <span class="nav-link-title">Le mie richieste</span>
             </a>
           </li>
-          <li class="nav-item" data-perm="REQUEST|DOWNLOAD" data-requires-auth="1">
+          <!-- No data-requires-auth: a followed series works without Jellyfin
+               too, it just belongs to the panel instead of to a user. -->
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
             <a class="nav-link" href="#" data-page="watches" onclick="showPage('watches');return false">
               <span class="nav-link-icon"><i class="ti ti-bell-ringing"></i></span>
               <span class="nav-link-title">Serie seguite</span>
@@ -1799,6 +1823,8 @@
                 <i class="ti ti-folder-filled text-yellow me-2"></i>File scaricati
               </h3>
               <div class="card-options">
+                <span class="text-muted d-none d-lg-inline" id="fm-disk-usage"
+                      style="font-size:11px;margin-right:12px"></span>
                 <span class="text-muted d-none d-md-inline" style="font-size:11px;margin-right:8px">
                   Trascina per spostare
                 </span>
@@ -2052,7 +2078,6 @@
             Dove finiscono i file scaricati, una cartella per tipo di contenuto.
           </p>
           <div id="libraries-list" class="mb-2"></div>
-          <div id="disk-usage-list" class="mb-3"></div>
           <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
             <i class="ti ti-plus me-1"></i>Aggiungi libreria
           </button>
@@ -2193,6 +2218,17 @@
             Inoltra le notifiche del pannello a Discord, Telegram, ntfy, email e altri servizi.
             Un canale è una URL Apprise, ad esempio
             <code>discord://id_webhook/token_webhook</code> oppure <code>tgram://token_bot/id_chat</code>.
+            <a href="https://github.com/caronc/apprise/wiki#notification-services" target="_blank"
+               rel="noopener noreferrer">Elenco completo dei servizi e formato delle URL</a>.
+          </p>
+          <p class="settings-section-hint" style="color:#e6a23c">
+            <i class="ti ti-alert-triangle me-1"></i>
+            Questi canali sono <strong>del pannello, non del singolo utente</strong>: ricevono gli
+            eventi di <em>tutti</em>, comprese le richieste e i download avviati da altri. Pensali
+            come un canale di amministrazione — un webhook su un canale Discord privato, non un
+            gruppo condiviso con chi usa il pannello. Con «Tutti gli eventi» attivo su una libreria
+            usata da più persone il volume può essere notevole: conviene scegliere solo gli eventi
+            che ti interessano davvero.
           </p>
           <div id="notif-channels-list" class="mb-2"></div>
 

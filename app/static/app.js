@@ -357,8 +357,10 @@ function renderWatchesList() {
   }
   c.innerHTML = _watches.map(w => {
     // The owner's DOWNLOAD permission is what the poller checks, so a follower
-    // without it must not be told the episode will just appear.
-    const auto = w.auto_approve || (!!_me && w.created_by === _me.user.id && can('DOWNLOAD'));
+    // without it must not be told the episode will just appear. An ownerless
+    // watch (no accounts) always downloads: there is no queue to wait in.
+    const auto = w.created_by === null || w.auto_approve ||
+      (!!_me && w.created_by === _me.user.id && can('DOWNLOAD'));
     const badge = auto
       ? '<span class="badge bg-green-lt">download automatico</span>'
       : '<span class="badge bg-yellow-lt">passa dalla coda</span>';
@@ -425,9 +427,9 @@ function _renderFollowButton(kind, following, busy = false) {
   const target = _followTarget(kind);
   const btn = document.getElementById(target.btnId);
   if (!btn) return;
-  // Without Jellyfin there is no account to own a watch, so the backend refuses
-  // it — the button must not be offered either, DOWNLOAD permission or not.
-  if (!_authEnabled || !target.followable || !(can('REQUEST') || can('DOWNLOAD'))) {
+  // Available with or without Jellyfin: an ownerless watch downloads directly,
+  // the way everything else does when the panel runs without accounts.
+  if (!target.followable || !(can('REQUEST') || can('DOWNLOAD'))) {
     btn.style.display = 'none';
     return;
   }
@@ -580,7 +582,6 @@ function _feedback(id, message = '', kind = 'muted') {
 // modal no longer waits on the slowest section (disk usage stats every library
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
-  librerie: () => loadDiskUsage(),
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),
   notifiche: () => loadNotificationChannels(),
@@ -658,42 +659,37 @@ function fmtBytes(bytes) {
   return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${units[i]}`;
 }
 
-const _LIB_TYPE_LABELS = {film: 'Film', tv: 'Serie TV', anime: 'Anime'};
-
+// Reported per volume, not per library: the three libraries are almost always
+// folders on one mount, and three identical bars said nothing.
 async function loadDiskUsage() {
+  const el = document.getElementById('fm-disk-usage');
+  if (!el) return;
   try {
-    const res = await fetch('/api/domain/disk-usage');
-    if (!res.ok) return;
-    renderDiskUsageList(await safeJson(res));
-  } catch (e) { console.error('loadDiskUsage:', e); }
+    const res = await fetch('/api/files/disk-usage');
+    if (!res.ok) { el.textContent = ''; return; }
+    renderDiskUsage(await safeJson(res));
+  } catch (e) { el.textContent = ''; }
 }
 
-function renderDiskUsageList(data) {
-  const c = document.getElementById('disk-usage-list');
-  if (!c) return;
-  const entries = (data && data.libraries) || [];
-  if (!entries.length) { c.innerHTML = ''; return; }
-  c.innerHTML = entries.map(lib => {
-    const label = _LIB_TYPE_LABELS[lib.type] || lib.type || '—';
-    if (lib.error) {
-      return `<div class="form-text text-danger">
-        ${escapeHtml(label)}: percorso non leggibile (${escapeHtml(lib.error)})
-      </div>`;
-    }
-    const pct = lib.total ? Math.round((lib.used / lib.total) * 100) : 0;
-    // Amber past 80%, red past 92%: at that point a 4K season may not fit.
-    const color = pct >= 92 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-primary';
-    return `
-      <div class="mb-2">
-        <div class="d-flex justify-content-between" style="font-size:11px">
-          <span style="color:var(--text)">${escapeHtml(label)}</span>
-          <span class="text-muted">${fmtBytes(lib.free)} liberi su ${fmtBytes(lib.total)}</span>
-        </div>
-        <div class="progress" style="height:4px">
-          <div class="progress-bar ${color}" style="width:${pct}%"></div>
-        </div>
-      </div>`;
-  }).join('');
+function renderDiskUsage(data) {
+  const el = document.getElementById('fm-disk-usage');
+  if (!el) return;
+  const volumes = (data && data.volumes) || [];
+  if (!volumes.length) {
+    el.textContent = data && data.errors && data.errors.length ? 'Spazio non leggibile' : '';
+    return;
+  }
+  // Several distinct mounts is the unusual case; show the fullest, since that
+  // is the one that will stop a download.
+  const worst = volumes.reduce((a, b) => (a.free <= b.free ? a : b));
+  const pct = worst.total ? Math.round((worst.used / worst.total) * 100) : 0;
+  // Amber past 80%, red past 92%: at that point a 4K season may not fit.
+  const color = pct >= 92 ? 'text-danger' : pct >= 80 ? 'text-warning' : '';
+  const suffix = volumes.length > 1 ? ` (volume più pieno di ${volumes.length})` : '';
+  el.innerHTML =
+    `<i class="ti ti-database me-1"></i><span class="${color}">${fmtBytes(worst.free)} liberi` +
+    `</span> su ${fmtBytes(worst.total)}${suffix}`;
+  el.title = worst.paths.join('\n');
 }
 
 // ── Canali di notifica (Apprise) ─────────────────────────────────────────────
@@ -2481,6 +2477,9 @@ function renderSearchResults(results, query) {
 async function loadFiles() {
   const pane = document.getElementById('files-left-pane');
   if (!pane) return;
+  // Not awaited: the free-space readout is an aside, and stat'ing a sleeping
+  // NFS mount must not hold up the file list.
+  loadDiskUsage();
   // If search is active, refresh search results instead of reloading the tree
   const searchInput = document.getElementById('fm-search-input');
   if (_fmSearchActive && searchInput && searchInput.value.trim().length >= 2) {

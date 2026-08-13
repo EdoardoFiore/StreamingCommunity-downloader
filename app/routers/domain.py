@@ -1,9 +1,6 @@
 import asyncio
 import json
 import logging
-import os
-import shutil
-import time
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -88,52 +85,6 @@ def set_libraries(body: LibrariesUpdate):
     data["excluded_folders"] = body.excluded_folders
     _write_data(data)
     return {"ok": True}
-
-
-# Opening the settings modal repeatedly should not re-stat a possibly slow NFS
-# mount every time. Short enough that a finished download shows up on reopen.
-_DISK_USAGE_TTL = 20
-_disk_usage_cache: dict = {"at": 0.0, "data": None}
-
-
-def _compute_disk_usage() -> dict:
-    now = time.monotonic()
-    if _disk_usage_cache["data"] is not None and now - _disk_usage_cache["at"] < _DISK_USAGE_TTL:
-        return _disk_usage_cache["data"]
-
-    data = _read_data()
-    # The libraries usually live on one mounted volume (/app/videos in Docker), so
-    # stat'ing each one separately would report the same numbers three times and
-    # hit the filesystem three times. st_dev collapses them to one real call.
-    by_device: dict[int, dict] = {}
-    entries = []
-    for lib in data.get("libraries", []):
-        path = lib.get("path", "")
-        try:
-            device = os.stat(path).st_dev
-            usage = by_device.get(device)
-            if usage is None:
-                total, used, free = shutil.disk_usage(path)
-                usage = {"total": total, "used": used, "free": free}
-                by_device[device] = usage
-            entries.append({"type": lib.get("type"), "path": path, **usage, "error": None})
-        except OSError as e:
-            # An unmounted or misconfigured library is an expected failure mode;
-            # it must not blank out the volumes that are fine.
-            entries.append({
-                "type": lib.get("type"), "path": path,
-                "total": None, "used": None, "free": None, "error": str(e),
-            })
-
-    result = {"libraries": entries}
-    _disk_usage_cache["at"] = now
-    _disk_usage_cache["data"] = result
-    return result
-
-
-@router.get("/disk-usage", dependencies=CAN_MANAGE)
-async def get_disk_usage():
-    return await asyncio.to_thread(_compute_disk_usage)
 
 
 class SettingsUpdate(BaseModel):
