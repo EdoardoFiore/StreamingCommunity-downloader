@@ -1735,7 +1735,12 @@
           </li>
         </ul>
         <div class="sidebar-footer">
-          <div id="stream-status">
+          <!-- Same permissions the stream itself requires (progress.py). Without
+               them app.js never opens the EventSource, so the indicator sat on
+               its initial "Connessione..." for good — reporting a connection
+               that was deliberately never attempted as one that never
+               succeeded. -->
+          <div id="stream-status" data-perm="DOWNLOAD|MANAGE_REQUESTS">
             <span class="stream-dot"></span>
             <span id="stream-label">Connessione...</span>
           </div>
