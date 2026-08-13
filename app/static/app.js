@@ -306,6 +306,7 @@ function showPage(page) {
   }[page] || 'Cerca';
   document.querySelectorAll('.nav-link[data-page]').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
+  if (page === 'downloads') refreshJobs();
   if (page === 'files') loadFiles();
   if (page === 'requests') loadRequestQueue();
   if (page === 'my-requests') loadMyRequests();
@@ -436,7 +437,9 @@ function _renderFollowButton(kind, following, busy = false) {
   btn.style.display = '';
   btn.disabled = busy;
   btn.dataset.following = following ? '1' : '';
-  btn.className = 'btn btn-sm ms-auto me-2 ' + (following ? 'btn-success' : 'btn-outline-secondary');
+  // No margin utilities: the header is a flex row with a gap, and the title
+  // takes the free space.
+  btn.className = 'btn btn-sm flex-shrink-0 ' + (following ? 'btn-success' : 'btn-outline-secondary');
   btn.innerHTML = following
     ? '<i class="ti ti-bell-check me-1"></i>Seguita'
     : '<i class="ti ti-bell-plus me-1"></i>Segui';
@@ -2184,6 +2187,27 @@ async function cancelJob(jobId) {
     const res = await fetch(`/api/download/${jobId}`, {method:'DELETE'});
     if (!res.ok) { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
   } catch(e) { showToast('Errore di rete','danger'); }
+}
+
+// The list is normally kept current by the event stream. This re-reads it from
+// the server for the times that is not enough — a laptop coming back from
+// sleep, a proxy that closed the connection, a tab that fell far behind.
+async function refreshJobs() {
+  const btn = document.getElementById('dl-refresh-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/jobs');
+    if (!res.ok) { showToast('Impossibile aggiornare i download', 'danger'); return; }
+    const jobs = await safeJson(res);
+    _jobs.clear();
+    jobs.forEach(j => _jobs.set(j.job_id, j));
+    renderAllJobCards();
+    updateActiveBadge();
+  } catch (e) {
+    showToast('Errore di rete', 'danger');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function clearFinished() {

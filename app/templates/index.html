@@ -627,11 +627,25 @@
        so in modals it gets full contrast and a faint chip to read as a target.
        Scoped to modals: the toast close button sits on a coloured alert and has
        its own rule below. */
+    /* Bootstrap draws the glyph as a dark background-image and whitens it with
+       a filter. A filter repaints the whole element, so any chip behind the
+       glyph gets inverted with it and turns into a dark blob — the opposite of
+       the intent. The glyph is supplied white here instead, and the filter is
+       switched off so the chip stays a chip. */
     .modal-header .btn-close {
-      opacity: .8 !important;
+      filter: none !important;
+      opacity: .85 !important;
       background-color: rgba(255,255,255,.07) !important;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23ffffff'%3E%3Cpath d='M1.293 1.293a1 1 0 0 1 1.414 0L8 6.586l5.293-5.293a1 1 0 1 1 1.414 1.414L9.414 8l5.293 5.293a1 1 0 0 1-1.414 1.414L8 9.414l-5.293 5.293a1 1 0 0 1-1.414-1.414L6.586 8 1.293 2.707a1 1 0 0 1 0-1.414z'/%3E%3C/svg%3E") !important;
+      background-size: 11px 11px !important;
       border-radius: 6px !important;
       padding: 9px !important;
+      /* Bootstrap pulls it around with negative margins to sit flush with the
+         header padding, which overlaps a sibling button. Only the automatic
+         left margin is kept, so a header holding nothing but the close button
+         still pushes it to the right edge. */
+      margin: 0 0 0 auto !important;
+      flex: 0 0 auto;
       transition: opacity .12s ease, background-color .12s ease !important;
     }
     .modal-header .btn-close:hover {
@@ -918,7 +932,12 @@
     .modal-header {
       border-bottom: 1px solid var(--border) !important;
       padding: 16px 20px !important;
+      /* Three children in some headers (title, follow button, close), and
+         space-between would spread them evenly instead of keeping the actions
+         together on the right. */
+      gap: 10px;
     }
+    .modal-header .modal-title { flex: 1 1 auto; min-width: 0; }
 
     .modal-title {
       font-family: var(--font-ui) !important;
@@ -1803,7 +1822,11 @@
               <i class="ti ti-loader-2 ti-spin me-1" style="font-size:11px"></i>
               <span id="dl-active-count">0</span>&nbsp;attivi
             </span>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="clearFinished()">
+            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshJobs()"
+                    id="dl-refresh-btn" title="Rileggi i download dal server">
+              <i class="ti ti-refresh me-1"></i>Aggiorna
+            </button>
+            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="clearFinished()">
               <i class="ti ti-trash me-1"></i>Rimuovi completati
             </button>
           </div>
