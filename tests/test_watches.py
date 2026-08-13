@@ -252,3 +252,65 @@ def test_one_broken_series_does_not_stop_the_others(client, panel, monkeypatch):
 
     assert result["watches"] == 2
     assert [r.media_type for r in request_models.list_all()] == ["anime"]
+
+
+# ── Checking a watch by hand ───────────────────────────────────────────────────
+
+def test_the_approvers_bell_gets_a_followed_episode(client, panel):
+    """The half that was in doubt. A follower without DOWNLOAD produces a
+    pending request, and an approver has to be told it is there — otherwise it
+    sits in a queue nobody knows to look at."""
+    boss = _user("boss", ALL_PERMISSIONS)
+    bob = _user("bob", Permission.REQUEST)
+    _follow(client, _login(client, bob))
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+
+    poller.run_poll_cycle()
+
+    from app.requests import notify
+
+    assert boss.id in notify.approver_ids()
+    messages = [n["message"] for n in notify.list_for_user(boss.id)]
+    assert any("Test Series S01E4" in m for m in messages), messages
+
+
+def test_a_follower_can_check_their_own_watch(client, panel):
+    """Following seeds every episode already published, so nothing happens until
+    the source releases the next one — which can be weeks. Without this, a user
+    who can only make requests had no way to see their watch do anything."""
+    bob = _user("bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    watch_id = _follow(client, csrf).json()["id"]
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+
+    response = client.post(f"/api/watches/{watch_id}/check",
+                           headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["new"] == 1
+    created = request_models.list_all()
+    assert [r.status for r in created] == [request_models.PENDING]
+
+
+def test_checking_someone_elses_watch_still_needs_the_permission(client, panel):
+    ann = _user("ann", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, ann)).json()["id"]
+
+    bob = _user("bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    response = client.post(f"/api/watches/{watch_id}/check",
+                           headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 403
+
+
+def test_an_approver_can_check_a_watch_they_do_not_follow(client, panel):
+    ann = _user("ann", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, ann)).json()["id"]
+
+    boss = _user("boss", ALL_PERMISSIONS)
+    csrf = _login(client, boss)
+    response = client.post(f"/api/watches/{watch_id}/check",
+                           headers={"X-CSRF-Token": csrf})
+
+    assert response.status_code == 200, response.text

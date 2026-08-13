@@ -496,7 +496,13 @@ async function toggleFollowSeries(kind) {
         return;
       }
       _renderFollowButton(kind, true);
-      showToast('Serie seguita: i nuovi episodi arriveranno da soli', 'success');
+      // Only true for someone who can start downloads. Without that permission
+      // each new episode becomes a request an approver has to accept, and
+      // saying otherwise sets up a wait for something that never arrives.
+      showToast(can('DOWNLOAD')
+        ? 'Serie seguita: i nuovi episodi arriveranno da soli'
+        : 'Serie seguita: i nuovi episodi verranno richiesti a un amministratore',
+        'success');
     }
     if (document.getElementById('page-watches').style.display !== 'none') loadWatches();
   } catch (e) {

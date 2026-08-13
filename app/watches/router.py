@@ -147,12 +147,26 @@ async def unfollow_series(watch_id: int, http_request: HttpRequest):
     return {"ok": True, "stopped": stopped}
 
 
-@router.post("/{watch_id}/check", dependencies=CAN_MANAGE)
-async def check_now(watch_id: int):
-    """Run this series' check immediately instead of waiting for the next cycle."""
+@router.post("/{watch_id}/check", dependencies=CAN_FOLLOW)
+async def check_now(watch_id: int, http_request: HttpRequest):
+    """Run this series' check immediately instead of waiting for the next cycle.
+
+    Open to whoever follows it, not only to approvers. A follower without
+    DOWNLOAD produces exactly what the automatic cycle would — a pending request
+    for an approver — and until this was allowed they had no way to see their
+    watch do anything at all: following seeds every published episode, so
+    nothing happens until the source releases the next one, which can be weeks.
+    Checking someone else's watch still takes MANAGE_REQUESTS or DOWNLOAD.
+    """
+    user = current_user(http_request)
+    user_id = acting_user_id(http_request)
     watch = models.get(watch_id)
     if watch is None or not watch.enabled:
         raise HTTPException(status_code=404, detail="Serie non trovata")
+
+    manages = user.has(Permission.MANAGE_REQUESTS) or user.has(Permission.DOWNLOAD)
+    if not manages and user_id not in models.followers(watch_id):
+        raise HTTPException(status_code=403, detail="Non segui questa serie")
     try:
         result = await asyncio.to_thread(poller.poll_watch, watch)
     except Exception as exc:
