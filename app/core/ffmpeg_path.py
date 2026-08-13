@@ -36,3 +36,31 @@ def get_ffmpeg_exe() -> str:
             "ffmpeg executable not found. Install ffmpeg and add it to PATH, "
             "or set the FFMPEG_PATH environment variable to its full path."
         ) from e
+
+
+@functools.lru_cache(maxsize=1)
+def get_ffprobe_exe() -> str | None:
+    """Resolve ffprobe, or None when there is none to resolve.
+
+    Unlike ffmpeg this is optional, and returns None rather than raising:
+    imageio-ffmpeg bundles ffmpeg alone, so the Windows fallback that saves the
+    download has no ffprobe to offer. Debian's ffmpeg package ships both, which
+    covers the Docker image.
+
+    FFPROBE_PATH overrides, then a sibling of the resolved ffmpeg — a manual
+    install usually puts the pair in one directory, and finding ffmpeg there
+    without looking would miss it — then PATH.
+    """
+    env_path = os.environ.get("FFPROBE_PATH")
+    if env_path and (shutil.which(env_path) or os.path.isfile(env_path)):
+        return env_path
+
+    try:
+        sibling = os.path.join(os.path.dirname(get_ffmpeg_exe()), "ffprobe")
+    except RuntimeError:
+        sibling = ""
+    for candidate in (sibling, sibling + ".exe"):
+        if candidate and os.path.isfile(candidate):
+            return candidate
+
+    return shutil.which("ffprobe")

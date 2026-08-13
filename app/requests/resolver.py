@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from app.config import DATA_FILE, VIDEOS_DIR
-from app.core import animeunity, paths
+from app.core import animeunity, paths, probe
 from app.requests import models
 
 logger = logging.getLogger(__name__)
@@ -97,13 +97,47 @@ def destination_path(request: models.Request) -> str:
     )
 
 
-def is_in_library(request: models.Request) -> bool:
-    """Whether the file is already there — checked before downloading anything."""
+def existing_file(request: models.Request) -> str | None:
+    """The file already occupying this request's destination, if any."""
     path = destination_path(request)
     if os.path.exists(path):
-        return True
+        return path
     # The downloader remuxes to .mkv when there are several audio tracks.
-    return os.path.exists(os.path.splitext(path)[0] + ".mkv")
+    mkv = os.path.splitext(path)[0] + ".mkv"
+    return mkv if os.path.exists(mkv) else None
+
+
+def library_gap(request: models.Request) -> dict | None:
+    """Which requested languages the file in the library does not carry.
+
+    ``None`` when there is no file, or when there is one that cannot be
+    inspected. Both mean "download it"; they differ only in what is already
+    there, which the caller sorts out with ``existing_file``.
+
+    This is why the check cannot simply ask whether the path exists. The
+    destination carries no language — two people asking for one film in
+    different audio make two requests that land on the same file — so an
+    existence test told the second of them their track was ready when what sat
+    there was the first one's.
+    """
+    path = existing_file(request)
+    if path is None:
+        return None
+    gap = probe.missing_languages(path, request.audio_languages, request.subtitle_languages)
+    if gap is None:
+        # Cannot look inside: ffprobe is optional and the bundled ffmpeg does
+        # not bring one. Treating an unreadable file as complete is the older
+        # behaviour, and the alternative — calling every track missing — would
+        # re-download the same file for ever.
+        logger.info("Cannot inspect %s; assuming it satisfies the request", path)
+        return {"audio": [], "subtitles": []}
+    return gap
+
+
+def is_in_library(request: models.Request) -> bool:
+    """Whether the request is already satisfied — the file *and* its tracks."""
+    gap = library_gap(request)
+    return gap is not None and not gap["audio"] and not gap["subtitles"]
 
 
 # ── Resolution ─────────────────────────────────────────────────────────────────
