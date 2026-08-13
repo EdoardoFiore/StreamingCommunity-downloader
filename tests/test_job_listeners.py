@@ -126,6 +126,34 @@ def test_a_listener_does_not_hold_a_download_slot(manager):
     assert started, "il secondo download ha aspettato il listener del primo"
 
 
+def test_a_slow_subscriber_keeps_receiving_events(manager):
+    """A full queue must cost an old event, not the subscription.
+
+    Dropping the subscriber left the browser holding a connection nobody would
+    write to again: the page looked live and silently froze until reloaded,
+    which is exactly what a season starting twenty downloads at once provoked.
+    """
+    import asyncio
+
+    async def scenario():
+        manager.set_loop(asyncio.get_running_loop())
+        q = manager.subscribe()
+        for i in range(q.maxsize + 5):
+            await manager._fanout({"type": "progress", "n": i})
+
+        assert q in manager._subscribers, "il client è stato disiscritto in silenzio"
+        assert q.full()
+        # The oldest were discarded, so the newest — the ones that repair the
+        # view — are the ones still queued.
+        assert q.get_nowait()["n"] == 5
+        newest = None
+        while not q.empty():
+            newest = q.get_nowait()
+        assert newest["n"] == q.maxsize + 4
+
+    asyncio.run(scenario())
+
+
 def test_a_raising_listener_does_not_stop_the_others(manager):
     seen = []
 

@@ -178,14 +178,26 @@ class JobManager:
         self._broadcast({**event, "job_id": job.job_id})
 
     async def _fanout(self, event: dict):
-        dead = []
+        """Push an event to every subscriber, dropping the oldest under pressure.
+
+        A backgrounded tab, a slow proxy, or a season starting twenty downloads
+        at once can all fill a queue. Dropping the *subscriber* there — which is
+        what used to happen — left the browser holding an open connection nobody
+        would ever write to again: the page looked live and silently stopped
+        updating until it was reloaded. Discarding the oldest event instead
+        costs a stale frame of progress and lets the next one repair the view.
+        """
         for q in list(self._subscribers):
-            try:
-                q.put_nowait(event)
-            except asyncio.QueueFull:
-                dead.append(q)
-        for q in dead:
-            self.unsubscribe(q)
+            while True:
+                try:
+                    q.put_nowait(event)
+                    break
+                except asyncio.QueueFull:
+                    try:
+                        q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        # Drained from under us by its own reader; try again.
+                        continue
 
     # ── Progress factory ───────────────────────────────────────────────────────
 
