@@ -622,20 +622,29 @@
     .btn-close:hover { opacity: 1 !important; }
     .btn-close-white { filter: invert(1) !important; }
 
-    /* Tabler floats the modal close button in the corner (position:absolute,
-       3.5rem, z-index 10), where it lands on top of anything else placed at the
-       right of the header — the follow button, in the episode browser. Putting
-       it back in the flow lets the header lay its children out as a row.
-       Everything else about the glyph is left to Tabler: .btn-close-white above
-       already whitens it, and it only needed to stop being half transparent. */
+    /* Tabler paints this glyph with background-color clipped by a CSS mask —
+       not with a background image — and its colour is currentColor, which on a
+       dark header is already light. The .btn-close-white filter above then
+       inverts it back to near-black, which is why it read as invisible.
+       Colour and size come from Tabler's own variables; the only structural
+       override is position, because it is otherwise floated into the corner
+       (absolute, 3.5rem, z-index 10) on top of the follow button. Never set
+       width/height here: the button has no content, so an auto size collapses
+       it to nothing. */
     .modal-header > .btn-close {
       position: static !important;
-      width: auto !important;
-      height: auto !important;
       margin: 0 0 0 auto !important;
-      opacity: .9 !important;
+      filter: none !important;
+      /* Tabler sizes it 3.5rem for the floating corner hit area; in the flow
+         that would set the header's height. A fixed 2rem keeps a comfortable
+         target without stretching the row. */
+      width: 2rem !important;
+      height: 2rem !important;
+      --tblr-btn-close-color: #fff;
+      --tblr-btn-close-size: 1.25rem;
+      --tblr-btn-close-opacity: .85;
+      --tblr-btn-close-hover-opacity: 1;
     }
-    .modal-header > .btn-close:hover { opacity: 1 !important; }
 
     /* ═══════════════════════════════════════════════════════
        CARDS
