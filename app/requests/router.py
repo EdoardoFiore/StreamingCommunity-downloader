@@ -102,6 +102,12 @@ class MarkReadRequest(BaseModel):
     ids: list[int] | None = None
 
 
+class DeleteNotificationsRequest(BaseModel):
+    # Bounded because the ids go into an IN clause. No ids means "all of mine",
+    # which needs no list at all.
+    ids: list[int] | None = Field(default=None, max_length=200)
+
+
 MAX_BATCH = 200
 
 
@@ -465,3 +471,16 @@ def mark_notifications_read(body: MarkReadRequest, http_request: HttpRequest):
     owner = _bell_owner(http_request)
     notify.mark_read(owner, body.ids)
     return {"unread": notify.unread_count(owner)}
+
+
+@notifications_router.post("/delete", dependencies=CAN_SEE_OWN)
+def delete_notifications(body: DeleteNotificationsRequest, http_request: HttpRequest):
+    """Remove notifications. No ids clears the bell.
+
+    Scoped to the caller the same way marking read is, so ids belonging to
+    someone else are simply not matched rather than refused — the response says
+    how many actually went.
+    """
+    owner = _bell_owner(http_request)
+    deleted = notify.delete(owner, body.ids)
+    return {"deleted": deleted, "unread": notify.unread_count(owner)}

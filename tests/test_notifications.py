@@ -182,3 +182,97 @@ def test_notifications_need_a_session(client, admin_credentials):
     do_setup(client, admin_credentials)
     client.cookies.clear()
     assert client.get("/api/notifications").status_code == 401
+
+
+# ── Deleting ───────────────────────────────────────────────────────────────────
+
+def _notify_both(client, bob, carol, external_id, title):
+    """One film asked for by both. The second request joins the first, which is
+    what puts a notification on each of their bells."""
+    csrf = _login(client, bob)
+    _create(client, csrf, {**FILM_BODY, "external_id": external_id, "title": title})
+    csrf = _login(client, carol)
+    _create(client, csrf, {**FILM_BODY, "external_id": external_id, "title": title})
+    return csrf
+
+
+def test_deleting_one_notification_leaves_the_rest(
+    client, admin_credentials, source, stub_jobs
+):
+    do_setup(client, admin_credentials)
+    bob, carol = _pair(client)
+    _notify_both(client, bob, carol, "123", "Film")
+    _notify_both(client, bob, carol, "999", "Altro Film")
+
+    csrf = _login(client, bob)
+    mine = client.get("/api/notifications").json()["items"]
+    assert len(mine) >= 2
+
+    response = client.post(
+        "/api/notifications/delete",
+        json={"ids": [mine[0]["id"]]},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.json()["deleted"] == 1
+    remaining = [n["id"] for n in client.get("/api/notifications").json()["items"]]
+    assert mine[0]["id"] not in remaining
+    assert len(remaining) == len(mine) - 1
+
+
+def test_deleting_without_ids_clears_the_bell(
+    client, admin_credentials, source, stub_jobs
+):
+    do_setup(client, admin_credentials)
+    bob, carol = _pair(client)
+    _notify_both(client, bob, carol, "123", "Film")
+
+    csrf = _login(client, bob)
+    response = client.post("/api/notifications/delete", json={},
+                           headers={"X-CSRF-Token": csrf})
+
+    assert response.json()["deleted"] >= 1
+    payload = client.get("/api/notifications").json()
+    assert payload["items"] == []
+    assert payload["unread"] == 0
+
+
+def test_deleting_cannot_reach_someone_elses_notifications(
+    client, admin_credentials, source, stub_jobs
+):
+    """Scoped exactly as marking read is: another user's ids are not matched,
+    so the count reports what actually went rather than claiming success."""
+    do_setup(client, admin_credentials)
+    bob, carol = _pair(client)
+    _notify_both(client, bob, carol, "123", "Film")
+    bobs_ids = [n["id"] for n in notify.list_for_user(bob.id)]
+    assert bobs_ids
+
+    csrf = _login(client, carol)
+    response = client.post("/api/notifications/delete", json={"ids": bobs_ids},
+                           headers={"X-CSRF-Token": csrf})
+
+    assert response.json()["deleted"] == 0
+    assert len(notify.list_for_user(bob.id)) == len(bobs_ids)
+
+
+def test_clearing_the_bell_leaves_other_users_alone(
+    client, admin_credentials, source, stub_jobs
+):
+    """The no-ids form deletes everything the *caller* owns, not everything."""
+    do_setup(client, admin_credentials)
+    bob, carol = _pair(client)
+    csrf = _notify_both(client, bob, carol, "123", "Film")
+    bobs = len(notify.list_for_user(bob.id))
+    assert bobs and notify.list_for_user(carol.id)
+
+    client.post("/api/notifications/delete", json={}, headers={"X-CSRF-Token": csrf})
+
+    assert len(notify.list_for_user(bob.id)) == bobs
+    assert notify.list_for_user(carol.id) == []
+
+
+def test_deleting_needs_a_session(client, admin_credentials):
+    do_setup(client, admin_credentials)
+    client.cookies.clear()
+    assert client.post("/api/notifications/delete", json={}).status_code == 401

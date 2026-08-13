@@ -187,6 +187,28 @@ def test_the_panel_bell_can_be_marked_read(client, open_panel, stub_jobs):
     assert client.get("/api/notifications").json()["unread"] == 0
 
 
+def test_the_panel_bell_can_be_cleared(client, open_panel, stub_jobs):
+    """Deleting has to reach the panel's own rows too, or the one bell that
+    exists without accounts is the one that cannot be emptied."""
+    from app import downloads_notify
+    from app.jobs import job_manager
+
+    for title in ("Film", "Altro Film"):
+        job = job_manager._make_job(title, "film", user_id=None)
+        job.status = "done"
+        downloads_notify.on_job_finished(job)
+
+    items = client.get("/api/notifications").json()["items"]
+    assert len(items) == 2
+
+    assert client.post("/api/notifications/delete",
+                       json={"ids": [items[0]["id"]]}).json()["deleted"] == 1
+    assert len(client.get("/api/notifications").json()["items"]) == 1
+
+    assert client.post("/api/notifications/delete", json={}).json()["deleted"] == 1
+    assert client.get("/api/notifications").json()["items"] == []
+
+
 def test_an_event_with_no_recipients_is_not_broadcast(client, open_panel):
     """panel_wide is asked for explicitly. An event that merely found no
     approvers must stay unsent, not become everyone's notification."""

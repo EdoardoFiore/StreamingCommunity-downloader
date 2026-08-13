@@ -1428,13 +1428,30 @@
       background: none; border: none; color: var(--blue);
       font-size: 11px; cursor: pointer; padding: 0;
     }
+    .btn-link-danger { color: var(--accent); }
+    .notif-actions { display: flex; gap: 11px; align-items: center; }
     .notif-item {
       display: flex; gap: 9px; padding: 10px 13px;
       border-bottom: 1px solid var(--border); font-size: 12.5px;
     }
-    .notif-item i { color: var(--text-muted); font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+    .notif-item > i { color: var(--text-muted); font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+    /* min-width:0 so a long message wraps instead of pushing the delete button
+       out of the panel. */
+    .notif-body { flex: 1; min-width: 0; }
+    /* Always visible rather than revealed on hover: on a touch screen there is
+       no hover, and a control that never appears is a control that is not there. */
+    .notif-del {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-dim); flex-shrink: 0; align-self: flex-start;
+      padding: 2px 3px; margin: -2px -4px 0 0; line-height: 1;
+      border-radius: var(--radius-sm);
+    }
+    .notif-del:hover { color: var(--accent); background: var(--bg-hover); }
+    .notif-del i { font-size: 13px; margin-top: 0; color: inherit; }
     .notif-unread { background: rgba(224,36,68,.06); }
-    .notif-unread i { color: var(--accent); }
+    /* Direct child only: this used to reach the delete button's icon too, which
+       made it accent-coloured on unread rows and read as the primary action. */
+    .notif-unread > i { color: var(--accent); }
     .notif-text { line-height: 1.4; }
     .notif-time { color: var(--text-dim); font-size: 10.5px; margin-top: 2px; }
     .notif-empty { padding: 22px; text-align: center; color: var(--text-muted); font-size: 12px; }
@@ -1755,7 +1772,10 @@
                 <div class="notif-panel" id="notif-panel" style="display:none">
                   <div class="notif-header">
                     <span>Notifiche</span>
-                    <button class="btn-link-sm" onclick="markAllNotificationsRead()">Segna lette</button>
+                    <span class="notif-actions" id="notif-actions">
+                      <button class="btn-link-sm" onclick="markAllNotificationsRead()">Segna lette</button>
+                      <button class="btn-link-sm btn-link-danger" onclick="clearAllNotifications()">Elimina tutte</button>
+                    </span>
                   </div>
                   <div id="notif-list"></div>
                 </div>

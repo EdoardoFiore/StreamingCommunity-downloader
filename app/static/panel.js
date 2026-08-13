@@ -745,12 +745,20 @@ async function refreshNotifications() {
       ? payload.items.map(n => `
           <div class="notif-item ${n.read_at ? '' : 'notif-unread'}">
             <i class="ti ${NOTIFICATION_ICONS[n.event] || 'ti-bell'}"></i>
-            <div>
+            <div class="notif-body">
               <div class="notif-text">${escapeHtml(n.message)}</div>
               <div class="notif-time">${fmtDate(n.created_at)}</div>
             </div>
+            <button class="notif-del" onclick="deleteNotification(${n.id})"
+                    title="Elimina questa notifica" aria-label="Elimina">
+              <i class="ti ti-x"></i>
+            </button>
           </div>`).join('')
       : '<div class="notif-empty">Nessuna notifica.</div>';
+
+    // Nothing to act on means nothing to offer.
+    const actions = document.getElementById('notif-actions');
+    if (actions) actions.style.display = payload.items.length ? '' : 'none';
   } catch (e) { /* the bell just stays as it was */ }
 }
 
@@ -767,6 +775,31 @@ async function markAllNotificationsRead() {
     body: JSON.stringify({}),
   });
   refreshNotifications();
+}
+
+async function _deleteNotifications(body) {
+  const res = await fetch('/api/notifications/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    showToast('Eliminazione fallita', 'danger');
+    return null;
+  }
+  await refreshNotifications();
+  return res.json();
+}
+
+// One row: no confirmation. It is a single line of history, and asking every
+// time would cost more than the mistake.
+async function deleteNotification(id) {
+  await _deleteNotifications({ ids: [id] });
+}
+
+async function clearAllNotifications() {
+  if (!await scConfirm('Eliminare tutte le notifiche?')) return;
+  const result = await _deleteNotifications({});
+  if (result) showToast('Notifiche eliminate', 'info');
 }
 
 document.addEventListener('click', event => {

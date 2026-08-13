@@ -192,3 +192,22 @@ def mark_read(user_id: int | None, notification_ids: list[int] | None = None):
             f"UPDATE jf_notification SET read_at = ? WHERE {where} AND read_at IS NULL",
             (timestamp, *params),
         )
+
+
+def delete(user_id: int | None, notification_ids: list[int] | None = None) -> int:
+    """Remove notifications, scoped to the caller's own rows exactly as
+    ``mark_read`` is. No ids means every one of them.
+
+    Returns how many rows went, so the caller can tell "deleted" from "those
+    were not yours" rather than reporting success for a no-op.
+    """
+    where, params = _owner_clause(user_id)
+    if notification_ids:
+        placeholders = ",".join("?" * len(notification_ids))
+        cursor = db.execute(
+            f"DELETE FROM jf_notification WHERE {where} AND id IN ({placeholders})",
+            (*params, *notification_ids),
+        )
+    else:
+        cursor = db.execute(f"DELETE FROM jf_notification WHERE {where}", params)
+    return cursor.rowcount
