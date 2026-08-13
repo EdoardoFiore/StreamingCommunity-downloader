@@ -133,6 +133,15 @@ anything under a mounted static directory is readable by unauthenticated visitor
 - **An empty `events` array on a notification channel means *every* event**, not none. Any UI
   offering a selection has to express "all" as its own state, or unchecking the last box silently
   subscribes to everything.
+- **A download with a missing segment must fail, never join.** TS concatenated with gaps produces a
+  file that opens, plays, and is wrong — and lands in the library looking like a good one. Failing
+  is recoverable because the download can be run again; a silently truncated film is not, because
+  nobody knows to. `_require_every_segment()` reads the *filesystem*, not `_failed_segments`: a run
+  cut short by the watchdog never attempts the rest, so the bookkeeping is emptiest exactly when
+  most of the download is absent.
+- **The progress bar counts segments obtained, not attempts made.** It is also the input to the
+  stall watchdog (`timer()`), so counting failures as progress does not just misreport — it stops a
+  source failing every single request from ever tripping the timeout.
 - Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
   are the exception by design: every caller of `notify()` is already off the loop.
 

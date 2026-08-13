@@ -1,5 +1,7 @@
 import logging
+import math
 import os
+import random
 import sys
 import shutil
 import time
@@ -26,6 +28,29 @@ warnings.filterwarnings("ignore", category=UserWarning, module="cryptography")
 logger = logging.getLogger(__name__)
 DOWNLOAD_SUB = True
 DOWNLOAD_DEFAULT_LANGUAGE = False
+
+# Segment failures worth another attempt. A 4xx that is not one of these is a
+# verdict rather than congestion: repeating it across a few thousand segments
+# only delays the error without changing it.
+RETRIABLE_SEGMENT_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+MAX_SEGMENT_BACKOFF = 8
+
+# Give up once this many segments are lost for good. Retrying properly makes a
+# dead source far slower to fail than it used to be — every segment now costs
+# its full attempts and waits — so there has to be a point where the download
+# stops rather than grinding through thousands of them to reach the same end.
+MIN_FAILURE_BUDGET = 25
+FAILURE_BUDGET_RATIO = 0.05
+
+
+def _segment_backoff(attempt: int) -> float:
+    """Exponential, capped, and jittered.
+
+    Sixteen worker threads back off in lockstep otherwise, and arrive back at a
+    struggling CDN together — which is what produced the 503s in the first
+    place.
+    """
+    return min(2 ** attempt, MAX_SEGMENT_BACKOFF) * (0.5 + random.random())
 
 
 class Decryption:
@@ -139,6 +164,9 @@ class M3U8_Segments:
         self.progress_factory = progress_factory
         self.progress_timeout = 30
         self.max_retry = 3
+        self._failed_segments = set()
+        self._failed_lock = threading.Lock()
+        self._abort = threading.Event()
 
     def parse_data(self, m3u8_content):
         m3u8_parser = M3U8_Parser()
@@ -224,19 +252,34 @@ class M3U8_Segments:
             raise RuntimeError(f"M3U8 has no segments and no variant playlists. Content: {response.text[:200]!r}")
 
     def get_req_ts(self, ts_url):
-        for attempt in range(3):
+        """Fetch one segment, retrying what is worth retrying.
+
+        The loop ran three times but only a 429 ever reached the second
+        iteration: every other status returned on the first attempt, so a CDN
+        shedding load with 503s lost segments it would have served a moment
+        later. An *exception* did retry, which meant the same outage was
+        handled differently depending on whether the server answered badly or
+        did not answer at all.
+
+        Returns the bytes, or None once the segment is given up on.
+        """
+        for attempt in range(self.max_retry):
+            if self._abort.is_set() or (self._cancel and self._cancel.is_set()):
+                return None
             try:
                 response = requests.get(ts_url, headers={"user-agent": get_headers()}, timeout=10)
+            except Exception as e:
+                logger.warning("Segment exception (attempt %d/%d): %s",
+                               attempt + 1, self.max_retry, e)
+            else:
                 if response.status_code == 200:
                     return response.content
-                logger.warning("Segment HTTP %d (attempt %d): ...%s", response.status_code, attempt + 1, ts_url[-60:])
-                if response.status_code == 429:
-                    time.sleep(2 ** attempt)
-                    continue
-                return None
-            except Exception as e:
-                logger.warning("Segment exception (attempt %d): %s", attempt + 1, e)
-                time.sleep(1)
+                logger.warning("Segment HTTP %d (attempt %d/%d): ...%s", response.status_code,
+                               attempt + 1, self.max_retry, ts_url[-60:])
+                if response.status_code not in RETRIABLE_SEGMENT_STATUS:
+                    return None
+            if attempt < self.max_retry - 1:
+                time.sleep(_segment_backoff(attempt))
         return None
 
     def _write_ts(self, index, content):
@@ -247,8 +290,22 @@ class M3U8_Segments:
             else:
                 ts_file.write(content)
 
+    def _record_failure(self, index, ts_url):
+        """Note a segment given up on, and trip the breaker once too many are."""
+        with self._failed_lock:
+            self._failed_segments.add(index)
+            lost = len(self._failed_segments)
+            over_budget = lost >= self._failure_budget
+        logger.warning("Segment %d failed after all retries: ...%s", index, ts_url[-60:])
+        if over_budget and not self._abort.is_set():
+            self._abort.set()
+            logger.error("Aborting: %d segments lost out of %d, the source is not serving them",
+                         lost, len(self.segments))
+
     def save_ts(self, index, progress_counter, quit_event):
         if self._cancel and self._cancel.is_set():
+            return
+        if self._abort.is_set():
             return
         ts_url = self.segments[index]
         ts_filename = os.path.join(self.temp_folder, f"{index}.ts")
@@ -256,22 +313,30 @@ class M3U8_Segments:
         downloaded_bytes = 0
         if not os.path.exists(ts_filename):
             ts_content = self.get_req_ts(ts_url)
-            if ts_content is not None:
-                self._write_ts(index, ts_content)
-                downloaded_bytes = len(ts_content)
-            else:
-                self._failed_segments.add(index)
-                logger.warning("Segment %d failed after all retries: ...%s", index, ts_url[-60:])
+            # Empty content counts as a failure: it would otherwise write a
+            # zero-byte file, which then looks like a segment that is present.
+            if not ts_content:
+                self._record_failure(index, ts_url)
+                return
+            self._write_ts(index, ts_content)
+            downloaded_bytes = len(ts_content)
         else:
             try:
                 downloaded_bytes = os.path.getsize(ts_filename)
             except OSError:
                 pass
 
+        # Only a segment actually obtained counts. Counting attempts drove the
+        # bar to 100% on a download that had saved barely half its segments,
+        # and — worse — kept feeding the watchdog below, so a source failing
+        # every single request still looked like it was making progress.
         progress_counter.update(1, bytes=downloaded_bytes)
 
     def download_ts(self):
         self._failed_segments = set()
+        self._abort.clear()
+        self._failure_budget = max(MIN_FAILURE_BUDGET,
+                                   math.ceil(len(self.segments) * FAILURE_BUDGET_RATIO))
         bar_factory = self.progress_factory or (lambda **kw: tqdm(**kw))
         progress_counter = bar_factory(total=len(self.segments), unit="seg", desc="Downloading", phase=self.phase)
         self._bar = progress_counter
@@ -289,7 +354,7 @@ class M3U8_Segments:
             with ThreadPoolExecutor(max_workers=get_settings().get("max_segment_workers", 16)) as executor:
                 futures = []
                 for index in range(len(self.segments)):
-                    if timeout_event.is_set():
+                    if timeout_event.is_set() or self._abort.is_set():
                         break
                     if self._cancel and self._cancel.is_set():
                         cancelled = True
@@ -297,7 +362,7 @@ class M3U8_Segments:
                     futures.append(executor.submit(self.save_ts, index, progress_counter, quit_event))
 
                 for future in as_completed(futures):
-                    if timeout_event.is_set():
+                    if timeout_event.is_set() or self._abort.is_set():
                         for f in futures:
                             f.cancel()
                         break
@@ -318,7 +383,24 @@ class M3U8_Segments:
         if cancelled:
             raise DownloadCancelledError("Download annullato dall'utente")
 
-        # Second pass: retry failed segments sequentially to avoid gaps in the TS stream
+        # Both of these used to fall through to the join, which then wrote an
+        # output file out of whatever had arrived.
+        if self._abort.is_set():
+            raise RuntimeError(
+                f"Download interrotto: {len(self._failed_segments)} segmenti su "
+                f"{len(self.segments)} non scaricati. La fonte sta rifiutando le "
+                f"richieste, riprova più tardi."
+            )
+        if timeout_event.is_set():
+            raise RuntimeError(
+                f"Download interrotto: nessun segmento scaricato per "
+                f"{self.progress_timeout}s. La fonte non risponde, riprova più tardi."
+            )
+
+        # Second pass: retry failed segments sequentially to avoid gaps in the TS
+        # stream. Worth a try even after the parallel attempts — this arrives
+        # later and one request at a time, which is exactly what a source
+        # shedding load was asking for.
         if self._failed_segments:
             logger.warning("Retrying %d failed segments sequentially...", len(self._failed_segments))
             still_failed = set()
@@ -327,13 +409,56 @@ class M3U8_Segments:
                     raise DownloadCancelledError("Download annullato dall'utente")
                 time.sleep(0.5)
                 ts_content = self.get_req_ts(self.segments[index])
-                if ts_content is not None:
+                if ts_content:
                     self._write_ts(index, ts_content)
                     logger.info("Segment %d recovered on retry", index)
                 else:
                     still_failed.add(index)
                     logger.error("Segment %d permanently failed", index)
             self._failed_segments = still_failed
+
+        self._require_every_segment()
+
+    def _missing_segments(self) -> list[int]:
+        """Which segments are not on disk.
+
+        Asks the filesystem rather than trusting ``_failed_segments``, which
+        only knows about segments that were attempted. A run cut short by the
+        watchdog never submits the rest, so the bookkeeping would call a
+        download whole precisely when most of it is absent.
+        """
+        present = set()
+        try:
+            names = os.listdir(self.temp_folder)
+        except OSError:
+            names = []
+        for name in names:
+            stem, ext = os.path.splitext(name)
+            if ext == ".ts" and stem.isdigit():
+                present.add(int(stem))
+        return [i for i in range(len(self.segments)) if i not in present]
+
+    def _require_every_segment(self):
+        """Refuse to hand on an incomplete set of segments.
+
+        A gap here is not a glitch to be logged: TS concatenated with segments
+        missing produces a file that opens, plays, and is wrong — and lands in
+        the library looking exactly like a good one. Failing is recoverable,
+        because the download can be run again; a silently truncated film is not,
+        because nobody knows to.
+        """
+        missing = self._missing_segments()
+        if not missing:
+            return
+        preview = ", ".join(str(i) for i in missing[:10])
+        if len(missing) > 10:
+            preview += ", …"
+        logger.error("Incomplete download: %d/%d segments missing (%s)",
+                     len(missing), len(self.segments), preview)
+        raise RuntimeError(
+            f"Download incompleto: {len(missing)} segmenti su {len(self.segments)} "
+            f"non scaricati. Il file non è stato creato per non salvarlo corrotto."
+        )
 
     def timer(self, progress_counter, quit_event, timeout_checker):
         start_time = time.time()
@@ -358,10 +483,20 @@ class M3U8_Segments:
     def join(self, output_filename):
         if self._cancel and self._cancel.is_set():
             raise DownloadCancelledError("Download annullato dall'utente")
-        ts_files = sorted(
-            [f for f in os.listdir(self.temp_folder) if f.endswith(".ts")],
-            key=lambda f: int("".join(filter(str.isdigit, f))),
+        # Checked before anything is written, not after. This used to warn about
+        # missing segments on the line *following* the concatenation, so the
+        # warning described a file that had already been assembled from a
+        # partial set — and the download still ended as "done".
+        self._require_every_segment()
+
+        # "_combined.ts" is excluded by name: it has no digits, so it used to
+        # raise ValueError out of the sort key if a previous attempt left one
+        # behind. Reachable now that a failed join can leave the folder in place.
+        indexed = sorted(
+            ((int(os.path.splitext(f)[0]), f) for f in os.listdir(self.temp_folder)
+             if f.endswith(".ts") and os.path.splitext(f)[0].isdigit()),
         )
+        ts_files = [name for _, name in indexed]
 
         # Byte-level concatenation: TS is a continuous stream format,
         # joining at byte level lets FFmpeg's TS demuxer handle PCR/PTS
@@ -371,10 +506,6 @@ class M3U8_Segments:
             for ts_file in ts_files:
                 with open(os.path.join(self.temp_folder, ts_file), "rb") as seg:
                     out.write(seg.read())
-
-        still_failed = getattr(self, "_failed_segments", set())
-        if still_failed:
-            logger.warning("%d segments permanently missing from output: %s", len(still_failed), sorted(still_failed))
 
         logger.info("Joining %d / %d segments...", len(ts_files), len(self.segments))
         if self.emit_join_phase and hasattr(self, '_bar') and hasattr(self._bar, 'emit_status'):
