@@ -189,3 +189,43 @@ def test_the_callers_own_language_is_never_filtered_away(monkeypatch):
                                 {"audio": ["ita"], "subtitles": []})
 
     assert common["audio_languages"] == ["fra"]
+
+
+def test_a_track_already_in_the_file_is_not_dropped(monkeypatch, tmp_path):
+    """A re-download replaces the file, so a language present but no longer
+    named by any live request — the request that asked for it was denied
+    afterwards — would vanish without anyone being told."""
+    from app.core import probe
+
+    path = tmp_path / "Film (2020)" / "Film (2020).mkv"
+    path.parent.mkdir(parents=True)
+    path.write_text("x")
+    monkeypatch.setattr(resolver, "library_dir", lambda media_type: str(tmp_path))
+    monkeypatch.setattr(probe, "media_languages",
+                        lambda p: {"audio": {"ita", "fra"}, "subtitles": set()})
+    monkeypatch.setattr(request_models, "wanted_languages", lambda r: (["eng", "ita"], []))
+
+    common = {"audio_languages": ["eng"], "subtitle_languages": []}
+    resolver._widen_to_everyone(common, _request(audio_languages=["eng"]),
+                                {"audio": ["ita", "eng", "fra"], "subtitles": []})
+
+    assert common["audio_languages"] == ["eng", "fra", "ita"]
+
+
+def test_an_untagged_track_is_not_asked_for_by_name(monkeypatch, tmp_path):
+    """"und" names no language; asking the source for it would find nothing."""
+    from app.core import probe
+
+    path = tmp_path / "Film (2020)" / "Film (2020).mp4"
+    path.parent.mkdir(parents=True)
+    path.write_text("x")
+    monkeypatch.setattr(resolver, "library_dir", lambda media_type: str(tmp_path))
+    monkeypatch.setattr(probe, "media_languages",
+                        lambda p: {"audio": {"und"}, "subtitles": set()})
+    monkeypatch.setattr(request_models, "wanted_languages", lambda r: (["eng"], []))
+
+    common = {"audio_languages": ["eng"], "subtitle_languages": []}
+    resolver._widen_to_everyone(common, _request(audio_languages=["eng"]),
+                                {"audio": ["eng"], "subtitles": []})
+
+    assert common["audio_languages"] == ["eng"]

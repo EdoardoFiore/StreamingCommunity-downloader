@@ -163,6 +163,19 @@ def _widen_to_everyone(common: dict, request: models.Request, available: dict):
     fail a download nobody else asked to be strict about.
     """
     audio, subtitles = models.wanted_languages(request)
+
+    # What the file already holds counts too. A re-download replaces it, so a
+    # track that is present but no longer named by any live request — the one
+    # request that asked for it was denied afterwards — would disappear without
+    # anyone being told. Untagged audio is skipped: it names no language, and
+    # asking the source for "und" would find nothing.
+    existing = existing_file(request)
+    if existing is not None:
+        present = probe.media_languages(existing)
+        if present is not None:
+            audio = sorted(set(audio) | (present["audio"] - {"und"}))
+            subtitles = sorted(set(subtitles) | (present["subtitles"] - {"und"}))
+
     offered_audio = {str(c).lower() for c in (available.get("audio") or [])}
     offered_subs = {str(c).lower() for c in (available.get("subtitles") or [])}
 
