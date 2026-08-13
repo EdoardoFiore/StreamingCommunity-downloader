@@ -15,6 +15,7 @@ import os
 import pytest
 import requests
 
+from app.core import m3u8
 from app.core.m3u8 import M3U8_Segments
 
 
@@ -130,17 +131,46 @@ def test_a_connection_error_is_still_retried(tmp_path, segment_server, no_sleep)
     assert len(calls) == 2
 
 
-def test_the_backoff_grows_and_is_jittered(tmp_path, segment_server, no_sleep):
+def test_each_wait_stays_inside_its_own_window(tmp_path, segment_server, no_sleep):
+    """The waits between attempts come from the backoff, in order.
+
+    Deliberately not asserting that the second wait is longer than the first.
+    The windows overlap by design — attempt 0 draws from [0.5, 1.5) and attempt 1
+    from [1.0, 3.0) — so a shorter second wait is correct behaviour, and a test
+    that forbade it failed in CI on the one run in ten that produced it.
+    """
     replies, _ = segment_server
     replies.extend([_Response(503)] * 3)
 
     _segments(tmp_path).get_req_ts("https://cdn.example.test/seg-0.ts")
 
     assert len(no_sleep) == 2
-    assert no_sleep[1] > no_sleep[0]
-    # Jittered rather than exact powers of two: sixteen workers backing off in
-    # lockstep return to a struggling CDN together.
-    assert all(s != int(s) for s in no_sleep)
+    for attempt, waited in enumerate(no_sleep):
+        base = min(2 ** attempt, m3u8.MAX_SEGMENT_BACKOFF)
+        assert base * 0.5 <= waited < base * 1.5
+
+
+def test_the_backoff_window_doubles_and_then_stops():
+    """The intended sequence is written out rather than recomputed from the
+    formula, which would only assert that the test agrees with itself. Every
+    draw is checked against its window, so nothing here depends on luck."""
+    expected = [1, 2, 4, 8, 8, 8]
+
+    for attempt, base in enumerate(expected):
+        draws = [m3u8._segment_backoff(attempt) for _ in range(50)]
+        assert all(base * 0.5 <= d < base * 1.5 for d in draws), (attempt, base)
+
+    # Uncapped, a long chain of retries would wait minutes between attempts on a
+    # source that is merely slow.
+    assert expected[-1] == m3u8.MAX_SEGMENT_BACKOFF
+
+
+def test_two_workers_do_not_wait_the_same_amount():
+    """Sixteen threads backing off in lockstep return to a struggling CDN
+    together, which is what produced the 503s being backed off from."""
+    draws = {m3u8._segment_backoff(1) for _ in range(50)}
+
+    assert len(draws) > 1
 
 
 # ── Progress counts segments, not attempts ─────────────────────────────────────
