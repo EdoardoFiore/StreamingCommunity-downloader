@@ -78,6 +78,18 @@ def _collect_audio_tracks(m3u8_url: str, referer: str, audio_languages: list[str
             return tracks
         parser = M3U8_Parser()
         parser.parse_data(req.text)
+
+        # No separate audio renditions at all: this source muxes its single
+        # soundtrack into the video rendition. There is nothing to choose
+        # between and nothing to substitute, so strict has nothing to protect
+        # against — the file that comes back carries the only audio there is.
+        # Raising here rejected every such title at approval, after the request
+        # had already been accepted: the create path (router.py) skips its own
+        # check for exactly this case, so the two disagreed.
+        if not parser.audio_ts:
+            logger.info("No separate audio renditions offered; using the muxed track")
+            return tracks
+
         for lang in audio_languages:
             url = _get_audio_track_url(parser, lang)
             if url:

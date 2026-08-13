@@ -214,6 +214,8 @@ def _park(request: models.Request, problem: str, exc: Exception):
         notify.REQUEST_NEEDS_ATTENTION,
         f"«{_label(parked)}» è in attesa di una verifica manuale.",
         parked,
+        # Approvers already carried this event outward, with the problem in it.
+        external=False,
     )
 
 
@@ -286,6 +288,7 @@ def on_job_finished(job):
             notify.REQUEST_FAILED,
             f"Download fallito per «{_label(failed)}»: {job.error or 'errore sconosciuto'}",
             failed,
+            external=False,
         )
 
 
@@ -349,6 +352,7 @@ def reconcile_orphaned_requests() -> int:
             notify.REQUEST_NEEDS_ATTENTION,
             f"«{_label(parked)}» è in attesa di una verifica: un riavvio del pannello ha interrotto l'elaborazione.",
             parked,
+            external=False,
         )
 
     for request in models.list_all((models.DOWNLOADING,)):
@@ -371,6 +375,7 @@ def reconcile_orphaned_requests() -> int:
             notify.REQUEST_FAILED,
             f"Download interrotto per «{_label(failed)}»: il pannello si è riavviato durante il download.",
             failed,
+            external=False,
         )
 
     if recovered:

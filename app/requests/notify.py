@@ -113,28 +113,37 @@ CHANNELS = [InAppChannel(), AppriseChannel()]
 
 def notify(event: str, message: str, user_ids: list[int], request_id: int | None = None,
            *, markdown_message: str | None = None, title: str | None = None,
-           notify_type: str | None = None, panel_wide: bool = False):
+           notify_type: str | None = None, panel_wide: bool = False,
+           external: bool = True):
     """Deliver one event to every channel.
 
     ``message`` is the plain text stored on the bell; ``markdown_message`` is
     what external channels render, defaulting to the same text. ``notify_type``
     is resolved from the event unless a caller overrides it — a partly-failed
     batch is neither a success nor a failure and says so explicitly.
+
+    ``external=False`` keeps the delivery in-app. It is for the second half of a
+    pair that tells subscribers and approvers about the same event in different
+    words: they are two audiences on the bell, but one webhook, which otherwise
+    receives the same news twice.
     """
     unique = list(dict.fromkeys(user_ids))
     outcome = notify_type or EVENT_NOTIFY_TYPE.get(event, INFO)
-    external = markdown_message if markdown_message is not None else message
+    external_body = markdown_message if markdown_message is not None else message
     for channel in CHANNELS:
+        if not external and channel.name != "in_app":
+            continue
         try:
-            body = external if channel.name != "in_app" else message
+            body = message if channel.name == "in_app" else external_body
             channel.deliver(event, unique, body, request_id,
                             title=title, notify_type=outcome, panel_wide=panel_wide)
         except Exception:
             logger.exception("Notification channel %s failed for %s", channel.name, event)
 
 
-def notify_subscribers(event: str, message: str, request: models.Request):
-    notify(event, message, models.subscribers(request.id), request.id)
+def notify_subscribers(event: str, message: str, request: models.Request,
+                       *, external: bool = True):
+    notify(event, message, models.subscribers(request.id), request.id, external=external)
 
 
 def approver_ids() -> list[int]:
@@ -145,8 +154,9 @@ def approver_ids() -> list[int]:
     return [r["id"] for r in rows]
 
 
-def notify_approvers(event: str, message: str, request: models.Request):
-    notify(event, message, approver_ids(), request.id)
+def notify_approvers(event: str, message: str, request: models.Request,
+                     *, external: bool = True):
+    notify(event, message, approver_ids(), request.id, external=external)
 
 
 # ── Reading ────────────────────────────────────────────────────────────────────

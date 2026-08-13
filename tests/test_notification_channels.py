@@ -252,3 +252,20 @@ def test_a_failing_channel_does_not_break_the_notification(client, admin, monkey
     notify.notify(notify.REQUEST_COMPLETED, "Film pronto.", [user.id])
 
     assert notify.unread_count(user.id) == 1
+
+
+def test_the_second_half_of_a_pair_stays_off_the_webhook(client, admin, sent):
+    """Subscribers and approvers are two audiences on the bell but one webhook.
+
+    A failed download tells both, in different words. On Discord that arrived
+    twice, saying the same thing — so the second call is delivered in-app only.
+    """
+    user, _ = admin
+    apprise_channel.create_channel(name="Discord", apprise_url=DISCORD_URL, events=[])
+
+    notify.notify(notify.REQUEST_FAILED, "Prima metà.", [user.id])
+    notify.notify(notify.REQUEST_FAILED, "Seconda metà.", [user.id], external=False)
+
+    assert [c["message"] for c in sent] == ["Prima metà."]
+    # Both still reach the bell: on the bell they are different audiences.
+    assert notify.unread_count(user.id) == 2
