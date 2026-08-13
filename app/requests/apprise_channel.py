@@ -206,7 +206,8 @@ class AppriseChannel:
     name = "apprise"
 
     def deliver(self, event: str, user_ids: list[int], message: str, request_id: int | None,
-                title: str | None = None, notify_type: str | None = None):
+                title: str | None = None, notify_type: str | None = None,
+                panel_wide: bool = False):
         # Deliberately no early return on an empty recipient list: external
         # channels are configured per panel, not per user, and a direct download
         # in open mode has no account to notify in-app while still being exactly

@@ -382,6 +382,11 @@ function renderWatchesList() {
         <div class="req-side">
           ${badge}
           <div class="req-actions">
+            <button class="btn btn-sm btn-outline-secondary" id="watch-check-${w.id}"
+                    onclick="checkWatchNow(${w.id})"
+                    title="Cerca subito nuovi episodi, senza aspettare il controllo automatico">
+              <i class="ti ti-refresh me-1"></i>Controlla ora
+            </button>
             <button class="btn btn-sm btn-outline-secondary" onclick="unfollowWatch(${w.id})">
               <i class="ti ti-bell-off me-1"></i>Non seguire più
             </button>
@@ -497,6 +502,34 @@ async function toggleFollowSeries(kind) {
   } catch (e) {
     _renderFollowButton(kind, following);
     showToast('Errore di rete', 'danger');
+  }
+}
+
+// The automatic check runs every few hours; this is for when an episode has
+// just dropped and waiting for the next cycle makes no sense.
+async function checkWatchNow(watchId) {
+  const btn = document.getElementById(`watch-check-${watchId}`);
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2 ti-spin me-1"></i>Controllo...'; }
+  try {
+    const res = await fetch(`/api/watches/${watchId}/check`, {method: 'POST'});
+    const data = await safeJson(res);
+    if (!res.ok) {
+      showToast(data.detail || 'Controllo fallito', 'danger');
+      return;
+    }
+    if (data.new) {
+      showToast(
+        data.new === 1 ? '1 nuovo episodio trovato' : `${data.new} nuovi episodi trovati`,
+        'success',
+      );
+    } else {
+      showToast('Nessun nuovo episodio', 'info');
+    }
+  } catch (e) {
+    showToast('Errore di rete', 'danger');
+  } finally {
+    // Redraws the row, which also refreshes "controllata ora".
+    await loadWatches();
   }
 }
 

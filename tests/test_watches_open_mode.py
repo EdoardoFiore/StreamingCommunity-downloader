@@ -155,3 +155,54 @@ def test_a_failed_submission_does_not_stop_the_cycle(client, open_panel, monkeyp
 
     assert result["outcomes"] == {"submit_failed": 1}
     assert "S01E4" in watch_models.seen_keys(watch.id)
+
+
+# ── The bell, without accounts ────────────────────────────────────────────────
+
+def test_a_finished_download_reaches_the_bell(client, open_panel, stub_jobs):
+    """Without accounts the bell holds the panel's own notifications: a download
+    nobody requested used to have nowhere to be reported."""
+    from app import downloads_notify
+    from app.jobs import job_manager
+
+    job = job_manager._make_job("Inception", "film", media_label="Inception",
+                                year="2010", user_id=None)
+    job.status = "done"
+    downloads_notify.on_job_finished(job)
+
+    body = client.get("/api/notifications").json()
+    assert body["unread"] == 1
+    assert "Inception (2010)" in body["items"][0]["message"]
+
+
+def test_the_panel_bell_can_be_marked_read(client, open_panel, stub_jobs):
+    from app import downloads_notify
+    from app.jobs import job_manager
+
+    job = job_manager._make_job("Film", "film", user_id=None)
+    job.status = "done"
+    downloads_notify.on_job_finished(job)
+
+    assert client.post("/api/notifications/read", json={"ids": []}).json()["unread"] == 0
+    assert client.get("/api/notifications").json()["unread"] == 0
+
+
+def test_an_event_with_no_recipients_is_not_broadcast(client, open_panel):
+    """panel_wide is asked for explicitly. An event that merely found no
+    approvers must stay unsent, not become everyone's notification."""
+    from app.requests import notify
+
+    notify.notify(notify.REQUEST_CREATED, "Nessun destinatario.", [])
+
+    assert client.get("/api/notifications").json()["items"] == []
+
+
+def test_checking_a_watch_by_hand_is_allowed_without_accounts(client, open_panel, stub_jobs):
+    watch_id = client.post("/api/watches", json=TV_BODY).json()["id"]
+    open_panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+
+    response = client.post(f"/api/watches/{watch_id}/check")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["new"] == 1
+    assert [name for name, _, _ in stub_jobs] == ["submit_episode"]

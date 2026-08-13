@@ -1745,7 +1745,9 @@
             <div class="header-actions">
 
               <!-- Notification bell -->
-              <div class="notif-wrap" data-requires-auth="1">
+              <!-- No data-requires-auth: without accounts the bell shows the
+                   panel's own notifications rather than a user's. -->
+              <div class="notif-wrap">
                 <button class="header-icon-btn" id="notif-button" onclick="toggleNotifications()" title="Notifiche">
                   <i class="ti ti-bell"></i>
                   <span class="notif-badge" id="notif-badge" style="display:none"></span>

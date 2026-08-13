@@ -361,12 +361,39 @@ _V5_WATCHES_WITHOUT_ACCOUNTS = [
 ]
 
 
+# The bell was per-user only, so a panel with no accounts had no bell at all —
+# and a download nobody requested had nowhere to be reported. A NULL user_id
+# means the notification belongs to the panel, and is what the implicit user
+# sees when there are no accounts.
+#
+# Rebuilt rather than altered: SQLite cannot relax NOT NULL in place. Nothing
+# references jf_notification, so no child tables are involved this time.
+_V6_PANEL_NOTIFICATIONS = [
+    """
+    CREATE TABLE jf_notification_v6 (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER REFERENCES jf_user(id) ON DELETE CASCADE,
+        request_id INTEGER REFERENCES jf_request(id) ON DELETE CASCADE,
+        event      TEXT    NOT NULL,
+        message    TEXT    NOT NULL,
+        read_at    TEXT,
+        created_at TEXT    NOT NULL
+    )
+    """,
+    "INSERT INTO jf_notification_v6 SELECT * FROM jf_notification",
+    "DROP TABLE jf_notification",
+    "ALTER TABLE jf_notification_v6 RENAME TO jf_notification",
+    "CREATE INDEX jf_notification_user ON jf_notification(user_id, read_at)",
+]
+
+
 MIGRATIONS: list[list[str]] = [
     _V1_AUTH,
     _V2_REQUESTS,
     _V3_NOTIFICATION_CHANNELS,
     _V4_SERIES_WATCH,
     _V5_WATCHES_WITHOUT_ACCOUNTS,
+    _V6_PANEL_NOTIFICATIONS,
 ]
 
 

@@ -29,16 +29,19 @@ def delivered(monkeypatch):
     calls: list[dict] = []
     real = notify.notify
 
+    # **kw so a new presentation argument shows up as a test to update rather
+    # than as a TypeError swallowed inside notify()'s per-channel try/except.
     def record(event, message, user_ids, request_id=None, *, markdown_message=None,
-               title=None, notify_type=None):
+               title=None, notify_type=None, **kw):
         if not event.startswith("download"):
             return real(event, message, user_ids, request_id,
                         markdown_message=markdown_message, title=title,
-                        notify_type=notify_type)
+                        notify_type=notify_type, **kw)
         calls.append({
             "event": event, "message": message, "user_ids": user_ids,
             "markdown": markdown_message, "title": title,
             "notify_type": notify_type or notify.EVENT_NOTIFY_TYPE.get(event, notify.INFO),
+            **kw,
         })
 
     monkeypatch.setattr(downloads_notify.notify, "notify", record)

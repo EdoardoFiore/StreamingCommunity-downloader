@@ -442,17 +442,26 @@ def cancel_request(request_id: int, http_request: HttpRequest):
 notifications_router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
+def _bell_owner(http_request: HttpRequest) -> int | None:
+    """Whose bell this is. None without accounts: the notifications belong to
+    the panel, and the implicit user has no row to own them."""
+    from app.auth.deps import OPEN_MODE_USER
+
+    user = current_user(http_request)
+    return None if user is OPEN_MODE_USER else user.id
+
+
 @notifications_router.get("", dependencies=CAN_SEE_OWN)
 def list_notifications(http_request: HttpRequest):
-    user = current_user(http_request)
+    owner = _bell_owner(http_request)
     return {
-        "items": notify.list_for_user(user.id),
-        "unread": notify.unread_count(user.id),
+        "items": notify.list_for_user(owner),
+        "unread": notify.unread_count(owner),
     }
 
 
 @notifications_router.post("/read", dependencies=CAN_SEE_OWN)
 def mark_notifications_read(body: MarkReadRequest, http_request: HttpRequest):
-    user = current_user(http_request)
-    notify.mark_read(user.id, body.ids)
-    return {"unread": notify.unread_count(user.id)}
+    owner = _bell_owner(http_request)
+    notify.mark_read(owner, body.ids)
+    return {"unread": notify.unread_count(owner)}

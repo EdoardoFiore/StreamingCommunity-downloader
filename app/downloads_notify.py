@@ -126,12 +126,15 @@ def _truncate(body: str) -> str:
 def _announce_single(job):
     label = _media_title(job)
     recipients = [job.user_id] if job.user_id else []
+    # Nobody to address it to means the panel has no accounts, so the bell shows
+    # it as the panel's own rather than dropping it.
+    panel = not recipients
 
     if job.status == "done":
         notify.notify(
             notify.DOWNLOAD_COMPLETED,
             f"«{label}» è pronto in libreria.",
-            recipients,
+            recipients, panel_wide=panel,
             markdown_message=f"«**{label}**» è pronto in libreria.",
             title="Download completato",
         )
@@ -141,7 +144,7 @@ def _announce_single(job):
     notify.notify(
         notify.DOWNLOAD_FAILED,
         f"Il download di «{label}» è fallito: {error}",
-        recipients,
+        recipients, panel_wide=panel,
         markdown_message=f"«**{label}**»\n`{error}`",
         title="Download fallito",
     )
@@ -152,6 +155,7 @@ def _announce_single(job):
 def _announce_batch(batch: _Batch):
     ok, failed, cancelled = len(batch.done), batch.failed, batch.cancelled
     recipients = [batch.user_id] if batch.user_id else []
+    panel = not recipients
     total = ok + len(failed) + len(cancelled)
     ok_title, partial_title, none_title = _BATCH_TITLES.get(batch.kind, _BATCH_TITLES["season"])
 
@@ -164,7 +168,7 @@ def _announce_batch(batch: _Batch):
     if not failed:
         plain = f"«{batch.label}» completata: {ok} episodi su {total} scaricati."
         body = f"«**{batch.label}**»\n{counts}"
-        notify.notify(notify.DOWNLOAD_BATCH_COMPLETED, plain, recipients,
+        notify.notify(notify.DOWNLOAD_BATCH_COMPLETED, plain, recipients, panel_wide=panel,
                       markdown_message=_truncate(body), title=ok_title)
         return
 
@@ -172,14 +176,14 @@ def _announce_batch(batch: _Batch):
     if ok == 0:
         plain = f"«{batch.label}»: nessun episodio scaricato, {len(failed)} falliti."
         body = f"«**{batch.label}**»\n❌ {len(failed)} episodi su {total} falliti.\n\n**Episodi falliti**\n{listed}"
-        notify.notify(notify.DOWNLOAD_BATCH_FAILED, plain, recipients,
+        notify.notify(notify.DOWNLOAD_BATCH_FAILED, plain, recipients, panel_wide=panel,
                       markdown_message=_truncate(body), title=none_title)
         return
 
     plain = f"«{batch.label}»: {ok} episodi scaricati, {len(failed)} falliti."
     body = f"«**{batch.label}**»\n{counts}\n\n**Episodi falliti**\n{listed}"
     # Neither a success nor a failure, and the colour should say so.
-    notify.notify(notify.DOWNLOAD_BATCH_COMPLETED, plain, recipients,
+    notify.notify(notify.DOWNLOAD_BATCH_COMPLETED, plain, recipients, panel_wide=panel,
                   markdown_message=_truncate(body), title=partial_title,
                   notify_type=notify.WARNING)
 

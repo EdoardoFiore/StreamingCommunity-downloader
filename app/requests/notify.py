@@ -80,14 +80,21 @@ class InAppChannel:
     name = "in_app"
 
     def deliver(self, event: str, user_ids: list[int], message: str, request_id: int | None,
-                title: str | None = None, notify_type: str | None = None):
+                title: str | None = None, notify_type: str | None = None,
+                panel_wide: bool = False):
         # title and notify_type are presentation for external channels; the bell
         # shows the message and picks its own icon from the event.
-        if not user_ids:
+        #
+        # panel_wide writes a single row addressed to nobody, which is what the
+        # bell shows when the panel has no accounts. Callers ask for it
+        # explicitly: an event that simply found no recipients — approvers on a
+        # panel that has none — must stay unsent rather than be broadcast.
+        recipients = list(user_ids) or ([None] if panel_wide else [])
+        if not recipients:
             return
         timestamp = models.now_iso()
         with db.tx() as conn:
-            for user_id in user_ids:
+            for user_id in recipients:
                 conn.execute(
                     "INSERT INTO jf_notification(user_id, request_id, event, message, created_at) "
                     "VALUES(?, ?, ?, ?, ?)",
@@ -106,7 +113,7 @@ CHANNELS = [InAppChannel(), AppriseChannel()]
 
 def notify(event: str, message: str, user_ids: list[int], request_id: int | None = None,
            *, markdown_message: str | None = None, title: str | None = None,
-           notify_type: str | None = None):
+           notify_type: str | None = None, panel_wide: bool = False):
     """Deliver one event to every channel.
 
     ``message`` is the plain text stored on the bell; ``markdown_message`` is
@@ -121,7 +128,7 @@ def notify(event: str, message: str, user_ids: list[int], request_id: int | None
         try:
             body = external if channel.name != "in_app" else message
             channel.deliver(event, unique, body, request_id,
-                            title=title, notify_type=outcome)
+                            title=title, notify_type=outcome, panel_wide=panel_wide)
         except Exception:
             logger.exception("Notification channel %s failed for %s", channel.name, event)
 
@@ -144,34 +151,44 @@ def notify_approvers(event: str, message: str, request: models.Request):
 
 # ── Reading ────────────────────────────────────────────────────────────────────
 
-def list_for_user(user_id: int, limit: int = 50) -> list[dict]:
+# A None user is the panel itself, which is who the bell belongs to when there
+# are no accounts. Its rows are never visible to a real user: with accounts,
+# every notification has a real recipient.
+def _owner_clause(user_id: int | None) -> tuple[str, tuple]:
+    return ("user_id IS NULL", ()) if user_id is None else ("user_id = ?", (user_id,))
+
+
+def list_for_user(user_id: int | None, limit: int = 50) -> list[dict]:
+    where, params = _owner_clause(user_id)
     rows = db.query(
         "SELECT id, request_id, event, message, read_at, created_at FROM jf_notification "
-        "WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-        (user_id, limit),
+        f"WHERE {where} ORDER BY created_at DESC, id DESC LIMIT ?",
+        (*params, limit),
     )
     return [dict(r) for r in rows]
 
 
-def unread_count(user_id: int) -> int:
+def unread_count(user_id: int | None) -> int:
+    where, params = _owner_clause(user_id)
     return db.query_one(
-        "SELECT COUNT(*) AS n FROM jf_notification WHERE user_id = ? AND read_at IS NULL",
-        (user_id,),
+        f"SELECT COUNT(*) AS n FROM jf_notification WHERE {where} AND read_at IS NULL",
+        params,
     )["n"]
 
 
-def mark_read(user_id: int, notification_ids: list[int] | None = None):
+def mark_read(user_id: int | None, notification_ids: list[int] | None = None):
     """Mark notifications read. Always scoped to the caller's own rows."""
     timestamp = models.now_iso()
+    where, params = _owner_clause(user_id)
     if notification_ids:
         placeholders = ",".join("?" * len(notification_ids))
         db.execute(
-            f"UPDATE jf_notification SET read_at = ? WHERE user_id = ? AND read_at IS NULL "
+            f"UPDATE jf_notification SET read_at = ? WHERE {where} AND read_at IS NULL "
             f"AND id IN ({placeholders})",
-            (timestamp, user_id, *notification_ids),
+            (timestamp, *params, *notification_ids),
         )
     else:
         db.execute(
-            "UPDATE jf_notification SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
-            (timestamp, user_id),
+            f"UPDATE jf_notification SET read_at = ? WHERE {where} AND read_at IS NULL",
+            (timestamp, *params),
         )
