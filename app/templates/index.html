@@ -2253,6 +2253,91 @@
         </div>
         </div>
 
+        <!-- ── Schema dei nomi ───────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Schema dei nomi</p>
+          <p class="settings-section-hint">
+            Come vengono chiamati cartelle e file. Segnaposto disponibili:
+            <code>{title}</code>, <code>{year}</code>, <code>{season}</code>,
+            <code>{season2}</code> (con lo zero), <code>{episode}</code>,
+            <code>{episode2}</code> (con lo zero). Quello che sta fra parentesi quadre compare
+            solo se i segnaposto al suo interno hanno un valore: <code>[ ({year})]</code> sparisce
+            del tutto quando l&rsquo;anno non &egrave; noto.
+          </p>
+          <p class="settings-section-hint" style="color:#e6a23c">
+            <i class="ti ti-alert-triangle me-1"></i>
+            I file gi&agrave; scaricati non vengono rinominati. Continuano a essere riconosciuti
+            come presenti, quindi non verranno riscaricati, ma restano con il nome vecchio finch&eacute;
+            non li rinomini dal gestore file.
+          </p>
+
+          <p class="settings-section-label mt-3 mb-2">Film</p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-film_folder">Cartella</label>
+              <input type="text" id="naming-film_folder" class="form-control" data-naming-slot="film_folder">
+              <div class="form-text" id="naming-preview-film_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-film_file">File</label>
+              <input type="text" id="naming-film_file" class="form-control" data-naming-slot="film_file">
+              <div class="form-text" id="naming-preview-film_file"></div>
+            </div>
+          </div>
+          <p class="settings-section-label mt-3 mb-2">Serie TV</p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-series_folder">Cartella serie</label>
+              <input type="text" id="naming-series_folder" class="form-control" data-naming-slot="series_folder">
+              <div class="form-text" id="naming-preview-series_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-season_folder">Cartella stagione</label>
+              <input type="text" id="naming-season_folder" class="form-control" data-naming-slot="season_folder">
+              <div class="form-text" id="naming-preview-season_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-episode_file">File episodio</label>
+              <input type="text" id="naming-episode_file" class="form-control" data-naming-slot="episode_file">
+              <div class="form-text" id="naming-preview-episode_file"></div>
+            </div>
+          </div>
+          <p class="settings-section-label mt-3 mb-2">Anime</p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-anime_folder">Cartella</label>
+              <input type="text" id="naming-anime_folder" class="form-control" data-naming-slot="anime_folder">
+              <div class="form-text" id="naming-preview-anime_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-anime_season_folder">Cartella stagione</label>
+              <input type="text" id="naming-anime_season_folder" class="form-control" data-naming-slot="anime_season_folder">
+              <div class="form-text" id="naming-preview-anime_season_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-anime_episode_file">File episodio</label>
+              <input type="text" id="naming-anime_episode_file" class="form-control" data-naming-slot="anime_episode_file">
+              <div class="form-text" id="naming-preview-anime_episode_file"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-anime_movie_file">File film</label>
+              <input type="text" id="naming-anime_movie_file" class="form-control" data-naming-slot="anime_movie_file">
+              <div class="form-text" id="naming-preview-anime_movie_file"></div>
+            </div>
+          </div>
+
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveNamingTemplates()" id="save-naming-btn">
+              Salva
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetNamingTemplates()">
+              Ripristina predefiniti
+            </button>
+            <div id="naming-feedback" class="form-text"></div>
+          </div>
+        </div>
+        </div>
+
         <div class="settings-pane" data-settings-pane="download" style="display:none">
         <!-- ── Performance download ──────────────────────────────────────── -->
         <div class="settings-section">

@@ -4,13 +4,13 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app import config
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import get_settings, save_settings
-from app.core import domain_recovery
+from app.core import domain_recovery, naming
 from app.core.page import get_domain_version
 
 logger = logging.getLogger(__name__)
@@ -157,14 +157,61 @@ class SettingsUpdate(BaseModel):
     max_concurrent_downloads: int | None = None
     max_segment_workers: int | None = None
     series_watch_interval_minutes: int | None = None
+    naming_templates: dict[str, str] | None = None
     domain_auto_check_enabled: bool | None = None
     domain_auto_apply: bool | None = None
     domain_check_interval_minutes: int | None = None
 
+    @field_validator("naming_templates")
+    @classmethod
+    def _check_templates(cls, value):
+        """Refuse at save time what render() cannot afford to complain about.
+
+        render() runs inside a download, after the bytes are already fetched, so
+        it silently defaults rather than raising. Everything it would paper over
+        has to be caught here, while there is still a person looking at it.
+        """
+        if value is None:
+            return None
+        return {slot: naming.validate(slot, template) for slot, template in value.items()}
+
+
+class NamingPreviewRequest(BaseModel):
+    templates: dict[str, str]
+
+
+@router.post("/settings/naming-preview", dependencies=CAN_MANAGE)
+def preview_naming(body: NamingPreviewRequest):
+    """What each template would produce, rendered by the real engine.
+
+    Server-side rather than reimplemented in JavaScript: two renderers drift,
+    and this way an invalid template shows its actual validation error while it
+    is being typed instead of at save time.
+    """
+    result = {}
+    for slot, template in body.templates.items():
+        if slot not in naming.SLOT_TOKENS:
+            continue
+        try:
+            naming.validate(slot, template)
+            result[slot] = {"preview": naming.preview(slot, template), "error": None}
+        except ValueError as exc:
+            result[slot] = {"preview": None, "error": str(exc)}
+    return {"slots": result, "tokens": {s: list(t) for s, t in naming.SLOT_TOKENS.items()}}
+
+
+@router.get("/settings/naming-defaults", dependencies=CAN_MANAGE)
+def naming_defaults():
+    return {"templates": dict(naming.DEFAULT_TEMPLATES),
+            "tokens": {s: list(t) for s, t in naming.SLOT_TOKENS.items()}}
+
 
 @router.get("/settings", dependencies=CAN_MANAGE)
 def get_app_settings():
-    return get_settings()
+    # naming_templates is always returned complete, defaults filled in: the UI
+    # renders nine fields and a partially stored dict would leave some blank,
+    # which reads as "no rule" rather than "the default rule".
+    return {**get_settings(), "naming_templates": naming.templates()}
 
 
 # Range checks, as (field, low, high). A settings key with no sensible bounds

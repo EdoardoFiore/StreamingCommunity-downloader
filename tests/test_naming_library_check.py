@@ -15,8 +15,10 @@ import os
 
 import pytest
 
+from app.auth.permissions import ALL_PERMISSIONS
 from app.core import naming, paths
 from app.requests import models, resolver
+from tests.conftest import do_setup, make_user, session_for
 
 
 # ── The anchor: defaults reproduce the old layout exactly ─────────────────────
@@ -191,3 +193,76 @@ def test_the_default_configuration_costs_no_extra_stats(library, monkeypatch):
 
     assert len(checked) == 2
     assert len(set(checked)) == 2
+
+
+# ── Settings API ──────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def admin(client, admin_credentials):
+    do_setup(client, admin_credentials)
+    user = make_user("boss", "jf-boss-id", int(ALL_PERMISSIONS))
+    client.cookies.clear()
+    return user, session_for(client, user.id)
+
+
+def _csrf(admin):
+    return {"X-CSRF-Token": admin[1]}
+
+
+def test_the_settings_endpoint_always_returns_all_nine_slots(client, admin):
+    """A half-filled form reads as "no rule", not as "the default rule"."""
+    body = client.get("/api/domain/settings").json()
+    assert set(body["naming_templates"]) == set(naming.DEFAULT_TEMPLATES)
+
+
+def test_a_valid_template_is_saved(client, admin):
+    res = client.put("/api/domain/settings", headers=_csrf(admin), json={
+        "naming_templates": {**naming.DEFAULT_TEMPLATES,
+                             "episode_file": "{title} {season}x{episode2}"},
+    })
+    assert res.status_code == 200
+    assert naming.templates()["episode_file"] == "{title} {season}x{episode2}"
+
+
+def test_an_invalid_template_is_a_422_naming_the_problem(client, admin):
+    res = client.put("/api/domain/settings", headers=_csrf(admin), json={
+        "naming_templates": {"film_file": "{title}/{year}"},
+    })
+    assert res.status_code == 422
+    assert "percorso" in str(res.json()["detail"])
+
+
+def test_saving_a_template_does_not_disturb_the_other_settings(client, admin):
+    from app import config
+
+    before = config.get_settings()["max_concurrent_downloads"]
+    client.put("/api/domain/settings", headers=_csrf(admin),
+               json={"naming_templates": {"film_file": "{title}"}})
+
+    assert config.get_settings()["max_concurrent_downloads"] == before
+
+
+def test_the_preview_uses_the_real_engine(client, admin):
+    body = client.post("/api/domain/settings/naming-preview", headers=_csrf(admin), json={
+        "templates": {"episode_file": "{title} {season}x{episode2}"},
+    }).json()
+
+    assert body["slots"]["episode_file"]["preview"] == "Titolo 1x07"
+    assert body["slots"]["episode_file"]["error"] is None
+
+
+def test_the_preview_reports_the_error_instead_of_a_result(client, admin):
+    body = client.post("/api/domain/settings/naming-preview", headers=_csrf(admin), json={
+        "templates": {"film_file": "{title} {quality}"},
+    }).json()
+
+    assert body["slots"]["film_file"]["preview"] is None
+    assert "quality" in body["slots"]["film_file"]["error"]
+
+
+def test_an_unknown_slot_in_a_preview_is_ignored(client, admin):
+    body = client.post("/api/domain/settings/naming-preview", headers=_csrf(admin), json={
+        "templates": {"nonsense": "{title}"},
+    }).json()
+    assert body["slots"] == {}

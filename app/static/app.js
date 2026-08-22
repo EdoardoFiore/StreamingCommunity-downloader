@@ -742,7 +742,7 @@ const _SETTINGS_FEEDBACK_IDS = [
   'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
   'domain-recovery-feedback', 'tmdb-feedback',
-  'jf-refresh-feedback', 'hooks-feedback',
+  'jf-refresh-feedback', 'hooks-feedback', 'naming-feedback',
 ];
 
 // FastAPI answers a validation failure with an *array* of error objects, so the
@@ -769,6 +769,7 @@ function _feedback(id, message = '', kind = 'muted') {
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
   sorgente: () => Promise.all([loadDomainRecoverySettings(), loadTmdbSettings()]),
+  librerie: () => loadNamingTemplates(),
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),
   notifiche: () => loadNotificationChannels(),
@@ -1200,6 +1201,106 @@ async function loadDomainRecoverySettings() {
   document.getElementById('domain-auto-apply').checked = !!data.domain_auto_apply;
   document.getElementById('domain-check-interval').value =
     data.domain_check_interval_minutes ?? 360;
+}
+
+
+// ── Naming templates ───────────────────────────────────────────────────────────
+//
+// The preview is rendered by the server, using the same engine the downloader
+// uses. Reimplementing it here would give two renderers that drift, and this way
+// an invalid template shows its real validation error while it is being typed.
+
+let _namingDefaults = null;
+let _namingPreviewTimer = null;
+
+function _namingInputs() {
+  return [...document.querySelectorAll('[data-naming-slot]')];
+}
+
+async function loadNamingTemplates() {
+  const data = await _loadAppSettings();
+  const templates = (data && data.naming_templates) || {};
+  _namingInputs().forEach(input => {
+    input.value = templates[input.dataset.namingSlot] || '';
+    if (!input.dataset.wired) {
+      input.addEventListener('input', scheduleNamingPreview);
+      input.dataset.wired = '1';
+    }
+  });
+  refreshNamingPreview();
+
+  if (!_namingDefaults) {
+    try {
+      const res = await fetch('/api/domain/settings/naming-defaults');
+      if (res.ok) _namingDefaults = (await safeJson(res)).templates;
+    } catch (e) { /* the reset button simply stays unavailable */ }
+  }
+}
+
+function scheduleNamingPreview() {
+  clearTimeout(_namingPreviewTimer);
+  _namingPreviewTimer = setTimeout(refreshNamingPreview, 200);
+}
+
+function _collectNamingTemplates() {
+  const templates = {};
+  _namingInputs().forEach(i => { templates[i.dataset.namingSlot] = i.value; });
+  return templates;
+}
+
+async function refreshNamingPreview() {
+  try {
+    const res = await fetch('/api/domain/settings/naming-preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({templates: _collectNamingTemplates()}),
+    });
+    if (!res.ok) return;
+    const data = await safeJson(res);
+    _namingInputs().forEach(input => {
+      const slot = data.slots[input.dataset.namingSlot];
+      const line = document.getElementById(`naming-preview-${input.dataset.namingSlot}`);
+      if (!line || !slot) return;
+      if (slot.error) {
+        line.className = 'form-text text-danger';
+        line.textContent = slot.error;
+      } else {
+        line.className = 'form-text';
+        line.textContent = `Esempio: ${slot.preview}`;
+      }
+    });
+  } catch (e) { /* previews are a convenience; saving still validates */ }
+}
+
+async function saveNamingTemplates() {
+  const btn = document.getElementById('save-naming-btn');
+  btn.disabled = true;
+  _feedback('naming-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/domain/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({naming_templates: _collectNamingTemplates()}),
+    });
+    if (res.ok) {
+      _feedback('naming-feedback', 'Salvato.', 'success');
+      showToast('Schema dei nomi salvato', 'success');
+    } else {
+      const d = await safeJson(res);
+      _feedback('naming-feedback', _detailText(d) || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('naming-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function resetNamingTemplates() {
+  if (!_namingDefaults) return;
+  if (!await scConfirm('Ripristinare lo schema dei nomi predefinito?')) return;
+  _namingInputs().forEach(input => {
+    input.value = _namingDefaults[input.dataset.namingSlot] || '';
+  });
+  refreshNamingPreview();
+  _feedback('naming-feedback', 'Predefiniti ripristinati: premi Salva per applicarli.');
 }
 
 
