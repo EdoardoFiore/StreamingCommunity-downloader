@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from app.config import DATA_FILE, VIDEOS_DIR
-from app.core import animeunity, paths, probe
+from app.core import animeunity, naming, paths, probe
 from app.requests import models
 
 logger = logging.getLogger(__name__)
@@ -81,30 +81,49 @@ def library_dir(media_type: str) -> str:
     return str(VIDEOS_DIR)
 
 
-def destination_path(request: models.Request) -> str:
+def destination_path(request: models.Request, templates: dict | None = None) -> str:
     """Where this request's file would land, using the downloader's own layout."""
     output_dir = library_dir(request.media_type)
     if request.media_type == FILM:
-        return paths.film_path(output_dir, request.title, request.year)
+        return paths.film_path(output_dir, request.title, request.year, templates)
     if request.media_type == EPISODE:
         return paths.episode_path(
             output_dir, request.title, request.season or 1,
-            request.episode_number or "1", request.year,
+            request.episode_number or "1", request.year, templates,
         )
     return paths.anime_path(
         output_dir, request.title, request.episode_number or "1",
-        request.anime_type or "tv", request.year,
+        request.anime_type or "tv", request.year, templates,
     )
+
+
+def _candidate_paths(request: models.Request) -> list[str]:
+    """Every path this request's file could be sitting at.
+
+    Two axes. The extension, because the downloader remuxes to .mkv as soon as
+    there is more than one audio track. And the naming template, because
+    changing it must not make files already in the library invisible: they would
+    be re-downloaded to the new name, leaving a duplicate of something that was
+    already there.
+
+    With the default configuration both templates render the same path and the
+    deduplication collapses this back to the two stats it has always been.
+    """
+    bases = dict.fromkeys([
+        # Current first: a library that has been renamed should win over a
+        # legacy file left behind.
+        destination_path(request),
+        destination_path(request, templates=naming.LEGACY_TEMPLATES),
+    ])
+    candidates = []
+    for base in bases:
+        candidates.extend([base, os.path.splitext(base)[0] + ".mkv"])
+    return list(dict.fromkeys(candidates))
 
 
 def existing_file(request: models.Request) -> str | None:
     """The file already occupying this request's destination, if any."""
-    path = destination_path(request)
-    if os.path.exists(path):
-        return path
-    # The downloader remuxes to .mkv when there are several audio tracks.
-    mkv = os.path.splitext(path)[0] + ".mkv"
-    return mkv if os.path.exists(mkv) else None
+    return next((p for p in _candidate_paths(request) if os.path.exists(p)), None)
 
 
 def library_gap(request: models.Request) -> dict | None:
