@@ -283,3 +283,80 @@ def test_the_tmdb_key_is_never_echoed_back(client, admin):
     body = client.get("/api/metadata/settings").json()
     assert body == {"tmdb_configured": True}
     assert "super-secret" not in str(body)
+
+
+# ── TMDB image proxy ──────────────────────────────────────────────────────────
+
+@pytest.fixture
+def tmdb_image(monkeypatch):
+    """Serve a fake image and record the upstream URL asked for."""
+    from app.routers import images
+
+    calls = []
+
+    class _Image:
+        ok = True
+        status_code = 200
+        headers = {"content-type": "image/jpeg"}
+        content = b"\xff\xd8\xff"
+
+    def fake_get(url, *args, **kwargs):
+        calls.append(url)
+        return _Image()
+
+    monkeypatch.setattr(images.requests, "get", fake_get)
+    return calls
+
+
+def test_the_tmdb_route_is_not_swallowed_by_the_catch_all(client, admin, tmdb_image):
+    """/api/image/{filename:path} matches "tmdb/w1280/x.jpg" perfectly happily.
+
+    If it wins, the request is answered by asking the source's CDN for a file it
+    has never heard of. Declaration order is the whole fix, so it is pinned.
+    """
+    res = client.get("/api/image/tmdb/w1280/backdrop.jpg")
+
+    assert res.status_code == 200
+    assert tmdb_image == ["https://image.tmdb.org/t/p/w1280/backdrop.jpg"]
+
+
+def test_tmdb_artwork_is_cached_by_the_browser(client, admin, tmdb_image):
+    res = client.get("/api/image/tmdb/w500/logo.png")
+    assert "max-age" in res.headers.get("cache-control", "")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/image/tmdb/w9999/backdrop.jpg",  # size not on the allowlist
+        "/api/image/tmdb/w1280/backdrop.sh",   # not an image extension
+        "/api/image/tmdb/w1280/back drop.jpg",  # space
+    ],
+)
+def test_bad_tmdb_image_requests_are_refused(client, admin, tmdb_image, path):
+    assert client.get(path).status_code in (400, 404)
+    # Nothing reached TMDB. A request carrying a slash falls through to the
+    # source catch-all instead, which is its own (host-pinned) proxy — so the
+    # assertion is about where the bytes were asked for, not about silence.
+    assert not [url for url in tmdb_image if "image.tmdb.org" in url]
+
+
+@pytest.mark.parametrize(
+    "path", ["../../etc/passwd", "..%2F..%2Fetc", "sub/dir.jpg", "a" * 200 + ".jpg"]
+)
+def test_the_tmdb_path_validator_rejects_directly(path):
+    """Checked against the regex rather than over HTTP.
+
+    A "../.." in a URL is normalised away by the client before the request is
+    sent, so going through TestClient would test the client's path handling
+    rather than this validator.
+    """
+    from app.routers.images import TMDB_PATH
+
+    assert not TMDB_PATH.match(path)
+
+
+def test_the_tmdb_image_host_cannot_be_influenced(client, admin, tmdb_image):
+    """The host is a constant: the path never gets to say where the bytes come from."""
+    client.get("/api/image/tmdb/w500/logo.png")
+    assert all(url.startswith("https://image.tmdb.org/t/p/") for url in tmdb_image)
