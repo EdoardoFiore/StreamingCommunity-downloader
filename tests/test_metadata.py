@@ -90,12 +90,16 @@ TMDB_PAYLOAD = {
     "videos": {"results": [{"site": "YouTube", "type": "Trailer", "key": "abc123"}]},
 }
 
-PREVIEW_PAYLOAD = {
-    "type": "tv",
-    "runtime": 45,
-    "plot": "Trama dalla sorgente.",
+# The title page props, which are the keyless provider. Deliberately carrying a
+# score and a trailer: the site publishes both, and an earlier version of this
+# module dropped them on the floor.
+SITE_PROPS = {
+    **PROPS,
+    "score": "9.4",
+    "trailers": [{"youtube_id": "siteTrailer"}],
     "genres": [{"name": "Azione"}],
-    "images": [{"type": "background", "filename": "bg.jpg"}],
+    "images": [{"type": "background", "filename": "bg.jpg"},
+               {"type": "logo", "filename": "logo.jpg"}],
 }
 
 
@@ -109,23 +113,18 @@ def _empty_cache():
 @pytest.fixture
 def outbound(monkeypatch):
     """Record every outbound call and serve canned payloads."""
-    calls = {"tmdb": [], "preview": [], "props": []}
+    calls = {"tmdb": [], "props": []}
 
     def fake_props(title_id, slug, version, domain):
         calls["props"].append(title_id)
-        return dict(PROPS)
+        return dict(SITE_PROPS)
 
     def fake_tmdb_get(url, *args, **kwargs):
         calls["tmdb"].append((url, kwargs))
         return _FakeResponse(TMDB_PAYLOAD)
 
-    def fake_preview_post(url, *args, **kwargs):
-        calls["preview"].append((url, kwargs))
-        return _FakeResponse(PREVIEW_PAYLOAD)
-
     monkeypatch.setattr(tv, "get_title_props", fake_props)
     monkeypatch.setattr(metadata.requests, "get", fake_tmdb_get)
-    monkeypatch.setattr(metadata.requests, "post", fake_preview_post)
     return calls
 
 
@@ -151,9 +150,31 @@ def test_without_a_key_tmdb_is_never_contacted(client, outbound):
     result = metadata.title_metadata("tv", "1", "test-series", "v1")
 
     assert result["source"] == "site"
-    assert result["plot"] == "Trama dalla sorgente."
+    assert result["plot"] == PROPS["plot"]
     assert outbound["tmdb"] == []
-    assert outbound["preview"]
+
+
+def test_without_a_key_the_score_and_trailer_still_arrive(client, outbound):
+    """The site publishes both. An earlier version of this module dropped them.
+
+    This is the regression pin for a real mistake: the keyless answer was
+    documented as having no rating and no trailer, on the strength of reading
+    the code rather than calling it.
+    """
+    result = metadata.title_metadata("tv", "1", "test-series", "v1")
+
+    assert result["rating"] == 9.4
+    assert result["trailer_url"] == "https://www.youtube.com/watch?v=siteTrailer"
+    assert result["logo"] == "/api/image/logo.jpg"
+    assert result["backdrop"] == "/api/image/bg.jpg"
+
+
+def test_the_keyless_answer_costs_no_extra_request(client, outbound):
+    """The props are fetched anyway, to find tmdb_id. Nothing else is called."""
+    metadata.title_metadata("tv", "1", "test-series", "v1")
+
+    assert len(outbound["props"]) == 1
+    assert outbound["tmdb"] == []
 
 
 def test_a_failing_tmdb_falls_through_to_the_source(client, monkeypatch, outbound):
@@ -166,12 +187,12 @@ def test_a_failing_tmdb_falls_through_to_the_source(client, monkeypatch, outboun
 
     result = metadata.title_metadata("tv", "1", "test-series", "v1")
     assert result["source"] == "site"
-    assert result["plot"] == "Trama dalla sorgente."
+    assert result["plot"] == PROPS["plot"]
 
 
 def test_everything_failing_is_not_an_error(client, monkeypatch):
-    monkeypatch.setattr(tv, "get_title_props", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
-    monkeypatch.setattr(metadata.requests, "post", lambda *a, **k: _FakeResponse(ok=False, status_code=500))
+    monkeypatch.setattr(tv, "get_title_props",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
 
     result = metadata.title_metadata("tv", "1", "test-series", "v1")
     assert result["source"] == "none"
@@ -186,7 +207,7 @@ def test_outbound_metadata_calls_have_timeouts(client, outbound):
     metadata.clear_cache()
     auth_models.set_setting(auth_models.SETTING_TMDB_API_KEY, "")
     metadata.title_metadata("tv", "2", "test-series", "v1")
-    assert outbound["preview"][-1][1].get("timeout") is not None
+    assert outbound["props"]
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
@@ -194,7 +215,7 @@ def test_outbound_metadata_calls_have_timeouts(client, outbound):
 def test_a_second_lookup_costs_nothing(client, outbound):
     metadata.title_metadata("tv", "1", "test-series", "v1")
     metadata.title_metadata("tv", "1", "test-series", "v1")
-    assert len(outbound["preview"]) == 1
+    assert len(outbound["props"]) == 1
 
 
 def test_the_cache_expires(client, monkeypatch, outbound):
@@ -205,7 +226,7 @@ def test_the_cache_expires(client, monkeypatch, outbound):
     clock[0] += metadata._TTL_HIT + 1
     metadata.title_metadata("tv", "1", "test-series", "v1")
 
-    assert len(outbound["preview"]) == 2
+    assert len(outbound["props"]) == 2
 
 
 def test_adding_a_key_does_not_keep_serving_the_keyless_answer(client, outbound):
@@ -216,8 +237,6 @@ def test_adding_a_key_does_not_keep_serving_the_keyless_answer(client, outbound)
 
 def test_a_miss_expires_sooner_than_a_hit(client, monkeypatch):
     monkeypatch.setattr(tv, "get_title_props", lambda *a, **k: {})
-    monkeypatch.setattr(metadata.requests, "post",
-                        lambda *a, **k: _FakeResponse(ok=False, status_code=500))
     clock = [1000.0]
     monkeypatch.setattr(metadata, "_now", lambda: clock[0])
 
@@ -236,7 +255,7 @@ def test_cached_tmdb_id_never_does_io(client, outbound, monkeypatch):
         raise AssertionError("cached_tmdb_id made a request")
 
     monkeypatch.setattr(metadata.requests, "get", boom)
-    monkeypatch.setattr(metadata.requests, "post", boom)
+    monkeypatch.setattr(tv, "get_title_props", boom)
     assert metadata.cached_tmdb_id("tv", "1") == 1396
 
 
@@ -253,15 +272,13 @@ def admin(client, admin_credentials):
 def test_the_endpoint_returns_normalised_metadata(client, admin, outbound):
     res = client.get("/api/metadata/tv/1?slug=test-series&version=v1")
     assert res.status_code == 200
-    assert res.json()["plot"] == "Trama dalla sorgente."
+    assert res.json()["plot"] == PROPS["plot"]
 
 
 def test_a_metadata_miss_is_a_200_not_a_502(client, admin, monkeypatch):
     """A modal with no plot is a modal with no plot, not an error page."""
     monkeypatch.setattr(tv, "get_title_props",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
-    monkeypatch.setattr(metadata.requests, "post",
-                        lambda *a, **k: _FakeResponse(ok=False, status_code=500))
 
     res = client.get("/api/metadata/movie/1?slug=x&version=v1")
     assert res.status_code == 200

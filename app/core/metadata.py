@@ -1,13 +1,18 @@
 """Plot, genres, artwork and a trailer for one title.
 
-Three providers, tried in order, because each one fails differently:
+Two providers, tried in order:
 
-1. **TMDB**, when an API key is configured. Italian text, a backdrop, a logo and
-   a trailer — the things the source does not carry well or at all.
-2. **The source's own preview endpoint**, which needs no key. Plot, genres,
-   runtime and images, good enough that a panel with no TMDB key is not empty.
-3. **What the title page already gave us**, since fetching it is how ``tmdb_id``
-   was found in the first place.
+1. **TMDB**, when an API key is configured. Curated Italian text, a wide
+   backdrop, a clean logo and a trailer.
+2. **The title page's own props**, which need no key and no extra request —
+   fetching them is how ``tmdb_id`` is found in the first place. They carry the
+   plot, the genres, the score, a trailer and the artwork, so a panel with no
+   TMDB key is a long way from empty.
+
+A third was tried and removed: the site's /api/titles/preview endpoint answers
+419 (Laravel's CSRF refusal) to every request the panel can make, so it never
+produced an answer — and it carried neither score nor trailers, making it poorer
+than the props it was sitting in front of.
 
 The result has the same shape whichever answered, so the frontend never branches
 on where a plot came from.
@@ -123,18 +128,6 @@ def tmdb_api_key() -> str | None:
     return (auth_models.get_setting(auth_models.SETTING_TMDB_API_KEY) or "").strip() or None
 
 
-def source_preview(title_id, domain: str) -> dict:
-    """The site's own metadata endpoint. No key, no scraping."""
-    res = requests.post(
-        f"https://{domain}/api/titles/preview/{title_id}",
-        headers={"user-agent": get_headers(), "referer": f"https://{domain}/"},
-        timeout=10,
-    )
-    if not res.ok:
-        raise RuntimeError(f"Preview failed: HTTP {res.status_code}")
-    return res.json()
-
-
 def tmdb_details(tmdb_id: int, media_type: str, api_key: str) -> dict:
     kind = "movie" if media_type == "movie" else "tv"
     res = requests.get(
@@ -201,23 +194,16 @@ def _from_tmdb(payload: dict, tmdb_id: int) -> dict:
     }
 
 
-def _from_source(payload: dict, tmdb_id: int | None) -> dict:
-    images = payload.get("images") or []
-    return {
-        "source": "site",
-        "plot": payload.get("plot") or None,
-        "genres": [g["name"] for g in payload.get("genres") or [] if g.get("name")],
-        "rating": None,
-        "runtime": payload.get("runtime"),
-        "backdrop": _source_image(images, "background") or _source_image(images, "cover"),
-        "logo": _source_image(images, "logo"),
-        "trailer_url": None,
-        "tmdb_id": tmdb_id,
-    }
-
-
 def _from_props(props: dict) -> dict:
-    """Last resort: whatever the title page happened to carry."""
+    """Everything the title page carries — which is nearly everything.
+
+    This used to be a last resort behind the site's /api/titles/preview
+    endpoint. That endpoint answers 419 (Laravel's CSRF refusal) to every
+    request the panel can make, so it never once produced an answer, and it was
+    also the *poorer* one: it has no score and no trailers. The props do, and
+    they are already in hand — _resolve fetches them to find tmdb_id — so this
+    path costs nothing at all.
+    """
     score = props.get("score")
     trailers = props.get("trailers") or []
     youtube_id = trailers[0].get("youtube_id") if trailers else None
@@ -227,7 +213,8 @@ def _from_props(props: dict) -> dict:
         "genres": [g["name"] for g in props.get("genres") or [] if g.get("name")],
         "rating": round(float(score), 1) if score else None,
         "runtime": props.get("runtime"),
-        "backdrop": _source_image(props.get("images"), "background"),
+        "backdrop": (_source_image(props.get("images"), "background")
+                     or _source_image(props.get("images"), "cover")),
         "logo": _source_image(props.get("images"), "logo"),
         "trailer_url": (
             f"https://www.youtube.com/watch?v={youtube_id}" if youtube_id else None
@@ -276,12 +263,6 @@ def _resolve(media_type: str, title_id, slug: str, version: str,
             return _from_tmdb(tmdb_details(int(tmdb_id), media_type, api_key), int(tmdb_id))
         except Exception as exc:
             logger.info("TMDB lookup failed for %s: %s", tmdb_id, exc)
-
-    if domain:
-        try:
-            return _from_source(source_preview(title_id, domain), tmdb_id)
-        except Exception as exc:
-            logger.info("Source preview failed for %s: %s", title_id, exc)
 
     if props:
         return _from_props(props)

@@ -33,7 +33,7 @@
 - Search and download films, TV series, and anime
 - **Recovers the source domain on its own** when it rotates: finds the new one, verifies it,
   and proposes it for one click
-- **Plot, genres, artwork and trailers** on the title page, from TMDB or from the source
+- **Plot, genres, rating, artwork and trailers** on the title page — no API key required
 - Automatic quality selection (1080p → 720p → 480p → 360p)
 - Parallel HLS segment download with AES-CBC decryption
 - Multi-audio track merge via FFmpeg
@@ -315,12 +315,16 @@ turn it on, and a "Controlla ora" button.
 
 ## Metadata
 
-Opening a title shows its plot, genres, rating, backdrop and trailer. With a
-[TMDB](https://www.themoviedb.org/settings/api) API key in **Impostazioni → Sorgente** those come
-from TMDB in Italian; without one they come from the source itself, which is less rich but needs no
-account. Artwork is proxied through the panel either way, so the browser never talks to anybody
-else.
+Opening a title shows its plot, genres, rating, backdrop and trailer. **No API key is needed for
+any of that** — the source's own title page carries all of it, and the panel is already reading
+that page, so the keyless path costs nothing extra.
 
+A [TMDB](https://www.themoviedb.org/settings/api) API key in **Impostazioni → Sorgente** is
+optional, and changes where the same fields come from: curated Italian synopses, a wider backdrop,
+a clean transparent logo and TMDB's own rating. It is an upgrade in quality, not the difference
+between having metadata and not having it.
+
+Artwork is proxied through the panel either way, so the browser never talks to anybody else.
 Metadata is fetched when you open a title, never for a whole page of search results.
 
 ---

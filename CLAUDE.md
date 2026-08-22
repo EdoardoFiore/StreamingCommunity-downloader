@@ -46,8 +46,8 @@ request before any route runs.
 - `page.py` — domain check, search
 - `domain_recovery.py` — finds the source domain again when it rotates: scrapes a
   third-party page, guards the candidate, verifies it, and *proposes* it
-- `metadata.py` — plot/genres/artwork/trailer, TMDB first then the source's preview endpoint,
-  behind an in-process TTL cache
+- `metadata.py` — plot/genres/rating/artwork/trailer, TMDB first then the title page's own
+  props, behind an in-process TTL cache
 - `naming.py` — the file/folder naming templates and their validation
 - `film.py` — movie resolve + download; also owns `_collect_audio_tracks` / `_collect_subtitle_tracks`, which `tv.py` and `animeunity.py` import
 - `tv.py` — seasons, episodes, per-episode languages, episode download
@@ -165,6 +165,11 @@ anything under a mounted static directory is readable by unauthenticated visitor
 - **`/api/image/tmdb/...` must be declared before `/api/image/{filename:path}`.** The catch-all
   matches it, and `SAFE_FILENAME` accepts `tmdb/w1280/x.jpg`, so the wrong order answers every TMDB
   request by asking the source's CDN for a file it has never heard of.
+- **The keyless metadata path is the title page props, not the site's preview endpoint.** That
+  endpoint answers 419 (Laravel CSRF) to every request the panel can make, and carries neither
+  score nor trailers — it was removed after being caught never having worked. The props are
+  fetched anyway to find `tmdb_id`, so the keyless answer costs no extra request and is close to
+  the TMDB one: plot, genres, score, trailer and artwork.
 - **`metadata.cached_tmdb_id()` never does I/O.** The direct download path reads it to decide
   whether a stream fallback is possible; a download that is about to succeed must not pay a round
   trip to find that out. The cache key includes whether a TMDB key is configured, or adding one
