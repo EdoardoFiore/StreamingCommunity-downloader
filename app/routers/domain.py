@@ -10,6 +10,7 @@ from app import config
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import get_settings, save_settings
+from app.core import domain_recovery
 from app.core.page import get_domain_version
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,10 @@ def _read_data() -> dict:
 _update_data = config.update_data
 
 
+class DomainUpdate(BaseModel):
+    domain: str
+
+
 @router.get("", dependencies=CAN_READ_DOMAIN)
 async def get_domain():
     data = _read_data()
@@ -50,11 +55,62 @@ async def get_domain():
             valid = True
         except Exception:
             valid = False
+
+    if not valid and get_settings().get("domain_auto_check_enabled", True):
+        # The domain is dead, so start looking for its replacement now rather
+        # than waiting up to six hours for the periodic check. This fires on
+        # every page load of every user while the panel is broken, which is
+        # exactly what the throttle inside run_check() is there to absorb.
+        asyncio.create_task(asyncio.to_thread(domain_recovery.run_check))
+
     return {"domain": domain, "valid": valid, "version": version}
 
 
-class DomainUpdate(BaseModel):
-    domain: str
+@router.get("/candidate", dependencies=CAN_READ_DOMAIN)
+def get_domain_candidate():
+    """The replacement domain waiting to be confirmed, if there is one.
+
+    Readable by anyone who can read the domain: a hostname is not a secret, and
+    a requester staring at a broken search benefits from being told the source
+    has moved even though they cannot be the one to apply it.
+    """
+    return {"candidate": domain_recovery.pending()}
+
+
+@router.post("/check", dependencies=CAN_MANAGE)
+async def check_domain_now():
+    return await asyncio.to_thread(domain_recovery.run_check, True)
+
+
+@router.post("/candidate/apply", dependencies=CAN_MANAGE)
+async def apply_domain_candidate(body: DomainUpdate):
+    """Adopt the pending candidate.
+
+    The domain in the body is a confirmation token, not an instruction: it must
+    match what the server already found, and the value written is the server's
+    own. Taking the host from the request would be exactly the "the source
+    domain never comes from the client" rule this endpoint looks like it breaks.
+    """
+    candidate = domain_recovery.pending()
+    if not candidate:
+        raise HTTPException(status_code=409, detail="Nessun dominio proposto")
+    if body.domain.strip() != candidate["host"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Il dominio proposto è cambiato: ricarica la pagina",
+        )
+
+    try:
+        version = await asyncio.to_thread(domain_recovery.apply_candidate, candidate["host"])
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"domain": candidate["host"], "version": version, "valid": True}
+
+
+@router.post("/candidate/dismiss", dependencies=CAN_MANAGE)
+def dismiss_domain_candidate():
+    domain_recovery.clear_pending()
+    return {"ok": True}
 
 
 class LibraryItem(BaseModel):
@@ -93,6 +149,9 @@ class SettingsUpdate(BaseModel):
     max_concurrent_downloads: int
     max_segment_workers: int
     series_watch_interval_minutes: int | None = None
+    domain_auto_check_enabled: bool | None = None
+    domain_auto_apply: bool | None = None
+    domain_check_interval_minutes: int | None = None
 
 
 @router.get("/settings", dependencies=CAN_MANAGE)
@@ -106,6 +165,10 @@ _SETTING_RANGES = (
     ("max_concurrent_downloads", 1, 32),
     ("max_segment_workers", 1, 128),
     ("series_watch_interval_minutes", 15, 1440),
+    # Floored well above the throttle in domain_recovery: a check any more often
+    # than this is hammering somebody else's page for a domain that rotates
+    # every few weeks.
+    ("domain_check_interval_minutes", 30, 1440),
 )
 
 

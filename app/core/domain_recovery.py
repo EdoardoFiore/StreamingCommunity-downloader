@@ -314,6 +314,11 @@ def run_check(force: bool = False) -> dict:
         try:
             apply_candidate(result["candidate"])
             result["applied"] = True
+            _announce(
+                "applied",
+                f"Il dominio della sorgente è cambiato: ora è «{result['candidate']}». "
+                "Il pannello lo ha applicato da solo.",
+            )
         except RuntimeError as exc:
             logger.warning("Auto-apply of %s failed: %s", result["candidate"], exc)
         return result
@@ -323,4 +328,77 @@ def run_check(force: bool = False) -> dict:
         "version": result["version"],
         "found_at": time.time(),
     })
+    _announce(
+        "found",
+        f"La sorgente non risponde più su «{result['current'] or 'nessun dominio'}». "
+        f"Trovato «{result['candidate']}»: apri il pannello per applicarlo.",
+    )
+    _broadcast_candidate()
     return result
+
+
+# ── Telling somebody ──────────────────────────────────────────────────────────
+
+def _announce(kind: str, message: str) -> None:
+    """Notify whoever can act on this, and never let that break the check.
+
+    ``app.requests.notify`` is imported here rather than at module scope: it
+    reaches the database and the job manager, and app.core has no business
+    depending on the request system at import time. The event vocabulary still
+    lives in one place — this only picks from it.
+    """
+    try:
+        from app.requests import notify as notify_module
+
+        event = {
+            "found": notify_module.SOURCE_DOMAIN_FOUND,
+            "applied": notify_module.SOURCE_DOMAIN_APPLIED,
+        }[kind]
+        notify_module.notify(
+            event,
+            message,
+            notify_module.settings_manager_ids(),
+            title="Dominio sorgente",
+            # The panel itself owns this one when there are no accounts: an open
+            # installation still needs to be told its source moved.
+            panel_wide=True,
+        )
+    except Exception:
+        logger.exception("Cannot announce the domain change (%s)", kind)
+
+
+def _broadcast_candidate() -> None:
+    """Nudge open tabs so the banner appears without a reload."""
+    try:
+        from app.jobs import job_manager
+
+        job_manager.broadcast({"type": "domain_candidate"})
+    except Exception:
+        logger.debug("Cannot broadcast the domain candidate", exc_info=True)
+
+
+# ── The periodic check ────────────────────────────────────────────────────────
+
+async def domain_watch_loop():
+    """Check periodically, shaped exactly like the followed-series poller.
+
+    Sleeps first for the same reason that one does: the lifespan must not do
+    network I/O, and a fresh install has no domain to check yet.
+    """
+    import asyncio
+
+    while True:
+        try:
+            interval = int(_settings().get("domain_check_interval_minutes") or 360)
+        except (TypeError, ValueError):
+            interval = 360
+        await asyncio.sleep(max(30, interval) * 60)
+
+        if not _settings().get("domain_auto_check_enabled", True):
+            continue
+        try:
+            await asyncio.to_thread(run_check)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Domain check failed")

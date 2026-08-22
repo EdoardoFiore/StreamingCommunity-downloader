@@ -615,6 +615,8 @@ const NOTIFICATION_ICONS = {
   download_batch_failed: 'ti-alert-octagon',
   watch_needs_approval: 'ti-bell-question',
   watch_auto_approved: 'ti-bell-check',
+  source_domain_found: 'ti-world-search',
+  source_domain_applied: 'ti-world-check',
 };
 
 const NOTIFICATION_LABELS = {
@@ -633,6 +635,8 @@ const NOTIFICATION_LABELS = {
   download_batch_failed: 'Stagione o serie fallita',
   watch_needs_approval: 'Serie seguita da approvare',
   watch_auto_approved: 'Serie approvata',
+  source_domain_found: 'Nuovo dominio trovato',
+  source_domain_applied: 'Dominio aggiornato',
 };
 
 // Explicit order, so the picker does not depend on object key order.
@@ -651,6 +655,10 @@ const NOTIFICATION_EVENT_GROUPS = [
   {
     label: 'Serie seguite',
     events: ['watch_needs_approval', 'watch_auto_approved'],
+  },
+  {
+    label: 'Sorgente',
+    events: ['source_domain_found', 'source_domain_applied'],
   },
 ];
 
