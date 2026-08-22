@@ -44,13 +44,19 @@ request before any route runs.
 
 **`app/core/`** — source interaction and the download engine
 - `page.py` — domain check, search
+- `domain_recovery.py` — finds the source domain again when it rotates: scrapes a
+  third-party page, guards the candidate, verifies it, and *proposes* it
+- `metadata.py` — plot/genres/rating/artwork/trailer, all from the title page's own props,
+  behind an in-process TTL cache
+- `naming.py` — the file/folder naming templates and their validation
 - `film.py` — movie resolve + download; also owns `_collect_audio_tracks` / `_collect_subtitle_tracks`, which `tv.py` and `animeunity.py` import
 - `tv.py` — seasons, episodes, per-episode languages, episode download
 - `animeunity.py` — AnimeUnity search, episodes, download
 - `m3u8.py` — `M3U8_Parser`, `M3U8_Segments`, `M3U8_Downloader`, `Decryption`, `download_m3u8()`
-- `paths.py` — destination paths (`film_path`, `episode_path`, `anime_path`). The request system's library check goes through these, so a change here changes both.
+- `paths.py` — destination paths (`film_path`, `episode_path`, `anime_path`). The request system's library check goes through these, so a change here changes both. Names come from `naming.py`; the optional `templates=` argument is what lets the library check ask for the *legacy* layout.
 - `headers.py` — user-agent rotation, `sanitize_filename`
-- `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`
+- `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`, and stream
+  resolution (`resolve_stream`, `fetch_key_from_playlist`, `_FALLBACK_PROVIDERS`)
 
 **`app/auth/`** — Jellyfin SSO, permissions, users
 - `jellyfin.py` — HTTP client (MediaBrowser header, stable DeviceId, X-Forwarded-For with retry)
@@ -73,15 +79,18 @@ request before any route runs.
 - `router.py` — follow, unfollow, status, manual check
 
 **`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `downloads_notify.py` (notifications
-for downloads that skipped the queue, one summary per season/series), `schedule.py`, `db.py`,
+for downloads that skipped the queue, one summary per season/series), `downloads_hooks.py`
+(post-download webhooks and the Jellyfin library refresh), `schedule.py`, `db.py`,
 `config.py`, `progress.py`, `routers/`, `templates/`, `static/`
 
 ### Persistence
 
 - `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications, notification
-  channels, followed series. Migrations are the ordered `MIGRATIONS` list in `app/db.py`, applied
+  channels, download hooks, followed series. Migrations are the ordered `MIGRATIONS` list in `app/db.py`, applied
   against `PRAGMA user_version`. Never edit an applied migration; append a new one.
-- `data.json` — source domain, library paths, performance settings. Runtime state, not committed:
+- `data.json` — source domain, library paths, performance settings, domain-recovery switches,
+  naming templates. Anything carrying a secret goes in `panel.db` instead. Written only through
+  `config.update_data()`, which holds the file lock: a background thread writes `domain`. Runtime state, not committed:
   a baked-in source domain ships stale, since the domain rotates. Tests get one from the
   `_configured_domain` autouse fixture in `tests/conftest.py`.
 - `schedule.json` — scheduled downloads
@@ -142,6 +151,52 @@ anything under a mounted static directory is readable by unauthenticated visitor
 - **The progress bar counts segments obtained, not attempts made.** It is also the input to the
   stall watchdog (`timer()`), so counting failures as progress does not just misreport — it stops a
   source failing every single request from ever tripping the timeout.
+- **A domain found automatically is proposed, never adopted.** The page it comes from is edited by
+  people we do not control, and the domain decides where every search, image fetch and download
+  referer goes. `domain_recovery.is_plausible()` is the guard, and its load-bearing rule is that a
+  candidate must be a **second-level domain**: checking only the first label would accept
+  `streamingcommunity.attacker.tld`, where the part that decides where the traffic lands is the
+  attacker's. The name pattern is a module constant with an env override and **must not become a
+  settings field** — a text box that relaxes an SSRF guard is a loaded gun. `verify()` is
+  deliberately stricter than `PUT /api/domain`, which accepts an empty version string: an admin
+  typing a host in is making a decision, a web page is not. `domain_auto_apply` opts out of all of
+  this and is off by default.
+- **Title metadata has one provider and needs no credential.** It comes from the title page's own
+  props — the payload already fetched to find `tmdb_id` — so it costs no request of its own. Two
+  other providers were tried and removed after being measured, and the measurements are the reason:
+  the site's `/api/titles/preview` endpoint answers 419 (Laravel CSRF) to every request the panel
+  can make and never once worked, while TMDB turned out not to be an upgrade at all — the site
+  copies its synopses from TMDB, so the text was usually identical, and the round trip *lost* a
+  trailer on one title, a logo on another and 1100 characters of plot on a third. Do not re-add a
+  provider without measuring it against the props on real titles first.
+- **`metadata.cached_tmdb_id()` never does I/O.** A stream fallback would read it at download time,
+  and a download that is about to succeed must not pay a round trip to discover a fallback it will
+  not use.
+- **When stream resolution has nothing to fall back to, the primary error must survive.**
+  `_FALLBACK_PROVIDERS` is empty: a second road through vixsrc was built and removed, because that
+  site is now a client-rendered app whose HTML carries no playlist, token or `.m3u8` at all — the
+  data would have to come from reverse-engineered internal calls that break silently on any of
+  their deploys. `resolve_stream()` is the seam a replacement plugs into, and the resolution
+  context (`tmdb_id`, media type, season, episode) is already threaded from every caller.
+  A user told "no alternative source" when the real failure was Cloudflare has been sent to debug
+  the wrong thing, so the original exception is re-raised unchanged. AnimeUnity is excluded from
+  all of it on purpose: no TMDB id, different embed host. `fetch_key_from_playlist()` exists so a
+  new provider does not have to solve the key again — it is read from the playlist with an
+  allowlisted host, never assumed.
+- **Download hooks are HTTP-only, and blind.** There is no shell hook and there must not be one:
+  open mode grants `MANAGE_SETTINGS` to every anonymous visitor, so a command would be RCE for
+  anyone who can reach the panel. A webhook pointing at a private address is the *point* (that is
+  where Jellyfin is), so the mitigation is that the response body never reaches the caller and is
+  never logged — only the status code. Failure logs name the hook, never its URL.
+- **Changing a naming template must not hide files already in the library.**
+  `resolver.existing_file()` probes the current template *and* `naming.LEGACY_TEMPLATES`, each with
+  its `.mkv` sibling; with the defaults the two render identically and it collapses back to two
+  stats. In the UI a blank field means the default — its placeholder shows what that is, synced
+  from `/api/domain/settings/naming-defaults` so the markup's copy cannot drift — and the frontend
+  substitutes it before saving, because the server rejects an empty template outright. `naming.render()` never raises — it runs inside a download, after the bytes are fetched —
+  so everything it would paper over is refused by `naming.validate()` at save time. Never
+  `str.format` a user template: `{title.__class__}` leaks attributes and a stray `{` raises
+  mid-download.
 - Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
   are the exception by design: every caller of `notify()` is already off the loop.
 

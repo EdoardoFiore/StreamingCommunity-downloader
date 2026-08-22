@@ -387,6 +387,34 @@ _V6_PANEL_NOTIFICATIONS = [
 ]
 
 
+_V7_DOWNLOAD_HOOK = [
+    # One row per outbound webhook fired when a download reaches a terminal
+    # state. The URL routinely carries a token or an API key — a Jellyfin
+    # refresh URL does, a Home Assistant one does — which is the same reason
+    # jf_notification_channel lives here and not in data.json.
+    #
+    # Deliberately a URL and nothing else. There is no command column and there
+    # will not be one: open mode grants MANAGE_SETTINGS to every anonymous
+    # visitor (app/auth/deps.py), so a shell hook would be remote code execution
+    # for anyone who can reach the panel.
+    """
+    CREATE TABLE jf_download_hook (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        name          TEXT    NOT NULL,
+        url           TEXT    NOT NULL,
+        method        TEXT    NOT NULL DEFAULT 'POST',
+        headers       TEXT    NOT NULL DEFAULT '{}',  -- JSON object
+        body_template TEXT    NOT NULL DEFAULT '',
+        events        TEXT    NOT NULL DEFAULT '[]',  -- JSON array; [] means every event
+        enabled       INTEGER NOT NULL DEFAULT 1,
+        created_at    TEXT    NOT NULL,
+        updated_at    TEXT    NOT NULL
+    )
+    """,
+    "CREATE INDEX jf_download_hook_enabled ON jf_download_hook(enabled)",
+]
+
+
 MIGRATIONS: list[list[str]] = [
     _V1_AUTH,
     _V2_REQUESTS,
@@ -394,6 +422,7 @@ MIGRATIONS: list[list[str]] = [
     _V4_SERIES_WATCH,
     _V5_WATCHES_WITHOUT_ACCOUNTS,
     _V6_PANEL_NOTIFICATIONS,
+    _V7_DOWNLOAD_HOOK,
 ]
 
 

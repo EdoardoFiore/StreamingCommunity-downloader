@@ -39,6 +39,17 @@ DOWNLOAD_BATCH_FAILED = "download_batch_failed"
 WATCH_NEEDS_APPROVAL = "watch_needs_approval"
 WATCH_AUTO_APPROVED = "watch_auto_approved"
 
+# The source domain rotating. FOUND asks for a decision — a candidate is only
+# ever proposed, never adopted, unless auto-apply is on — so it is the one
+# notification here that is worth interrupting somebody for.
+SOURCE_DOMAIN_FOUND = "source_domain_found"
+SOURCE_DOMAIN_APPLIED = "source_domain_applied"
+
+# A post-download hook that did not land. Reported rather than logged: a
+# webhook failing quietly is worse than not having configured one, because
+# whatever was waiting on the other end is now silently out of date.
+HOOK_FAILED = "hook_failed"
+
 # The single vocabulary: the per-channel event picker, the server-side validator
 # and the bell's icon table all key off this.
 ALL_EVENTS = (
@@ -57,6 +68,9 @@ ALL_EVENTS = (
     DOWNLOAD_BATCH_FAILED,
     WATCH_NEEDS_APPROVAL,
     WATCH_AUTO_APPROVED,
+    SOURCE_DOMAIN_FOUND,
+    SOURCE_DOMAIN_APPLIED,
+    HOOK_FAILED,
 )
 
 # Outcome vocabulary, kept as plain strings so this module never imports apprise.
@@ -82,6 +96,9 @@ EVENT_NOTIFY_TYPE = {
     DOWNLOAD_BATCH_FAILED: FAILURE,
     WATCH_NEEDS_APPROVAL: WARNING,
     WATCH_AUTO_APPROVED: SUCCESS,
+    SOURCE_DOMAIN_FOUND: WARNING,
+    SOURCE_DOMAIN_APPLIED: SUCCESS,
+    HOOK_FAILED: WARNING,
 }
 
 
@@ -168,6 +185,21 @@ def approver_ids() -> list[int]:
 def notify_approvers(event: str, message: str, request: models.Request,
                      *, external: bool = True):
     notify(event, message, approver_ids(), request.id, external=external)
+
+
+def settings_manager_ids() -> list[int]:
+    """Who can act on a settings-level problem.
+
+    Selected on MANAGE_SETTINGS rather than on an administrator flag, because
+    there isn't one — an account that manages users and never sees settings is
+    a supported shape, and telling it about a dead source domain would be
+    telling the wrong person.
+    """
+    rows = db.query(
+        "SELECT id FROM jf_user WHERE enabled = 1 AND (permissions & ?) != 0",
+        (int(Permission.MANAGE_SETTINGS),),
+    )
+    return [r["id"] for r in rows]
 
 
 # ── Reading ────────────────────────────────────────────────────────────────────

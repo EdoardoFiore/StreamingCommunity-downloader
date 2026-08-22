@@ -9,6 +9,8 @@ from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
 from app.core._shared import (
     MissingAudioTrackError,
+    StreamSource,
+    resolve_stream,
     _fetch_vixcloud_embed,
     _parse_content,
     _get_m3u8_key,
@@ -29,7 +31,18 @@ def get_token(id_tv: int, domain: str) -> str:
     raise RuntimeError("XSRF-TOKEN cookie not found after page visit")
 
 
-def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -> int:
+def get_title_props(id_film: int, title_name: str, site_version: str, domain: str) -> dict:
+    """The full ``props.title`` payload of a title page.
+
+    This request was already being made to read one integer out of it, throwing
+    away the plot, the genres, the images, the trailers and ``tmdb_id``, which
+    is what lets the panel show real metadata and is the identifier any
+    fallback stream provider would resolve against.
+
+    The same route serves films, despite living in tv.py: the site has one title
+    page, and splitting this in two would mean two copies of the Inertia header
+    dance.
+    """
     req = requests.get(
         f"https://{domain}/it/titles/{id_film}-{title_name}",
         headers={
@@ -39,9 +52,20 @@ def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -
         },
         timeout=15,
     )
-    if req.ok:
-        return req.json()["props"]["title"]["seasons_count"]
-    raise RuntimeError(f"Cannot fetch TV info: HTTP {req.status_code}")
+    if not req.ok:
+        raise RuntimeError(f"Cannot fetch TV info: HTTP {req.status_code}")
+    return req.json()["props"]["title"]
+
+
+def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -> int:
+    """How many seasons this series has.
+
+    Signature and int return kept exactly as they were: the watch poller, the
+    seasons endpoint and the batch download path all call this, and several
+    tests monkeypatch it. Widening it to return the props would have been the
+    obvious refactor and would have broken all of them.
+    """
+    return get_title_props(id_film, title_name, site_version, domain)["seasons_count"]
 
 
 def get_info_season(tv_id: int, tv_name: str, domain: str, version: str, token: str, n_stagione: int) -> list[dict]:
@@ -150,6 +174,7 @@ def download_episode(
     audio_languages: list[str] = None,
     subtitle_languages: list[str] = None,
     strict_audio: bool = False,
+    tmdb_id: int = None,
 ) -> str:
     audio_languages = audio_languages or ["ita"]
     subtitle_languages = subtitle_languages or []
@@ -157,18 +182,31 @@ def download_episode(
     ep = eps[ep_index]
     logger.info(f"Downloading S{season:02d}E{fmt_ep(ep['n'])} — {ep['name']}")
 
-    embed_content, url_embed = _get_iframe(tv_id, ep["id"], domain, token)
-    json_win_video, json_win_param = _parse_content(embed_content, url_embed)
-    logger.info("Video ID: %s token: %.8s... audio lang: %s", json_win_video['id'], json_win_param.get('token', ''), json_win_video.get('lang', 'it'))
+    def _primary() -> StreamSource:
+        embed_content, url_embed = _get_iframe(tv_id, ep["id"], domain, token)
+        json_win_video, json_win_param = _parse_content(embed_content, url_embed)
+        logger.info("Video ID: %s token: %.8s... audio lang: %s", json_win_video['id'], json_win_param.get('token', ''), json_win_video.get('lang', 'it'))
 
-    embed_referer = (
-        f"https://vixcloud.co/embed/{json_win_video['id']}"
-        f"?token={json_win_param['token']}&title={quote(tv_name)}"
-        f"&referer=1&expires={json_win_param['expires']}"
-        f"&description=S{season}%3AE{ep['n']}+{quote(ep['name'])}&nextEpisode=1"
+        embed_referer = (
+            f"https://vixcloud.co/embed/{json_win_video['id']}"
+            f"?token={json_win_param['token']}&title={quote(tv_name)}"
+            f"&referer=1&expires={json_win_param['expires']}"
+            f"&description=S{season}%3AE{ep['n']}+{quote(ep['name'])}&nextEpisode=1"
+        )
+        return StreamSource(
+            m3u8_url=_get_m3u8_url(json_win_video, json_win_param),
+            key_hex=_get_m3u8_key(json_win_video, json_win_param, embed_referer),
+            referer=embed_referer,
+            provider="vixcloud",
+        )
+
+    stream = resolve_stream(
+        _primary, tmdb_id=tmdb_id, media_type="tv", season=season, episode=ep["n"],
     )
-    m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
-    m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_referer)
+    m3u8_url, m3u8_key, embed_referer = stream.m3u8_url, stream.key_hex, stream.referer
+    if stream.provider != "vixcloud":
+        logger.info("Resolved S%02dE%s through the %s fallback",
+                    season, fmt_ep(ep["n"]), stream.provider)
 
     audio_track_urls = _collect_audio_tracks(
         m3u8_url, embed_referer, audio_languages, strict=strict_audio

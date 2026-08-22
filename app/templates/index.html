@@ -960,6 +960,34 @@
       box-shadow: 0 8px 28px rgba(0,0,0,.40) !important;
     }
 
+    /* Backdrop behind the detail modal header.
+       Masked down to the panel background so the text below keeps its contrast
+       whatever the artwork happens to be. */
+    #detail-backdrop {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 190px;
+      background-size: cover;
+      background-position: center 25%;
+      opacity: .38;
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .detail-plot {
+      color: var(--text-muted) !important;
+      font-size: 13px !important;
+      line-height: 1.5 !important;
+      margin: 0 0 10px !important;
+      /* Long synopses would push the action button off a short viewport. */
+      max-height: 6.6em;
+      overflow-y: auto;
+    }
+
+    #detail-genres .badge { margin-right: 4px; }
+
     /* Nav tabs */
     .nav-tabs {
       border-bottom: 1px solid var(--border) !important;
@@ -1807,6 +1835,31 @@
     <div class="page-body">
       <div class="container-xl">
 
+        <!-- ── Dominio sorgente cambiato ───────────────────────── -->
+        <!--
+          Static markup, toggled by JS. The buttons carry data-perm so the
+          sweep in initAuth() hides them from anyone who cannot apply the
+          change, without this file knowing who that is.
+        -->
+        <div id="domain-banner" class="alert mb-4" role="status"
+             style="display:none;border-color:#e6a23c;background:rgba(230,162,60,.12)">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="ti ti-world-search" style="font-size:18px;color:#e6a23c"></i>
+            <div class="flex-fill">
+              <strong>La sorgente ha cambiato dominio.</strong>
+              Trovato <code id="domain-banner-host"></code>, verificato dal pannello.
+            </div>
+            <button class="btn btn-sm btn-primary" data-perm="MANAGE_SETTINGS"
+                    onclick="applyDomainCandidate()" id="domain-banner-apply">
+              Applica
+            </button>
+            <button class="btn btn-sm btn-ghost-secondary" data-perm="MANAGE_SETTINGS"
+                    onclick="dismissDomainCandidate()">
+              Ignora
+            </button>
+          </div>
+        </div>
+
         <!-- ── Search ──────────────────────────────────────────── -->
         <div id="page-search">
           <div class="mb-4">
@@ -2081,6 +2134,9 @@
             <a class="nav-link" href="#" data-settings-tab="librerie">Librerie</a>
           </li>
           <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="nomi">Nomi</a>
+          </li>
+          <li class="nav-item">
             <a class="nav-link" href="#" data-settings-tab="download">Download</a>
           </li>
           <li class="nav-item">
@@ -2088,6 +2144,9 @@
           </li>
           <li class="nav-item">
             <a class="nav-link" href="#" data-settings-tab="notifiche">Notifiche</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="#" data-settings-tab="hook">Hook</a>
           </li>
         </ul>
 
@@ -2105,6 +2164,47 @@
               Verifica e salva
             </button>
             <div id="domain-feedback" class="form-text"></div>
+          </div>
+        </div>
+
+        <!-- ── Recupero automatico del dominio ───────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Recupero automatico</p>
+          <p class="settings-section-hint">
+            Il dominio della sorgente cambia ogni poche settimane. Il pannello pu&ograve;
+            accorgersene e proporre quello nuovo, dopo averlo verificato.
+          </p>
+          <p class="settings-section-hint" style="color:#e6a23c">
+            <i class="ti ti-alert-triangle me-1"></i>
+            Il dominio viene letto da una pagina esterna che non controlliamo. Vengono presi in
+            considerazione solo domini di secondo livello con un nome riconosciuto, e solo se
+            rispondono davvero come la sorgente attesa. Con l&rsquo;applicazione automatica attiva
+            nessuno rilegge quella scelta prima che abbia effetto.
+          </p>
+
+          <label class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="domain-auto-check">
+            <span class="form-check-label">Controlla se la sorgente non risponde</span>
+          </label>
+          <label class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="domain-auto-apply">
+            <span class="form-check-label">Applica il dominio trovato senza chiedere</span>
+          </label>
+
+          <label class="form-label mt-3" for="domain-check-interval">
+            Intervallo del controllo (minuti)
+            <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(30&ndash;1440)</span>
+          </label>
+          <input type="number" id="domain-check-interval" class="form-control" min="30" max="1440">
+
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveDomainRecovery()" id="save-domain-recovery-btn">
+              Salva
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="checkDomainNow()" id="domain-check-btn">
+              <i class="ti ti-refresh me-1"></i>Controlla ora
+            </button>
+            <div id="domain-recovery-feedback" class="form-text"></div>
           </div>
         </div>
         </div>
@@ -2131,6 +2231,100 @@
               Salva librerie e cartelle
             </button>
             <div id="libraries-feedback" class="form-text"></div>
+          </div>
+        </div>
+        </div>
+
+        <div class="settings-pane" data-settings-pane="nomi" style="display:none">
+        <!-- ── Schema dei nomi ───────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Schema dei nomi</p>
+          <p class="settings-section-hint">
+            Come vengono chiamati cartelle e file. Segnaposto disponibili:
+            <code>{title}</code>, <code>{year}</code>, <code>{season}</code>,
+            <code>{season2}</code> (con lo zero), <code>{episode}</code>,
+            <code>{episode2}</code> (con lo zero). Quello che sta fra parentesi quadre compare
+            solo se i segnaposto al suo interno hanno un valore: <code>[ ({year})]</code> sparisce
+            del tutto quando l&rsquo;anno non &egrave; noto.
+          </p>
+          <p class="settings-section-hint">
+            I valori suggeriti nei campi sono quelli predefiniti e seguono la struttura
+            raccomandata dalla <a href="https://jellyfin.org/docs/general/server/media/movies/"
+            target="_blank" rel="noopener noreferrer">documentazione ufficiale di Jellyfin</a>:
+            <code>Film (2020)/Film (2020).mkv</code> e
+            <code>Serie (2019)/Season 01/Serie S01E01.mkv</code>. Cambiali solo se la tua libreria
+            segue una convenzione diversa: Jellyfin riconosce quella sopra senza configurazione.
+          </p>
+          <p class="settings-section-hint" style="color:#e6a23c">
+            <i class="ti ti-alert-triangle me-1"></i>
+            I file gi&agrave; scaricati non vengono rinominati. Continuano a essere riconosciuti
+            come presenti, quindi non verranno riscaricati, ma restano con il nome vecchio finch&eacute;
+            non li rinomini dal gestore file.
+          </p>
+
+          <p class="settings-section-label mt-3 mb-2">Film</p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-film_folder">Cartella</label>
+              <input type="text" id="naming-film_folder" class="form-control" data-naming-slot="film_folder" placeholder="{title}[ ({year})]">
+              <div class="form-text" id="naming-preview-film_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-film_file">File</label>
+              <input type="text" id="naming-film_file" class="form-control" data-naming-slot="film_file" placeholder="{title}[ ({year})]">
+              <div class="form-text" id="naming-preview-film_file"></div>
+            </div>
+          </div>
+          <p class="settings-section-label mt-3 mb-2">Serie TV</p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-series_folder">Cartella serie</label>
+              <input type="text" id="naming-series_folder" class="form-control" data-naming-slot="series_folder" placeholder="{title}[ ({year})]">
+              <div class="form-text" id="naming-preview-series_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-season_folder">Cartella stagione</label>
+              <input type="text" id="naming-season_folder" class="form-control" data-naming-slot="season_folder" placeholder="Season {season2}">
+              <div class="form-text" id="naming-preview-season_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-episode_file">File episodio</label>
+              <input type="text" id="naming-episode_file" class="form-control" data-naming-slot="episode_file" placeholder="{title} S{season2}E{episode2}">
+              <div class="form-text" id="naming-preview-episode_file"></div>
+            </div>
+          </div>
+          <p class="settings-section-label mt-3 mb-2">Anime</p>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-anime_folder">Cartella</label>
+              <input type="text" id="naming-anime_folder" class="form-control" data-naming-slot="anime_folder" placeholder="{title}[ ({year})]">
+              <div class="form-text" id="naming-preview-anime_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-anime_season_folder">Cartella stagione</label>
+              <input type="text" id="naming-anime_season_folder" class="form-control" data-naming-slot="anime_season_folder" placeholder="Season 01">
+              <div class="form-text" id="naming-preview-anime_season_folder"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-anime_episode_file">File episodio</label>
+              <input type="text" id="naming-anime_episode_file" class="form-control" data-naming-slot="anime_episode_file" placeholder="{title} S01E{episode2}">
+              <div class="form-text" id="naming-preview-anime_episode_file"></div>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="naming-anime_movie_file">File film</label>
+              <input type="text" id="naming-anime_movie_file" class="form-control" data-naming-slot="anime_movie_file" placeholder="{title}">
+              <div class="form-text" id="naming-preview-anime_movie_file"></div>
+            </div>
+          </div>
+
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveNamingTemplates()" id="save-naming-btn">
+              Salva
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetNamingTemplates()">
+              Ripristina predefiniti
+            </button>
+            <div id="naming-feedback" class="form-text"></div>
           </div>
         </div>
         </div>
@@ -2294,6 +2488,79 @@
         </div>
         </div>
 
+        <div class="settings-pane" data-settings-pane="hook" style="display:none">
+        <!-- ── Jellyfin ──────────────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Libreria Jellyfin</p>
+          <p class="settings-section-hint">
+            A fine download il pannello pu&ograve; chiedere a Jellyfin di aggiornare la libreria,
+            invece di aspettare la sua scansione periodica.
+          </p>
+          <label class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="jf-refresh-on-download">
+            <span class="form-check-label">Aggiorna la libreria a fine download</span>
+          </label>
+          <div class="form-text" id="jf-refresh-status"></div>
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveJellyfinRefresh()" id="save-jf-refresh-btn">
+              Salva
+            </button>
+            <div id="jf-refresh-feedback" class="form-text"></div>
+          </div>
+        </div>
+
+        <!-- ── Webhook ───────────────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Webhook</p>
+          <p class="settings-section-hint">
+            Una chiamata HTTP quando un download finisce. Nel corpo si possono usare
+            <code>{title}</code>, <code>{path}</code>, <code>{status}</code>, <code>{type}</code>,
+            <code>{season}</code>, <code>{episode}</code>, <code>{year}</code> e
+            <code>{error}</code>. Con il corpo vuoto viene inviato un JSON con tutti i campi.
+          </p>
+          <p class="settings-section-hint" style="color:#e6a23c">
+            <i class="ti ti-alert-triangle me-1"></i>
+            Un webhook pu&ograve; puntare anche a servizi della rete locale. Il pannello non
+            restituisce mai la risposta ricevuta, solo l&rsquo;esito: chi configura un hook sa se ha
+            funzionato, non cosa ha risposto l&rsquo;altro capo.
+          </p>
+
+          <div id="hooks-list" class="mb-2"></div>
+
+          <div id="hook-form" class="row g-2 mb-2" style="display:none">
+            <div class="col-sm-4">
+              <input type="text" id="hook-name" class="form-control" placeholder="Nome (es. Jellyfin)">
+            </div>
+            <div class="col-sm-5">
+              <input type="text" id="hook-url" class="form-control" placeholder="http://jellyfin.local:8096/...">
+            </div>
+            <div class="col-sm-3">
+              <select id="hook-method" class="form-select">
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="GET">GET</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <textarea id="hook-body" class="form-control" rows="2"
+                        placeholder="Corpo, opzionale."></textarea>
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+              <button type="button" class="btn btn-primary btn-sm" onclick="saveHook()" id="hook-save-btn">
+                Aggiungi
+              </button>
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleHookForm()" id="hook-add-btn">
+            <i class="ti ti-plus me-1"></i>Aggiungi webhook
+          </button>
+          <div class="settings-actions">
+            <div id="hooks-feedback" class="form-text"></div>
+          </div>
+        </div>
+        </div>
+
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Chiudi</button>
@@ -2304,12 +2571,17 @@
 
 <!-- ── Detail Modal ──────────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="detail-modal" tabindex="-1" style="display:none" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered" style="max-width:520px">
-    <div class="modal-content">
-      <div class="modal-header border-0 pb-0">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:640px">
+    <div class="modal-content" style="position:relative;overflow:hidden">
+      <!--
+        Sits behind the header, faded into the panel background. The poster
+        stays where it is: this is behind it, not instead of it.
+      -->
+      <div id="detail-backdrop" style="display:none"></div>
+      <div class="modal-header border-0 pb-0" style="position:relative;z-index:1">
         <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body pt-1">
+      <div class="modal-body pt-1" style="position:relative;z-index:1">
         <div class="row g-3">
           <div class="col-auto">
             <img id="detail-poster" src="" alt=""
@@ -2324,12 +2596,20 @@
             <h3 id="detail-title"></h3>
             <div id="detail-meta" class="text-muted mb-2"></div>
             <div id="detail-score" class="mb-2"></div>
+            <div id="detail-genres" class="mb-2" style="display:none"></div>
+            <!-- Last in the text column stays the interactive part: the
+                 language chips belong nearest the action button. -->
+            <p id="detail-plot" class="detail-plot" style="display:none"></p>
             <div id="detail-langs" class="small" style="color:var(--text-muted)"></div>
           </div>
         </div>
       </div>
-      <div class="modal-footer border-0 pt-0" style="flex-wrap:wrap;gap:8px">
+      <div class="modal-footer border-0 pt-0" style="flex-wrap:wrap;gap:8px;position:relative;z-index:1">
         <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
+        <a id="detail-trailer-btn" class="btn btn-ghost-secondary" href="#" target="_blank"
+           rel="noopener noreferrer" style="display:none">
+          <i class="ti ti-brand-youtube me-1"></i>Trailer
+        </a>
         <div class="d-flex align-items-center gap-2 flex-shrink-0" id="detail-schedule-wrap" style="display:none!important">
           <i class="ti ti-clock text-muted" style="font-size:15px"></i>
           <input type="datetime-local" id="detail-scheduled-at" class="form-control form-control-sm" style="max-width:196px" title="Lascia vuoto per scaricare subito">

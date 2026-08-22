@@ -91,6 +91,16 @@ SETTINGS_DEFAULTS = {
     "max_segment_workers": 16,
     # How often followed series are checked for new episodes, in minutes.
     "series_watch_interval_minutes": 240,
+    # Whether to look for a replacement when the source domain stops answering.
+    "domain_auto_check_enabled": True,
+    # Whether to adopt the replacement without asking. Off: a domain found on a
+    # page we do not control is proposed to an administrator, never applied on
+    # its own. See app.core.domain_recovery.
+    "domain_auto_apply": False,
+    "domain_check_interval_minutes": 360,
+    # Ask Jellyfin to scan when a download lands, instead of waiting for its
+    # own schedule. Inert unless Jellyfin is connected.
+    "jellyfin_refresh_on_download": False,
 }
 
 
@@ -121,7 +131,17 @@ def get_settings() -> dict:
         return dict(SETTINGS_DEFAULTS)
 
 
-def save_settings(new_settings: dict):
+def update_data(changes: dict):
+    """Apply top-level changes to data.json under the shared lock.
+
+    Read-modify-write inside the lock rather than "read it somewhere, mutate,
+    write it back": the domain recovery loop writes ``domain`` from a background
+    thread while an administrator may be saving libraries, and the last writer
+    would otherwise drop the other's key wholesale.
+
+    This lives here, not in the domain router, because ``app.core`` writes the
+    domain too and importing a router from ``app.core`` would be a cycle.
+    """
     lock = FileLock(str(DATA_FILE) + ".lock")
     with lock:
         try:
@@ -129,6 +149,10 @@ def save_settings(new_settings: dict):
                 data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             data = {}
-        data["settings"] = new_settings
+        data.update(changes)
         with open(DATA_FILE, "w") as f:
             json.dump(data, f)
+
+
+def save_settings(new_settings: dict):
+    update_data({"settings": new_settings})

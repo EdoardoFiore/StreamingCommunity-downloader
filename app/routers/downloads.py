@@ -39,6 +39,23 @@ def _domain() -> str:
     return domain
 
 
+def _tmdb_id(media_type: str, title_id) -> int | None:
+    """The TMDB id for this title, if the panel already happens to know it.
+
+    Resolved server-side rather than accepted from the request body: it decides
+    which third-party host a failed download falls back to, which is not a
+    choice a client gets to make. A pure cache read, so a download that is about
+    to work pays nothing — the detail modal has usually just filled it in, and a
+    miss simply means no fallback, which is what there was before.
+    """
+    from app.core import metadata
+
+    try:
+        return metadata.cached_tmdb_id(media_type, title_id)
+    except Exception:
+        return None
+
+
 class FilmDownloadRequest(BaseModel):
     id: int
     title: str
@@ -210,6 +227,7 @@ def _episode_submits(body, tv_id, slug, tv_name, season, domain, version, token,
                 audio_languages=body.audio_languages,
                 subtitle_languages=body.subtitle_languages,
                 user_id=user_id, batch_id=batch_id, batch_kind=kind, batch_label=label,
+                tmdb_id=_tmdb_id("tv", tv_id),
             )
             if body.scheduled_at:
                 return job_manager.schedule_episode(
@@ -309,6 +327,7 @@ def download_film(body: FilmDownloadRequest, http_request: HttpRequest):
         audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,
         user_id=_acting_user_id(http_request),
+        tmdb_id=_tmdb_id("movie", body.id),
     )
     return {"job_id": job_id, "status": "queued"}
 
@@ -324,6 +343,7 @@ def download_episode(body: EpisodeDownloadRequest, http_request: HttpRequest):
         audio_languages=body.audio_languages,
         subtitle_languages=body.subtitle_languages,
         user_id=_acting_user_id(http_request),
+        tmdb_id=_tmdb_id("tv", body.tv_id),
     )
     return {"job_id": job_id, "status": "queued"}
 

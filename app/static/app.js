@@ -232,7 +232,10 @@ function showToast(message, type = 'info') {
 
 document.addEventListener('DOMContentLoaded', async () => {
   if (!await initAuth()) return;
-  if (can('REQUEST') || can('DOWNLOAD') || can('MANAGE_SETTINGS')) await loadDomainStatus();
+  if (can('REQUEST') || can('DOWNLOAD') || can('MANAGE_SETTINGS')) {
+    await loadDomainStatus();
+    loadDomainCandidate();
+  }
   if (can('MANAGE_SETTINGS')) await Promise.all([loadLibraries(), loadPerfSettings()]);
   if (can('DOWNLOAD') || can('MANAGE_REQUESTS')) {
     connectGlobalStream();
@@ -274,6 +277,67 @@ async function loadDomainStatus() {
       openSettings();
     }
   } catch(e) { console.error('loadDomainStatus:', e); }
+}
+
+// ── Source domain moved ────────────────────────────────────────────────────────
+//
+// The panel proposes; a person applies. See app/core/domain_recovery.py for why
+// adopting a domain published on a page we do not control is not something that
+// happens quietly.
+
+let _domainCandidate = null;
+
+async function loadDomainCandidate() {
+  try {
+    const res = await fetch('/api/domain/candidate');
+    if (!res.ok) return;
+    const data = await safeJson(res);
+    _domainCandidate = data.candidate || null;
+    renderDomainBanner();
+  } catch (e) { /* a missing banner is not worth a console error */ }
+}
+
+function renderDomainBanner() {
+  const banner = document.getElementById('domain-banner');
+  if (!banner) return;
+  if (!_domainCandidate) { banner.style.display = 'none'; return; }
+  document.getElementById('domain-banner-host').textContent = _domainCandidate.host;
+  banner.style.display = '';
+}
+
+async function applyDomainCandidate() {
+  if (!_domainCandidate) return;
+  const btn = document.getElementById('domain-banner-apply');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/domain/candidate/apply', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      // Echoed back as a confirmation token: the server compares it with what
+      // it found and refuses a mismatch rather than trusting this value.
+      body: JSON.stringify({domain: _domainCandidate.host}),
+    });
+    if (res.ok) {
+      const data = await safeJson(res);
+      showToast(`Dominio aggiornato: ${data.domain}`, 'success');
+      _domainCandidate = null;
+      renderDomainBanner();
+      await loadDomainStatus();
+    } else {
+      const d = await safeJson(res);
+      showToast(d.detail || 'Impossibile applicare il dominio', 'danger');
+    }
+  } catch (e) { showToast('Errore di rete', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function dismissDomainCandidate() {
+  if (!await scConfirm('Ignorare il dominio trovato? Il pannello resta sul dominio attuale.')) return;
+  try {
+    await fetch('/api/domain/candidate/dismiss', {method: 'POST'});
+  } catch (e) { /* clearing a banner is best effort */ }
+  _domainCandidate = null;
+  renderDomainBanner();
 }
 
 // ── Source selector ────────────────────────────────────────────────────────────
@@ -615,6 +679,9 @@ const NOTIFICATION_ICONS = {
   download_batch_failed: 'ti-alert-octagon',
   watch_needs_approval: 'ti-bell-question',
   watch_auto_approved: 'ti-bell-check',
+  source_domain_found: 'ti-world-search',
+  source_domain_applied: 'ti-world-check',
+  hook_failed: 'ti-webhook-off',
 };
 
 const NOTIFICATION_LABELS = {
@@ -633,6 +700,9 @@ const NOTIFICATION_LABELS = {
   download_batch_failed: 'Stagione o serie fallita',
   watch_needs_approval: 'Serie seguita da approvare',
   watch_auto_approved: 'Serie approvata',
+  source_domain_found: 'Nuovo dominio trovato',
+  source_domain_applied: 'Dominio aggiornato',
+  hook_failed: 'Hook fallito',
 };
 
 // Explicit order, so the picker does not depend on object key order.
@@ -652,6 +722,14 @@ const NOTIFICATION_EVENT_GROUPS = [
     label: 'Serie seguite',
     events: ['watch_needs_approval', 'watch_auto_approved'],
   },
+  {
+    label: 'Sorgente',
+    events: ['source_domain_found', 'source_domain_applied'],
+  },
+  {
+    label: 'Hook',
+    events: ['hook_failed'],
+  },
 ];
 
 const ALL_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_GROUPS.flatMap(g => g.events);
@@ -663,7 +741,21 @@ const ALL_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_GROUPS.flatMap(g => g.events)
 const _SETTINGS_FEEDBACK_IDS = [
   'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
+  'domain-recovery-feedback',
+  'jf-refresh-feedback', 'hooks-feedback', 'naming-feedback',
 ];
+
+// FastAPI answers a validation failure with an *array* of error objects, so the
+// `data.detail || 'Errore'` idiom used throughout renders "[object Object]".
+function _detailText(data) {
+  const detail = data && data.detail;
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(e => (e && (e.msg || e.message)) || '').filter(Boolean).join('; ');
+  }
+  return String(detail);
+}
 
 function _feedback(id, message = '', kind = 'muted') {
   const el = document.getElementById(id);
@@ -676,14 +768,30 @@ function _feedback(id, message = '', kind = 'muted') {
 // modal no longer waits on the slowest section (disk usage stats every library
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
+  sorgente: () => loadDomainRecoverySettings(),
+  nomi: () => loadNamingTemplates(),
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),
   notifiche: () => loadNotificationChannels(),
+  hook: () => Promise.all([loadJellyfinRefresh(), loadHooks()]),
 };
+
+// Two panes read the same endpoint. Shared per modal-open so switching between
+// them does not fetch it twice; cleared alongside _settingsLoaded.
+let _appSettingsPromise = null;
+
+function _loadAppSettings() {
+  if (!_appSettingsPromise) {
+    _appSettingsPromise = fetch('/api/domain/settings')
+      .then(res => (res.ok ? safeJson(res) : null))
+      .catch(() => null);
+  }
+  return _appSettingsPromise;
+}
 
 // Tabs whose panes only talk to MANAGE_SETTINGS endpoints: without it they would
 // render as empty panes fed by 403s.
-const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'download', 'notifiche'];
+const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'nomi', 'download', 'notifiche', 'hook'];
 
 let _settingsTab = 'sorgente';
 const _settingsLoaded = new Set();
@@ -736,6 +844,7 @@ async function openSettings() {
   // Cleared on every open so a value changed elsewhere is picked up; within one
   // open, moving between tabs does not refetch.
   _settingsLoaded.clear();
+  _appSettingsPromise = null;
   showModal('settings-modal');
   const tabs = _visibleSettingsTabs();
   await switchSettingsTab(tabs.includes('sorgente') ? 'sorgente' : tabs[0]);
@@ -1076,15 +1185,387 @@ async function connectJellyfin(reconfigure) {
 }
 
 async function loadPerfSettings() {
+  const data = await _loadAppSettings();
+  if (!data) return;
+  document.getElementById('setting-max-concurrent').value = data.max_concurrent_downloads ?? 3;
+  document.getElementById('setting-max-workers').value = data.max_segment_workers ?? 16;
+  document.getElementById('setting-watch-interval').value =
+    data.series_watch_interval_minutes ?? 240;
+}
+
+async function loadDomainRecoverySettings() {
+  const data = await _loadAppSettings();
+  if (!data) return;
+  document.getElementById('domain-auto-check').checked =
+    data.domain_auto_check_enabled !== false;
+  document.getElementById('domain-auto-apply').checked = !!data.domain_auto_apply;
+  document.getElementById('domain-check-interval').value =
+    data.domain_check_interval_minutes ?? 360;
+}
+
+
+// ── Naming templates ───────────────────────────────────────────────────────────
+//
+// The preview is rendered by the server, using the same engine the downloader
+// uses. Reimplementing it here would give two renderers that drift, and this way
+// an invalid template shows its real validation error while it is being typed.
+
+let _namingDefaults = null;
+let _namingPreviewTimer = null;
+
+function _namingInputs() {
+  return [...document.querySelectorAll('[data-naming-slot]')];
+}
+
+async function loadNamingTemplates() {
+  // The defaults come first: they are what every placeholder shows, and the
+  // markup's hardcoded ones are only a fallback for when this fetch fails.
+  // Without this the two copies drift the day a default changes server-side.
+  if (!_namingDefaults) {
+    try {
+      const res = await fetch('/api/domain/settings/naming-defaults');
+      if (res.ok) _namingDefaults = (await safeJson(res)).templates;
+    } catch (e) { /* the markup's placeholders stand in */ }
+  }
+
+  const data = await _loadAppSettings();
+  const templates = (data && data.naming_templates) || {};
+  _namingInputs().forEach(input => {
+    const slot = input.dataset.namingSlot;
+    if (_namingDefaults && _namingDefaults[slot]) input.placeholder = _namingDefaults[slot];
+    // Left blank when it matches the default, so the placeholder — which *is*
+    // the default — stays visible, and the field reads as "nothing changed
+    // here" rather than as a value somebody chose.
+    const stored = templates[slot] || '';
+    input.value = stored === input.placeholder ? '' : stored;
+    if (!input.dataset.wired) {
+      input.addEventListener('input', scheduleNamingPreview);
+      input.dataset.wired = '1';
+    }
+  });
+  refreshNamingPreview();
+}
+
+function scheduleNamingPreview() {
+  clearTimeout(_namingPreviewTimer);
+  _namingPreviewTimer = setTimeout(refreshNamingPreview, 200);
+}
+
+function _collectNamingTemplates() {
+  // An empty field means the default, which is what its placeholder shows. The
+  // server rejects an empty template outright, so the substitution happens here
+  // rather than turning a blank box into a validation error.
+  const templates = {};
+  _namingInputs().forEach(i => {
+    templates[i.dataset.namingSlot] = i.value.trim() || i.placeholder;
+  });
+  return templates;
+}
+
+async function refreshNamingPreview() {
   try {
-    const res = await fetch('/api/domain/settings');
+    const res = await fetch('/api/domain/settings/naming-preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({templates: _collectNamingTemplates()}),
+    });
     if (!res.ok) return;
     const data = await safeJson(res);
-    document.getElementById('setting-max-concurrent').value = data.max_concurrent_downloads ?? 3;
-    document.getElementById('setting-max-workers').value = data.max_segment_workers ?? 16;
-    document.getElementById('setting-watch-interval').value =
-      data.series_watch_interval_minutes ?? 240;
-  } catch (e) { /* ignore */ }
+    _namingInputs().forEach(input => {
+      const slot = data.slots[input.dataset.namingSlot];
+      const line = document.getElementById(`naming-preview-${input.dataset.namingSlot}`);
+      if (!line || !slot) return;
+      if (slot.error) {
+        line.className = 'form-text text-danger';
+        line.textContent = slot.error;
+      } else {
+        line.className = 'form-text';
+        line.textContent = `Esempio: ${slot.preview}`;
+      }
+    });
+  } catch (e) { /* previews are a convenience; saving still validates */ }
+}
+
+async function saveNamingTemplates() {
+  const btn = document.getElementById('save-naming-btn');
+  btn.disabled = true;
+  _feedback('naming-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/domain/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({naming_templates: _collectNamingTemplates()}),
+    });
+    if (res.ok) {
+      _feedback('naming-feedback', 'Salvato.', 'success');
+      showToast('Schema dei nomi salvato', 'success');
+    } else {
+      const d = await safeJson(res);
+      _feedback('naming-feedback', _detailText(d) || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('naming-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function resetNamingTemplates() {
+  if (!await scConfirm('Ripristinare lo schema dei nomi predefinito?')) return;
+  // Blank means default, so restoring is emptying every field.
+  _namingInputs().forEach(input => { input.value = ''; });
+  refreshNamingPreview();
+  _feedback('naming-feedback', 'Predefiniti ripristinati: premi Salva per applicarli.');
+}
+
+
+// ── Post-download hooks ────────────────────────────────────────────────────────
+//
+// Webhooks only: open mode grants MANAGE_SETTINGS to every anonymous visitor, so
+// a shell hook would be remote code execution for whoever can reach the panel.
+// See app/downloads_hooks.py.
+
+let _hooks = [];
+
+const HOOK_EVENT_LABELS = {
+  done: 'Completato',
+  error: 'Fallito',
+  cancelled: 'Annullato',
+};
+
+async function loadJellyfinRefresh() {
+  const data = await _loadAppSettings();
+  if (!data) return;
+  document.getElementById('jf-refresh-on-download').checked =
+    !!data.jellyfin_refresh_on_download;
+
+}
+
+// Set from the hooks payload, which reports whether the refresh has credentials
+// to use. Inferring it from the auth status would report an installation that
+// skipped the wizard and connected Jellyfin later as unconnected.
+function renderJellyfinRefreshAvailability(connected) {
+  const toggle = document.getElementById('jf-refresh-on-download');
+  if (!toggle) return;
+  toggle.disabled = !connected;
+  document.getElementById('jf-refresh-status').textContent = connected
+    ? ''
+    : 'Jellyfin non è collegato: collegalo da Accesso e utenti perché questa opzione abbia effetto.';
+}
+
+async function saveJellyfinRefresh() {
+  const btn = document.getElementById('save-jf-refresh-btn');
+  btn.disabled = true;
+  _feedback('jf-refresh-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/domain/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        jellyfin_refresh_on_download:
+          document.getElementById('jf-refresh-on-download').checked,
+      }),
+    });
+    if (res.ok) {
+      _feedback('jf-refresh-feedback', 'Salvato.', 'success');
+      showToast('Impostazione salvata', 'success');
+    } else {
+      const d = await safeJson(res);
+      _feedback('jf-refresh-feedback', d.detail || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('jf-refresh-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function loadHooks() {
+  try {
+    const res = await fetch('/api/download-hooks');
+    if (!res.ok) return;
+    const data = await safeJson(res);
+    _hooks = data.hooks || [];
+    renderJellyfinRefreshAvailability(!!data.jellyfin_connected);
+    renderHooksList();
+  } catch (e) { /* the list simply stays as it was */ }
+}
+
+function _hookEventSummary(hook) {
+  // An empty list means every event — the same convention the notification
+  // channels use, and the one thing here that is easy to read backwards.
+  if (!hook.events || !hook.events.length) return 'Tutti gli esiti';
+  return hook.events.map(e => HOOK_EVENT_LABELS[e] || e).join(', ');
+}
+
+function renderHooksList() {
+  const container = document.getElementById('hooks-list');
+  if (!_hooks.length) {
+    container.innerHTML = '<p class="text-muted small mb-0">Nessun webhook configurato.</p>';
+    return;
+  }
+  container.innerHTML = _hooks.map(hook => `
+    <div class="border-bottom pb-1 mb-1">
+      <div class="d-flex align-items-center gap-2 py-1">
+        <label class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" ${hook.enabled ? 'checked' : ''}
+                 onchange="toggleHook(${hook.id}, this.checked)">
+        </label>
+        <div class="flex-fill text-truncate">
+          <span style="color:var(--text)">${escapeHtml(hook.name)}</span>
+          <span class="text-muted small ms-2">${escapeHtml(hook.method)} ${escapeHtml(hook.url_masked || '')}</span>
+        </div>
+        <span class="badge bg-secondary-lt">${escapeHtml(_hookEventSummary(hook))}</span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="testHook(${hook.id})">
+          <i class="ti ti-send me-1"></i>Test
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteHook(${hook.id})">
+          <i class="ti ti-trash"></i>
+        </button>
+      </div>
+    </div>`).join('');
+}
+
+function toggleHookForm() {
+  const form = document.getElementById('hook-form');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function saveHook() {
+  const btn = document.getElementById('hook-save-btn');
+  const name = document.getElementById('hook-name').value.trim();
+  const url = document.getElementById('hook-url').value.trim();
+  if (!name || !url) {
+    _feedback('hooks-feedback', 'Nome e URL sono obbligatori.', 'danger'); return;
+  }
+  btn.disabled = true;
+  _feedback('hooks-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/download-hooks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name, url,
+        method: document.getElementById('hook-method').value,
+        body_template: document.getElementById('hook-body').value,
+      }),
+    });
+    if (res.ok) {
+      document.getElementById('hook-name').value = '';
+      document.getElementById('hook-url').value = '';
+      document.getElementById('hook-body').value = '';
+      document.getElementById('hook-form').style.display = 'none';
+      _feedback('hooks-feedback', 'Aggiunto.', 'success');
+      await loadHooks();
+    } else {
+      const d = await safeJson(res);
+      _feedback('hooks-feedback', _detailText(d) || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function toggleHook(id, enabled) {
+  try {
+    await fetch(`/api/download-hooks/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled}),
+    });
+  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+  await loadHooks();
+}
+
+async function deleteHook(id) {
+  if (!await scConfirm('Eliminare questo webhook?')) return;
+  try {
+    await fetch(`/api/download-hooks/${id}`, {method: 'DELETE'});
+    await loadHooks();
+  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+}
+
+async function testHook(id) {
+  _feedback('hooks-feedback', 'Invio chiamata di prova...');
+  try {
+    const res = await fetch(`/api/download-hooks/${id}/test`, {method: 'POST'});
+    const data = await safeJson(res);
+    // Only an outcome and a status code come back: the panel never relays what
+    // the other end said.
+    if (res.ok && data.ok) {
+      _feedback('hooks-feedback', `Riuscito (HTTP ${data.status}).`, 'success');
+      showToast('Webhook raggiunto', 'success');
+    } else {
+      _feedback('hooks-feedback',
+        data.status ? `Fallito (HTTP ${data.status}).` : 'Nessuna risposta.', 'danger');
+    }
+  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+}
+
+// ── Post-download hooks end ────────────────────────────────────────────────────
+
+async function saveDomainRecovery() {
+  const btn = document.getElementById('save-domain-recovery-btn');
+  const interval = parseInt(document.getElementById('domain-check-interval').value, 10);
+  if (!(interval >= 30 && interval <= 1440)) {
+    _feedback('domain-recovery-feedback', 'Intervallo tra 30 e 1440 minuti.', 'danger');
+    return;
+  }
+  const autoApply = document.getElementById('domain-auto-apply').checked;
+  // Turning this on hands a page we do not control the ability to move the
+  // panel's source. Worth one deliberate click.
+  if (autoApply && !await scConfirm(
+      'Con l\'applicazione automatica il pannello adotta il dominio trovato senza chiedere. ' +
+      'Verranno accettati solo domini verificati e con un nome riconosciuto. Continuare?')) {
+    return;
+  }
+  btn.disabled = true;
+  _feedback('domain-recovery-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/domain/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        domain_auto_check_enabled: document.getElementById('domain-auto-check').checked,
+        domain_auto_apply: autoApply,
+        domain_check_interval_minutes: interval,
+      }),
+    });
+    if (res.ok) {
+      _feedback('domain-recovery-feedback', 'Salvato.', 'success');
+      showToast('Impostazioni salvate', 'success');
+    } else {
+      const d = await safeJson(res);
+      _feedback('domain-recovery-feedback', d.detail || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('domain-recovery-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function checkDomainNow() {
+  const btn = document.getElementById('domain-check-btn');
+  btn.disabled = true;
+  _feedback('domain-recovery-feedback', 'Controllo in corso...');
+  try {
+    const res = await fetch('/api/domain/check', {method: 'POST'});
+    if (!res.ok) {
+      const d = await safeJson(res);
+      _feedback('domain-recovery-feedback', d.detail || 'Controllo fallito.', 'danger');
+      return;
+    }
+    const data = await safeJson(res);
+    if (data.applied) {
+      _feedback('domain-recovery-feedback', `Applicato ${data.candidate}.`, 'success');
+      await loadDomainStatus();
+    } else if (data.candidate) {
+      _feedback('domain-recovery-feedback', `Trovato ${data.candidate}: da applicare.`, 'success');
+    } else if (data.current_ok) {
+      _feedback('domain-recovery-feedback', 'Il dominio attuale risponde.', 'success');
+    } else {
+      // Rejections are shown rather than swallowed: a rebranded source and an
+      // edited page look identical from here, and only a person can tell them
+      // apart.
+      const why = (data.rejected || []).map(r => `${r.host} (${r.reason})`).join(', ');
+      _feedback('domain-recovery-feedback',
+        why ? `Nessun dominio adottabile. Scartati: ${why}` : 'Nessun dominio trovato.',
+        'danger');
+    }
+    await loadDomainCandidate();
+  } catch (e) { _feedback('domain-recovery-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
 }
 
 async function savePerfSettings() {
@@ -1370,9 +1851,96 @@ function _getLangSelections() {
   };
 }
 
+// Guards against a stale response painting over a newer one: open a title, close
+// it, open another before the first reply lands, and the first one used to win.
+let _detailToken = 0;
+// The two fetches of one open land in either order, and each needs something
+// the other has: the failure message depends on whether a fallback exists.
+let _detailState = { langsError: null };
+
+function _resetDetailExtras() {
+  _detailState = { langsError: null };
+  document.getElementById('detail-backdrop').style.display = 'none';
+  const plot = document.getElementById('detail-plot');
+  plot.textContent = ''; plot.style.display = 'none';
+  const genres = document.getElementById('detail-genres');
+  genres.innerHTML = ''; genres.style.display = 'none';
+  document.getElementById('detail-trailer-btn').style.display = 'none';
+  // The class is rewritten further down on every open; the tooltip is not, so
+  // a stale warning would follow the modal onto the next title.
+  document.getElementById('detail-action-btn').title = '';
+}
+
+function renderTitleMetadata(meta) {
+  if (!meta) return;
+
+  if (meta.backdrop) {
+    const backdrop = document.getElementById('detail-backdrop');
+    backdrop.style.backgroundImage = `url("${encodeURI(meta.backdrop)}")`;
+    backdrop.style.display = '';
+  }
+  if (meta.plot) {
+    const plot = document.getElementById('detail-plot');
+    plot.textContent = meta.plot;
+    plot.style.display = '';
+  }
+  if (meta.genres?.length) {
+    const genres = document.getElementById('detail-genres');
+    genres.innerHTML = meta.genres.slice(0, 4)
+      .map(g => `<span class="badge bg-secondary-lt">${escapeHtml(g)}</span>`).join('');
+    genres.style.display = '';
+  }
+  if (meta.trailer_url) {
+    const trailer = document.getElementById('detail-trailer-btn');
+    trailer.href = meta.trailer_url;
+    trailer.style.display = '';
+  }
+  // The source carries no rating for many titles; TMDB's fills that gap rather
+  // than replacing a score already on screen.
+  const scoreEl = document.getElementById('detail-score');
+  if (meta.rating && !scoreEl.innerHTML) {
+    scoreEl.innerHTML =
+      `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${meta.rating}</span>`;
+  }
+}
+
+function renderDetailSourceError(detail) {
+  _detailState.langsError = detail;
+  const langsEl = document.getElementById('detail-langs');
+  const trimmed = (detail || '').slice(0, 140);
+  // No alternative provider is registered (see app/core/_shared.py), so this
+  // must not promise one. Saying "the alternative source will be tried" when
+  // nothing will be tried is worse than the silence this replaced.
+  langsEl.innerHTML =
+    `<div class="alert bg-warning py-1 px-2 mb-0 small" style="border-color:#e6a23c">
+       <i class="ti ti-alert-triangle me-1"></i>
+       Sorgente non raggiungibile per questo titolo. Le lingue non sono selezionabili
+       e il download potrebbe fallire.
+       ${trimmed ? `<div class="text-muted mt-1">${escapeHtml(trimmed)}</div>` : ''}
+     </div>`;
+
+  // Deliberately still enabled. The fallback may well work, and disabling the
+  // button removes the one path that might; saying so is the honest version of
+  // taking the choice away.
+  const btn = document.getElementById('detail-action-btn');
+  if (btn) {
+    // The title goes on regardless: "Richiedi" is already btn-warning for its
+    // own reason, and the tooltip is what actually carries the warning.
+    btn.title = hasFallback
+      ? 'La sorgente principale non risponde: verr\u00e0 tentata quella alternativa.'
+      : 'La sorgente non risponde: il download potrebbe fallire.';
+    if (!btn.className.includes('btn-warning')) btn.className = 'btn btn-warning';
+  }
+}
+
 function openDetailModal(idx) {
   const item = _searchResults[idx];
   if (!item) return;
+  // The modal is reused, so anything filled in asynchronously has to be cleared
+  // first — a plot left over from the previous title under a new heading reads
+  // as fact — and late responses have to be able to tell they are late.
+  const token = ++_detailToken;
+  _resetDetailExtras();
   const isAnime = item.type === 'anime';
   const isMovie = item.type === 'movie';
   const year = itemYear(item);
@@ -1450,9 +2018,24 @@ function openDetailModal(idx) {
   showModal('detail-modal');
 
   const p = new URLSearchParams({ type:isMovie?'movie':'tv', slug:item.slug||'', version:currentVersion||'' });
-  fetch(`/api/search/languages/${item.id}?${p}`)
+
+  // Independent of the languages call and started alongside it: one is metadata,
+  // the other reaches the stream host, and neither should wait on the other.
+  fetch(`/api/metadata/${isMovie ? 'movie' : 'tv'}/${item.id}?${p}`)
     .then(r => r.ok ? r.json() : null)
+    .then(meta => { if (token === _detailToken) renderTitleMetadata(meta); })
+    .catch(() => { /* the modal simply stays as it was */ });
+
+  fetch(`/api/search/languages/${item.id}?${p}`)
+    .then(async r => {
+      if (r.ok) return r.json();
+      // Used to be swallowed: no chips, no explanation, and a download button
+      // that looked entirely fine.
+      const body = await safeJson(r).catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${r.status}`);
+    })
     .then(info => {
+      if (token !== _detailToken) return;
       if (!info) { langsEl.innerHTML=''; return; }
       let html='';
       if (info.audio?.length) {
@@ -1473,7 +2056,10 @@ function openDetailModal(idx) {
       }
       langsEl.innerHTML=html;
     })
-    .catch(()=>{ langsEl.innerHTML=''; });
+    .catch(err => {
+      if (token !== _detailToken) return;
+      renderDetailSourceError(err && err.message);
+    });
 }
 
 // ── Requesting ─────────────────────────────────────────────────────────────────
@@ -1897,6 +2483,9 @@ function connectGlobalStream() {
         _jobs.delete(msg.job_id);
         document.getElementById(`job-card-${msg.job_id}`)?.remove();
         updateActiveBadge();
+        break;
+      case 'domain_candidate':
+        loadDomainCandidate();
         break;
       case 'notification':
         // A bare signal: the payload lives behind /api/notifications, which is

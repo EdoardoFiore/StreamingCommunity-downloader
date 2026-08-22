@@ -11,12 +11,13 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app import __version__, db, downloads_notify
+from app import __version__, db, downloads_hooks, downloads_notify
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
 from app.auth import users_router
 from app.auth.deps import AuthMiddleware
+from app.core import domain_recovery
 from app.jobs import job_manager
 from app.requests import router as requests_router, service as requests_service
 from app.watches import poller as watch_poller, router as watches_router
@@ -24,6 +25,7 @@ from app.schedule import ScheduleStore
 from app.config import AUTH_ENABLED, SCHEDULE_FILE
 from app.routers import (
     domain, search, tv, downloads, progress, files, images, anime, notification_channels,
+    metadata as metadata_router, download_hooks,
 )
 
 logging.basicConfig(
@@ -91,6 +93,9 @@ async def lifespan(app: FastAPI):
     # Second listener, registered after the request one so a request's own row is
     # updated first: this one only speaks up for jobs no request owns.
     downloads_notify.register_batch_listener()
+    # Third and last: outbound side effects only, so it can neither delay a
+    # request's own row nor swallow a notification if it fails.
+    downloads_hooks.register_hook_listener()
     # Before anything can approve or complete a request: any row still
     # "approved" or "downloading" from a previous run has no in-memory worker
     # left, and never will — it needs recovering before the app is reachable.
@@ -102,10 +107,15 @@ async def lifespan(app: FastAPI):
     # Started last: a new episode found by the poller becomes an approval, which
     # submits a job, so the job manager has to be fully wired first.
     poller_task = asyncio.create_task(watch_poller.watch_poller_loop())
+    # Independent of the poller: this one watches the source itself rather than
+    # anything in it, and both sleep before their first pass so the lifespan
+    # never does network I/O.
+    domain_task = asyncio.create_task(domain_recovery.domain_watch_loop())
     try:
         yield
     finally:
         poller_task.cancel()
+        domain_task.cancel()
 
 
 app = FastAPI(title="StreamingCommunity Web Panel", version=__version__, lifespan=lifespan)
@@ -123,7 +133,9 @@ app.include_router(users_router.router)
 app.include_router(requests_router.router)
 app.include_router(requests_router.notifications_router)
 app.include_router(domain.router)
+app.include_router(metadata_router.router)
 app.include_router(notification_channels.router)
+app.include_router(download_hooks.router)
 app.include_router(watches_router.router)
 app.include_router(search.router)
 app.include_router(tv.router)
