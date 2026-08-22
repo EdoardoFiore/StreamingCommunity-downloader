@@ -6,8 +6,6 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from filelock import FileLock
-
 from app import config
 from app.auth.deps import require
 from app.auth.permissions import Permission
@@ -37,20 +35,7 @@ def _read_data() -> dict:
         return {"domain": ""}
 
 
-def _update_data(changes: dict):
-    """Apply top-level changes to data.json under the same lock as save_settings.
-
-    Read-modify-write inside the lock rather than "read, mutate, write back":
-    the domain recovery loop writes ``domain`` from a background thread, so a
-    concurrent libraries or settings save would otherwise lose one of the two
-    writes wholesale.
-    """
-    lock = FileLock(str(config.DATA_FILE) + ".lock")
-    with lock:
-        data = _read_data()
-        data.update(changes)
-        with open(config.DATA_FILE, "w") as f:
-            json.dump(data, f)
+_update_data = config.update_data
 
 
 @router.get("", dependencies=CAN_READ_DOMAIN)
