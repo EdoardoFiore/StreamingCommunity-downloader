@@ -29,7 +29,18 @@ def get_token(id_tv: int, domain: str) -> str:
     raise RuntimeError("XSRF-TOKEN cookie not found after page visit")
 
 
-def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -> int:
+def get_title_props(id_film: int, title_name: str, site_version: str, domain: str) -> dict:
+    """The full ``props.title`` payload of a title page.
+
+    This request was already being made to read one integer out of it, throwing
+    away the plot, the genres, the images, the trailers and — the one that
+    matters most — ``tmdb_id``, which is what lets the panel show real metadata
+    and gives the vixsrc fallback something to resolve against.
+
+    The same route serves films, despite living in tv.py: the site has one title
+    page, and splitting this in two would mean two copies of the Inertia header
+    dance.
+    """
     req = requests.get(
         f"https://{domain}/it/titles/{id_film}-{title_name}",
         headers={
@@ -39,9 +50,20 @@ def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -
         },
         timeout=15,
     )
-    if req.ok:
-        return req.json()["props"]["title"]["seasons_count"]
-    raise RuntimeError(f"Cannot fetch TV info: HTTP {req.status_code}")
+    if not req.ok:
+        raise RuntimeError(f"Cannot fetch TV info: HTTP {req.status_code}")
+    return req.json()["props"]["title"]
+
+
+def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -> int:
+    """How many seasons this series has.
+
+    Signature and int return kept exactly as they were: the watch poller, the
+    seasons endpoint and the batch download path all call this, and several
+    tests monkeypatch it. Widening it to return the props would have been the
+    obvious refactor and would have broken all of them.
+    """
+    return get_title_props(id_film, title_name, site_version, domain)["seasons_count"]
 
 
 def get_info_season(tv_id: int, tv_name: str, domain: str, version: str, token: str, n_stagione: int) -> list[dict]:
