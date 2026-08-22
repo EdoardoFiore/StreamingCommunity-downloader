@@ -191,7 +191,9 @@ anything under a mounted static directory is readable by unauthenticated visitor
 - **Changing a naming template must not hide files already in the library.**
   `resolver.existing_file()` probes the current template *and* `naming.LEGACY_TEMPLATES`, each with
   its `.mkv` sibling; with the defaults the two render identically and it collapses back to two
-  stats. `naming.render()` never raises — it runs inside a download, after the bytes are fetched —
+  stats. In the UI a blank field means the default — its placeholder shows what that is, synced
+  from `/api/domain/settings/naming-defaults` so the markup's copy cannot drift — and the frontend
+  substitutes it before saving, because the server rejects an empty template outright. `naming.render()` never raises — it runs inside a download, after the bytes are fetched —
   so everything it would paper over is refused by `naming.validate()` at save time. Never
   `str.format` a user template: `{title.__class__}` leaks attributes and a stray `{` raises
   mid-download.

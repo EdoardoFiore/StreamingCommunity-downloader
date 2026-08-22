@@ -769,7 +769,7 @@ function _feedback(id, message = '', kind = 'muted') {
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
   sorgente: () => loadDomainRecoverySettings(),
-  librerie: () => loadNamingTemplates(),
+  nomi: () => loadNamingTemplates(),
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),
   notifiche: () => loadNotificationChannels(),
@@ -791,7 +791,7 @@ function _loadAppSettings() {
 
 // Tabs whose panes only talk to MANAGE_SETTINGS endpoints: without it they would
 // render as empty panes fed by 403s.
-const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'download', 'notifiche', 'hook'];
+const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'nomi', 'download', 'notifiche', 'hook'];
 
 let _settingsTab = 'sorgente';
 const _settingsLoaded = new Set();
@@ -1218,23 +1218,32 @@ function _namingInputs() {
 }
 
 async function loadNamingTemplates() {
+  // The defaults come first: they are what every placeholder shows, and the
+  // markup's hardcoded ones are only a fallback for when this fetch fails.
+  // Without this the two copies drift the day a default changes server-side.
+  if (!_namingDefaults) {
+    try {
+      const res = await fetch('/api/domain/settings/naming-defaults');
+      if (res.ok) _namingDefaults = (await safeJson(res)).templates;
+    } catch (e) { /* the markup's placeholders stand in */ }
+  }
+
   const data = await _loadAppSettings();
   const templates = (data && data.naming_templates) || {};
   _namingInputs().forEach(input => {
-    input.value = templates[input.dataset.namingSlot] || '';
+    const slot = input.dataset.namingSlot;
+    if (_namingDefaults && _namingDefaults[slot]) input.placeholder = _namingDefaults[slot];
+    // Left blank when it matches the default, so the placeholder — which *is*
+    // the default — stays visible, and the field reads as "nothing changed
+    // here" rather than as a value somebody chose.
+    const stored = templates[slot] || '';
+    input.value = stored === input.placeholder ? '' : stored;
     if (!input.dataset.wired) {
       input.addEventListener('input', scheduleNamingPreview);
       input.dataset.wired = '1';
     }
   });
   refreshNamingPreview();
-
-  if (!_namingDefaults) {
-    try {
-      const res = await fetch('/api/domain/settings/naming-defaults');
-      if (res.ok) _namingDefaults = (await safeJson(res)).templates;
-    } catch (e) { /* the reset button simply stays unavailable */ }
-  }
 }
 
 function scheduleNamingPreview() {
@@ -1243,8 +1252,13 @@ function scheduleNamingPreview() {
 }
 
 function _collectNamingTemplates() {
+  // An empty field means the default, which is what its placeholder shows. The
+  // server rejects an empty template outright, so the substitution happens here
+  // rather than turning a blank box into a validation error.
   const templates = {};
-  _namingInputs().forEach(i => { templates[i.dataset.namingSlot] = i.value; });
+  _namingInputs().forEach(i => {
+    templates[i.dataset.namingSlot] = i.value.trim() || i.placeholder;
+  });
   return templates;
 }
 
@@ -1294,11 +1308,9 @@ async function saveNamingTemplates() {
 }
 
 async function resetNamingTemplates() {
-  if (!_namingDefaults) return;
   if (!await scConfirm('Ripristinare lo schema dei nomi predefinito?')) return;
-  _namingInputs().forEach(input => {
-    input.value = _namingDefaults[input.dataset.namingSlot] || '';
-  });
+  // Blank means default, so restoring is emptying every field.
+  _namingInputs().forEach(input => { input.value = ''; });
   refreshNamingPreview();
   _feedback('naming-feedback', 'Predefiniti ripristinati: premi Salva per applicarli.');
 }

@@ -362,8 +362,14 @@ came back.
 
 ## Naming
 
-**Impostazioni → Librerie** sets how files and folders are named, per type. The defaults are the
-layout below.
+**Impostazioni → Nomi** sets how files and folders are named, per type. Each field is left blank
+when it matches the default, and shows that default as its placeholder — so an untouched field
+reads as "nothing changed here" rather than as a value somebody chose. Saving a blank field keeps
+the default.
+
+The defaults follow the structure [Jellyfin's own documentation](https://jellyfin.org/docs/general/server/media/movies/)
+recommends, which is the layout below. Change them only if your library already follows a different
+convention: Jellyfin recognises this one with no configuration at all.
 
 Placeholders: `{title}`, `{year}`, `{season}`, `{season2}`, `{episode}`, `{episode2}` — the `2`
 variants are zero-padded. Anything in square brackets appears only if the placeholders inside it
