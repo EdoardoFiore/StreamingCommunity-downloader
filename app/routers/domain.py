@@ -146,8 +146,16 @@ def set_libraries(body: LibrariesUpdate):
 
 
 class SettingsUpdate(BaseModel):
-    max_concurrent_downloads: int
-    max_segment_workers: int
+    """Every field optional: each settings section sends only what it owns.
+
+    The merge in set_app_settings fills in the rest from what is stored, so the
+    performance section and the recovery section can save independently without
+    either one having to re-send the other's values and risk overwriting a
+    change made seconds earlier in the same modal.
+    """
+
+    max_concurrent_downloads: int | None = None
+    max_segment_workers: int | None = None
     series_watch_interval_minutes: int | None = None
     domain_auto_check_enabled: bool | None = None
     domain_auto_apply: bool | None = None

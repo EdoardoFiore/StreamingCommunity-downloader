@@ -232,7 +232,10 @@ function showToast(message, type = 'info') {
 
 document.addEventListener('DOMContentLoaded', async () => {
   if (!await initAuth()) return;
-  if (can('REQUEST') || can('DOWNLOAD') || can('MANAGE_SETTINGS')) await loadDomainStatus();
+  if (can('REQUEST') || can('DOWNLOAD') || can('MANAGE_SETTINGS')) {
+    await loadDomainStatus();
+    loadDomainCandidate();
+  }
   if (can('MANAGE_SETTINGS')) await Promise.all([loadLibraries(), loadPerfSettings()]);
   if (can('DOWNLOAD') || can('MANAGE_REQUESTS')) {
     connectGlobalStream();
@@ -274,6 +277,67 @@ async function loadDomainStatus() {
       openSettings();
     }
   } catch(e) { console.error('loadDomainStatus:', e); }
+}
+
+// ── Source domain moved ────────────────────────────────────────────────────────
+//
+// The panel proposes; a person applies. See app/core/domain_recovery.py for why
+// adopting a domain published on a page we do not control is not something that
+// happens quietly.
+
+let _domainCandidate = null;
+
+async function loadDomainCandidate() {
+  try {
+    const res = await fetch('/api/domain/candidate');
+    if (!res.ok) return;
+    const data = await safeJson(res);
+    _domainCandidate = data.candidate || null;
+    renderDomainBanner();
+  } catch (e) { /* a missing banner is not worth a console error */ }
+}
+
+function renderDomainBanner() {
+  const banner = document.getElementById('domain-banner');
+  if (!banner) return;
+  if (!_domainCandidate) { banner.style.display = 'none'; return; }
+  document.getElementById('domain-banner-host').textContent = _domainCandidate.host;
+  banner.style.display = '';
+}
+
+async function applyDomainCandidate() {
+  if (!_domainCandidate) return;
+  const btn = document.getElementById('domain-banner-apply');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/domain/candidate/apply', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      // Echoed back as a confirmation token: the server compares it with what
+      // it found and refuses a mismatch rather than trusting this value.
+      body: JSON.stringify({domain: _domainCandidate.host}),
+    });
+    if (res.ok) {
+      const data = await safeJson(res);
+      showToast(`Dominio aggiornato: ${data.domain}`, 'success');
+      _domainCandidate = null;
+      renderDomainBanner();
+      await loadDomainStatus();
+    } else {
+      const d = await safeJson(res);
+      showToast(d.detail || 'Impossibile applicare il dominio', 'danger');
+    }
+  } catch (e) { showToast('Errore di rete', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function dismissDomainCandidate() {
+  if (!await scConfirm('Ignorare il dominio trovato? Il pannello resta sul dominio attuale.')) return;
+  try {
+    await fetch('/api/domain/candidate/dismiss', {method: 'POST'});
+  } catch (e) { /* clearing a banner is best effort */ }
+  _domainCandidate = null;
+  renderDomainBanner();
 }
 
 // ── Source selector ────────────────────────────────────────────────────────────
@@ -671,6 +735,7 @@ const ALL_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_GROUPS.flatMap(g => g.events)
 const _SETTINGS_FEEDBACK_IDS = [
   'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
+  'domain-recovery-feedback',
 ];
 
 function _feedback(id, message = '', kind = 'muted') {
@@ -684,10 +749,24 @@ function _feedback(id, message = '', kind = 'muted') {
 // modal no longer waits on the slowest section (disk usage stats every library
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
+  sorgente: () => loadDomainRecoverySettings(),
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),
   notifiche: () => loadNotificationChannels(),
 };
+
+// Two panes read the same endpoint. Shared per modal-open so switching between
+// them does not fetch it twice; cleared alongside _settingsLoaded.
+let _appSettingsPromise = null;
+
+function _loadAppSettings() {
+  if (!_appSettingsPromise) {
+    _appSettingsPromise = fetch('/api/domain/settings')
+      .then(res => (res.ok ? safeJson(res) : null))
+      .catch(() => null);
+  }
+  return _appSettingsPromise;
+}
 
 // Tabs whose panes only talk to MANAGE_SETTINGS endpoints: without it they would
 // render as empty panes fed by 403s.
@@ -744,6 +823,7 @@ async function openSettings() {
   // Cleared on every open so a value changed elsewhere is picked up; within one
   // open, moving between tabs does not refetch.
   _settingsLoaded.clear();
+  _appSettingsPromise = null;
   showModal('settings-modal');
   const tabs = _visibleSettingsTabs();
   await switchSettingsTab(tabs.includes('sorgente') ? 'sorgente' : tabs[0]);
@@ -1084,15 +1164,93 @@ async function connectJellyfin(reconfigure) {
 }
 
 async function loadPerfSettings() {
+  const data = await _loadAppSettings();
+  if (!data) return;
+  document.getElementById('setting-max-concurrent').value = data.max_concurrent_downloads ?? 3;
+  document.getElementById('setting-max-workers').value = data.max_segment_workers ?? 16;
+  document.getElementById('setting-watch-interval').value =
+    data.series_watch_interval_minutes ?? 240;
+}
+
+async function loadDomainRecoverySettings() {
+  const data = await _loadAppSettings();
+  if (!data) return;
+  document.getElementById('domain-auto-check').checked =
+    data.domain_auto_check_enabled !== false;
+  document.getElementById('domain-auto-apply').checked = !!data.domain_auto_apply;
+  document.getElementById('domain-check-interval').value =
+    data.domain_check_interval_minutes ?? 360;
+}
+
+async function saveDomainRecovery() {
+  const btn = document.getElementById('save-domain-recovery-btn');
+  const interval = parseInt(document.getElementById('domain-check-interval').value, 10);
+  if (!(interval >= 30 && interval <= 1440)) {
+    _feedback('domain-recovery-feedback', 'Intervallo tra 30 e 1440 minuti.', 'danger');
+    return;
+  }
+  const autoApply = document.getElementById('domain-auto-apply').checked;
+  // Turning this on hands a page we do not control the ability to move the
+  // panel's source. Worth one deliberate click.
+  if (autoApply && !await scConfirm(
+      'Con l\'applicazione automatica il pannello adotta il dominio trovato senza chiedere. ' +
+      'Verranno accettati solo domini verificati e con un nome riconosciuto. Continuare?')) {
+    return;
+  }
+  btn.disabled = true;
+  _feedback('domain-recovery-feedback', 'Salvataggio...');
   try {
-    const res = await fetch('/api/domain/settings');
-    if (!res.ok) return;
+    const res = await fetch('/api/domain/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        domain_auto_check_enabled: document.getElementById('domain-auto-check').checked,
+        domain_auto_apply: autoApply,
+        domain_check_interval_minutes: interval,
+      }),
+    });
+    if (res.ok) {
+      _feedback('domain-recovery-feedback', 'Salvato.', 'success');
+      showToast('Impostazioni salvate', 'success');
+    } else {
+      const d = await safeJson(res);
+      _feedback('domain-recovery-feedback', d.detail || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('domain-recovery-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function checkDomainNow() {
+  const btn = document.getElementById('domain-check-btn');
+  btn.disabled = true;
+  _feedback('domain-recovery-feedback', 'Controllo in corso...');
+  try {
+    const res = await fetch('/api/domain/check', {method: 'POST'});
+    if (!res.ok) {
+      const d = await safeJson(res);
+      _feedback('domain-recovery-feedback', d.detail || 'Controllo fallito.', 'danger');
+      return;
+    }
     const data = await safeJson(res);
-    document.getElementById('setting-max-concurrent').value = data.max_concurrent_downloads ?? 3;
-    document.getElementById('setting-max-workers').value = data.max_segment_workers ?? 16;
-    document.getElementById('setting-watch-interval').value =
-      data.series_watch_interval_minutes ?? 240;
-  } catch (e) { /* ignore */ }
+    if (data.applied) {
+      _feedback('domain-recovery-feedback', `Applicato ${data.candidate}.`, 'success');
+      await loadDomainStatus();
+    } else if (data.candidate) {
+      _feedback('domain-recovery-feedback', `Trovato ${data.candidate}: da applicare.`, 'success');
+    } else if (data.current_ok) {
+      _feedback('domain-recovery-feedback', 'Il dominio attuale risponde.', 'success');
+    } else {
+      // Rejections are shown rather than swallowed: a rebranded source and an
+      // edited page look identical from here, and only a person can tell them
+      // apart.
+      const why = (data.rejected || []).map(r => `${r.host} (${r.reason})`).join(', ');
+      _feedback('domain-recovery-feedback',
+        why ? `Nessun dominio adottabile. Scartati: ${why}` : 'Nessun dominio trovato.',
+        'danger');
+    }
+    await loadDomainCandidate();
+  } catch (e) { _feedback('domain-recovery-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
 }
 
 async function savePerfSettings() {
@@ -1905,6 +2063,9 @@ function connectGlobalStream() {
         _jobs.delete(msg.job_id);
         document.getElementById(`job-card-${msg.job_id}`)?.remove();
         updateActiveBadge();
+        break;
+      case 'domain_candidate':
+        loadDomainCandidate();
         break;
       case 'notification':
         // A bare signal: the payload lives behind /api/notifications, which is

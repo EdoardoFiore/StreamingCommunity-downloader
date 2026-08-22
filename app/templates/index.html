@@ -1807,6 +1807,31 @@
     <div class="page-body">
       <div class="container-xl">
 
+        <!-- ── Dominio sorgente cambiato ───────────────────────── -->
+        <!--
+          Static markup, toggled by JS. The buttons carry data-perm so the
+          sweep in initAuth() hides them from anyone who cannot apply the
+          change, without this file knowing who that is.
+        -->
+        <div id="domain-banner" class="alert mb-4" role="status"
+             style="display:none;border-color:#e6a23c;background:rgba(230,162,60,.12)">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="ti ti-world-search" style="font-size:18px;color:#e6a23c"></i>
+            <div class="flex-fill">
+              <strong>La sorgente ha cambiato dominio.</strong>
+              Trovato <code id="domain-banner-host"></code>, verificato dal pannello.
+            </div>
+            <button class="btn btn-sm btn-primary" data-perm="MANAGE_SETTINGS"
+                    onclick="applyDomainCandidate()" id="domain-banner-apply">
+              Applica
+            </button>
+            <button class="btn btn-sm btn-ghost-secondary" data-perm="MANAGE_SETTINGS"
+                    onclick="dismissDomainCandidate()">
+              Ignora
+            </button>
+          </div>
+        </div>
+
         <!-- ── Search ──────────────────────────────────────────── -->
         <div id="page-search">
           <div class="mb-4">
@@ -2105,6 +2130,47 @@
               Verifica e salva
             </button>
             <div id="domain-feedback" class="form-text"></div>
+          </div>
+        </div>
+
+        <!-- ── Recupero automatico del dominio ───────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Recupero automatico</p>
+          <p class="settings-section-hint">
+            Il dominio della sorgente cambia ogni poche settimane. Il pannello pu&ograve;
+            accorgersene e proporre quello nuovo, dopo averlo verificato.
+          </p>
+          <p class="settings-section-hint" style="color:#e6a23c">
+            <i class="ti ti-alert-triangle me-1"></i>
+            Il dominio viene letto da una pagina esterna che non controlliamo. Vengono presi in
+            considerazione solo domini di secondo livello con un nome riconosciuto, e solo se
+            rispondono davvero come la sorgente attesa. Con l&rsquo;applicazione automatica attiva
+            nessuno rilegge quella scelta prima che abbia effetto.
+          </p>
+
+          <label class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="domain-auto-check">
+            <span class="form-check-label">Controlla se la sorgente non risponde</span>
+          </label>
+          <label class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="domain-auto-apply">
+            <span class="form-check-label">Applica il dominio trovato senza chiedere</span>
+          </label>
+
+          <label class="form-label mt-3" for="domain-check-interval">
+            Intervallo del controllo (minuti)
+            <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(30&ndash;1440)</span>
+          </label>
+          <input type="number" id="domain-check-interval" class="form-control" min="30" max="1440">
+
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveDomainRecovery()" id="save-domain-recovery-btn">
+              Salva
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="checkDomainNow()" id="domain-check-btn">
+              <i class="ti ti-refresh me-1"></i>Controlla ora
+            </button>
+            <div id="domain-recovery-feedback" class="form-text"></div>
           </div>
         </div>
         </div>
