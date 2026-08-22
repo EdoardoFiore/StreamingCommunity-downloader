@@ -31,13 +31,18 @@
 ## Features
 
 - Search and download films, TV series, and anime
+- **Recovers the source domain on its own** when it rotates: finds the new one, verifies it,
+  and proposes it for one click
+- **Plot, genres, artwork and trailers** on the title page, from TMDB or from the source
 - Automatic quality selection (1080p → 720p → 480p → 360p)
 - Parallel HLS segment download with AES-CBC decryption
 - Multi-audio track merge via FFmpeg
 - Subtitle download (`.vtt`) for non-Italian audio tracks
 - Real-time download progress with per-phase steps (video → audio → merge)
 - Integrated file manager with drag-and-drop, video streaming and free space on the media volume
-- Jellyfin library path configuration
+- Jellyfin library path configuration, and an optional **library refresh when a download lands**
+- **Post-download webhooks** with a body template
+- **Configurable file and folder names**
 - Scheduled downloads
 - **Follow a series or anime** and get new episodes as the source publishes them
 - **Notifications to Discord, Telegram, ntfy and anything else Apprise speaks**, with per-channel
@@ -242,6 +247,8 @@ failed and why.
 | `FFMPEG_PATH` | — | full path to `ffmpeg`, when it is not on `PATH` |
 | `FFPROBE_PATH` | — | full path to `ffprobe`; see the note below |
 | `AUTH_ENABLED` | `0` | `1` enables Jellyfin login, requests and users |
+| `DOMAIN_SOURCE_URL` | a public page | where replacement domains are read from |
+| `DOMAIN_NAME_PATTERN` | `streaming(community\|unity)…` | which names may be adopted automatically |
 | `COOKIE_SECURE` | `0` | set to `1` when serving over HTTPS |
 | `COOKIE_SAMESITE` | `lax` | `none` (with `COOKIE_SECURE=1`) only to embed the panel cross-site |
 | `TRUST_PROXY_HEADERS` | `0` | set to `1` only behind a reverse proxy you control |
@@ -285,6 +292,80 @@ tiers fails with "the connection was blocked".
 for skipping even that one login. It needs a script running on the Jellyfin page, which posts the
 token to the frame. Do not put that script in the custom tab HTML: tab content is injected as a
 string, so quoting breaks the page, and `<script>` tags inserted that way never execute.
+
+---
+
+## When the source moves
+
+The source's domain changes every few weeks, and until now that simply stopped the panel: searches
+failed and nothing said why. It now notices, reads the current address from a public page, checks
+it actually serves the source, and shows a banner offering to switch.
+
+It **proposes**; you apply. That page is edited by people nobody here controls, and the domain
+decides where every search, image request and download referer goes — so adopting one because a web
+page said so, with nobody looking, is not something the panel does by default. Only second-level
+domains whose name matches the expected one are ever considered, and only if they answer like the
+source. Anything refused is reported rather than swallowed, because a genuine rebrand and an edited
+page look identical from the inside; you can always type a domain in by hand.
+
+**Impostazioni → Sorgente** has a switch for adopting the new domain without asking, off unless you
+turn it on, and a "Controlla ora" button.
+
+---
+
+## Metadata
+
+Opening a title shows its plot, genres, rating, backdrop and trailer. With a
+[TMDB](https://www.themoviedb.org/settings/api) API key in **Impostazioni → Sorgente** those come
+from TMDB in Italian; without one they come from the source itself, which is less rich but needs no
+account. Artwork is proxied through the panel either way, so the browser never talks to anybody
+else.
+
+Metadata is fetched when you open a title, never for a whole page of search results.
+
+---
+
+## When the stream will not resolve
+
+Films and series have a second route to the video. If the usual embed page is unreachable — it sits
+behind Cloudflare and sometimes refuses — the panel retries through vixsrc using the title's TMDB
+id. Failures are visible in the title's page now instead of leaving you with a download button that
+looks fine and a job that fails minutes later.
+
+AnimeUnity has no second route: no TMDB id, different host.
+
+---
+
+## After a download
+
+**Impostazioni → Hook** can tell something else that a file has landed.
+
+- **Jellyfin**: one switch, using the server already configured for login. The library updates
+  immediately instead of on Jellyfin's own schedule.
+- **Webhook**: a URL, a method and an optional body, where `{title}`, `{path}`, `{status}`,
+  `{type}`, `{season}`, `{episode}`, `{year}` and `{error}` are substituted. With no body a JSON
+  object carrying all of them is sent.
+
+There is no "run a command" hook, deliberately: on a panel running without login, settings are open
+to every visitor, and a command would hand them a shell. A webhook can point at your own network —
+that is how it reaches Jellyfin — so the panel reports only whether the call succeeded, never what
+came back.
+
+---
+
+## Naming
+
+**Impostazioni → Librerie** sets how files and folders are named, per type. The defaults are the
+layout below.
+
+Placeholders: `{title}`, `{year}`, `{season}`, `{season2}`, `{episode}`, `{episode2}` — the `2`
+variants are zero-padded. Anything in square brackets appears only if the placeholders inside it
+have a value, so `[ ({year})]` disappears entirely for a title with no year. Each field previews
+itself as you type.
+
+Changing a rule does not rename what is already there. Existing files keep being recognised, so
+nothing is downloaded twice; they simply keep their old names until you rename them in the file
+manager.
 
 ---
 
