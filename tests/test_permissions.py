@@ -36,6 +36,8 @@ CASES = [
     ((Permission.REQUEST, Permission.DOWNLOAD), "GET",
      "/api/search?q=abc&domain=example.test", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/domain/settings", None),
+    ((Permission.MANAGE_SETTINGS,), "GET", "/api/metadata/settings", None),
+    ((Permission.REQUEST, Permission.DOWNLOAD), "GET", "/api/metadata/tv/1", None),
     ((Permission.MANAGE_SETTINGS,), "POST", "/api/domain/check", None),
     ((Permission.MANAGE_SETTINGS,), "POST", "/api/domain/candidate/apply",
      {"domain": "example.test"}),

@@ -31,6 +31,11 @@ SETTING_DEFAULT_PERMISSIONS = "default_permissions"
 # Reverting "jellyfin" -> "open" is intentionally not supported.
 SETTING_AUTH_MODE = "auth_mode"
 
+# TMDB API key, optional. Here rather than in data.json because it is a
+# credential, and data.json holds the settings a file manager and a library
+# picker write. No migration needed: jf_setting is key/value already.
+SETTING_TMDB_API_KEY = "tmdb_api_key"
+
 _SETTING_DEFAULTS = {
     SETTING_ALLOW_NEW_LOGIN: "0",  # off by default: users are imported explicitly
     SETTING_DEFAULT_PERMISSIONS: str(int(perms.DEFAULT_PERMISSIONS)),

@@ -25,6 +25,7 @@ from app.schedule import ScheduleStore
 from app.config import AUTH_ENABLED, SCHEDULE_FILE
 from app.routers import (
     domain, search, tv, downloads, progress, files, images, anime, notification_channels,
+    metadata as metadata_router,
 )
 
 logging.basicConfig(
@@ -129,6 +130,7 @@ app.include_router(users_router.router)
 app.include_router(requests_router.router)
 app.include_router(requests_router.notifications_router)
 app.include_router(domain.router)
+app.include_router(metadata_router.router)
 app.include_router(notification_channels.router)
 app.include_router(watches_router.router)
 app.include_router(search.router)
