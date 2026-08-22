@@ -272,3 +272,62 @@ def test_the_movie_url_has_no_season(monkeypatch, playlists):
     assert asked == ["https://vixsrc.to/movie/1396"]
     assert source.provider == "vixsrc"
     assert "token=abc123" in source.m3u8_url
+
+
+# ── Wiring ────────────────────────────────────────────────────────────────────
+
+def test_the_anime_path_has_no_fallback_to_offer():
+    """An anime here has no TMDB id and its embed lives elsewhere.
+
+    Pinned as a signature check: quietly adding the parameter for symmetry would
+    give AnimeUnity a fallback that cannot work.
+    """
+    import inspect
+
+    from app.jobs import job_manager
+
+    assert "tmdb_id" not in inspect.signature(job_manager.submit_anime_episode).parameters
+    assert "tmdb_id" in inspect.signature(job_manager.submit_film).parameters
+    assert "tmdb_id" in inspect.signature(job_manager.submit_episode).parameters
+
+
+def test_a_film_falls_back_when_the_embed_is_blocked(monkeypatch, tmp_path):
+    from app.core import film
+
+    monkeypatch.setattr(
+        film, "_get_iframe",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("403 Cloudflare")),
+    )
+    # Patched on _shared, not on film: resolve_stream lives there and calls
+    # fetch_vixsrc as its own module global.
+    monkeypatch.setattr(
+        _shared, "fetch_vixsrc",
+        lambda *a, **k: _shared.StreamSource("https://v/p.m3u8", "aa" * 16, "r", "vixsrc"),
+    )
+    monkeypatch.setattr(film, "_collect_audio_tracks", lambda *a, **k: [])
+    monkeypatch.setattr(film, "_collect_subtitle_tracks", lambda *a, **k: [])
+
+    used = {}
+
+    def fake_download(**kwargs):
+        used.update(kwargs)
+        return kwargs["output_filename"]
+
+    monkeypatch.setattr(film, "download_m3u8", fake_download)
+
+    film.download_film(1, "Test", "example.test", output_dir=str(tmp_path), tmdb_id=1396)
+
+    assert used["m3u8_index"] == "https://v/p.m3u8"
+    assert used["key"] == "aa" * 16
+
+
+def test_a_film_without_a_tmdb_id_still_reports_the_real_error(monkeypatch, tmp_path):
+    from app.core import film
+
+    monkeypatch.setattr(
+        film, "_get_iframe",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("403 Cloudflare")),
+    )
+
+    with pytest.raises(RuntimeError, match="403 Cloudflare"):
+        film.download_film(1, "Test", "example.test", output_dir=str(tmp_path))

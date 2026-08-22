@@ -270,6 +270,7 @@ class JobManager:
                 year=params.get("year"), cancel_event=job.cancel_event,
                 audio_languages=params.get("audio_languages", ["ita"]),
                 subtitle_languages=params.get("subtitle_languages", ["ita", "eng"]),
+                tmdb_id=params.get("tmdb_id"),
             )
         if type_ == "episode":
             from app.core.tv import download_episode
@@ -281,6 +282,7 @@ class JobManager:
                 cancel_event=job.cancel_event, year=params.get("year"),
                 audio_languages=params.get("audio_languages", ["ita"]),
                 subtitle_languages=params.get("subtitle_languages", ["ita", "eng"]),
+                tmdb_id=params.get("tmdb_id"),
             )
         if type_ == "anime":
             from app.core.animeunity import download_anime_episode
@@ -411,7 +413,8 @@ class JobManager:
                     audio_languages: list[str] = None,
                     subtitle_languages: list[str] = None,
                     strict_audio: bool = False,
-                    user_id: int = None) -> str:
+                    user_id: int = None,
+                    tmdb_id: int = None) -> str:
         from app.core.film import download_film
 
         job = self._make_job(title, "film", schedule_id=schedule_id,
@@ -428,6 +431,7 @@ class JobManager:
             audio_languages=audio_languages or ["ita"],
             subtitle_languages=subtitle_languages or ["ita", "eng"],
             strict_audio=strict_audio,
+            tmdb_id=tmdb_id,
         )
 
     def submit_episode(self, tv_id: int, eps: list[dict], ep_index: int, domain: str,
@@ -437,7 +441,8 @@ class JobManager:
                        subtitle_languages: list[str] = None,
                        strict_audio: bool = False,
                        user_id: int = None, batch_id: str = None,
-                       batch_kind: str = None, batch_label: str = None) -> str:
+                       batch_kind: str = None, batch_label: str = None,
+                       tmdb_id: int = None) -> str:
         from app.core.tv import download_episode, fmt_ep
 
         ep = eps[ep_index]
@@ -458,8 +463,12 @@ class JobManager:
             audio_languages=audio_languages or ["ita"],
             subtitle_languages=subtitle_languages or ["ita", "eng"],
             strict_audio=strict_audio,
+            tmdb_id=tmdb_id,
         )
 
+    # AnimeUnity deliberately gains no tmdb_id: an anime here has no TMDB
+    # identifier, and its embed lives on a different host, so the vixsrc
+    # fallback has nothing to resolve against.
     def submit_anime_episode(self, anime_id: str, episode: dict, anime_name: str,
                              anime_type: str = "tv", year: str = None,
                              schedule_id: str = None,
@@ -496,11 +505,15 @@ class JobManager:
                       scheduled_at: datetime, year: str = None,
                       audio_languages: list[str] = None,
                       subtitle_languages: list[str] = None,
-                      user_id: int = None) -> str:
+                      user_id: int = None,
+                      tmdb_id: int = None) -> str:
         params = {
             "id": id_film, "title": title, "domain": domain, "year": year,
             "audio_languages": audio_languages or ["ita"],
             "subtitle_languages": subtitle_languages or ["ita", "eng"],
+            # Persisted with the schedule: the cache it came from will not
+            # survive until the job fires.
+            "tmdb_id": tmdb_id,
         }
         return self._add_schedule("film", scheduled_at, params, title,
                                   user_id=user_id, media_label=title, year=year)
@@ -511,7 +524,8 @@ class JobManager:
                          audio_languages: list[str] = None,
                          subtitle_languages: list[str] = None,
                          user_id: int = None, batch_id: str = None,
-                         batch_kind: str = None, batch_label: str = None) -> str:
+                         batch_kind: str = None, batch_label: str = None,
+                         tmdb_id: int = None) -> str:
         from app.core.tv import fmt_ep
         ep = eps[ep_index]
         title = f"{tv_name} S{season:02d}E{fmt_ep(ep['n'])}"
@@ -521,6 +535,7 @@ class JobManager:
             "season": season, "year": year,
             "audio_languages": audio_languages or ["ita"],
             "subtitle_languages": subtitle_languages or ["ita", "eng"],
+            "tmdb_id": tmdb_id,
         }
         return self._add_schedule("episode", scheduled_at, params, title,
                                   user_id=user_id, batch_id=batch_id, batch_kind=batch_kind,

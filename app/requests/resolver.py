@@ -148,6 +148,25 @@ class Resolution:
     submit: Callable[[], str]
 
 
+def _tmdb_id_for(request, media_type: str) -> int | None:
+    """The title's TMDB id, for the stream fallback. Best effort.
+
+    Approval is already doing network work, so one more lookup is affordable
+    here in a way it is not on the direct download path. It must never be the
+    reason an approval fails: without an id there is simply no fallback, which
+    is the behaviour there has always been.
+    """
+    from app.core import metadata
+
+    try:
+        return metadata.title_metadata(
+            media_type, request.external_id, request.slug or "", ""
+        ).get("tmdb_id")
+    except Exception:
+        logger.info("No tmdb_id for request %s; the fallback will be unavailable", request.id)
+        return None
+
+
 def _widen_to_everyone(common: dict, request: models.Request, available: dict):
     """Download what everyone asked for, not only what this request asked for.
 
@@ -309,10 +328,12 @@ def resolve(request: models.Request) -> Resolution:
             available = get_film_languages(int(request.external_id), domain)
             _check_audio(request, available)
             _widen_to_everyone(common, request, available)
+            tmdb_id = _tmdb_id_for(request, "movie")
 
             def submit():
                 return job_manager.submit_film(
-                    int(request.external_id), request.title, domain, **common
+                    int(request.external_id), request.title, domain,
+                    tmdb_id=tmdb_id, **common
                 )
 
             return Resolution(available=available, submit=submit)
@@ -330,10 +351,12 @@ def resolve(request: models.Request) -> Resolution:
         _check_audio(request, available)
         _widen_to_everyone(common, request, available)
 
+        tmdb_id = _tmdb_id_for(request, "tv")
+
         def submit():
             return job_manager.submit_episode(
                 int(request.external_id), episodes, index, domain, token,
-                request.title, request.season or 1, **common,
+                request.title, request.season or 1, tmdb_id=tmdb_id, **common,
             )
 
         return Resolution(available=available, submit=submit)

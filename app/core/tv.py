@@ -9,6 +9,8 @@ from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
 from app.core._shared import (
     MissingAudioTrackError,
+    StreamSource,
+    resolve_stream,
     _fetch_vixcloud_embed,
     _parse_content,
     _get_m3u8_key,
@@ -172,6 +174,7 @@ def download_episode(
     audio_languages: list[str] = None,
     subtitle_languages: list[str] = None,
     strict_audio: bool = False,
+    tmdb_id: int = None,
 ) -> str:
     audio_languages = audio_languages or ["ita"]
     subtitle_languages = subtitle_languages or []
@@ -179,18 +182,31 @@ def download_episode(
     ep = eps[ep_index]
     logger.info(f"Downloading S{season:02d}E{fmt_ep(ep['n'])} — {ep['name']}")
 
-    embed_content, url_embed = _get_iframe(tv_id, ep["id"], domain, token)
-    json_win_video, json_win_param = _parse_content(embed_content, url_embed)
-    logger.info("Video ID: %s token: %.8s... audio lang: %s", json_win_video['id'], json_win_param.get('token', ''), json_win_video.get('lang', 'it'))
+    def _primary() -> StreamSource:
+        embed_content, url_embed = _get_iframe(tv_id, ep["id"], domain, token)
+        json_win_video, json_win_param = _parse_content(embed_content, url_embed)
+        logger.info("Video ID: %s token: %.8s... audio lang: %s", json_win_video['id'], json_win_param.get('token', ''), json_win_video.get('lang', 'it'))
 
-    embed_referer = (
-        f"https://vixcloud.co/embed/{json_win_video['id']}"
-        f"?token={json_win_param['token']}&title={quote(tv_name)}"
-        f"&referer=1&expires={json_win_param['expires']}"
-        f"&description=S{season}%3AE{ep['n']}+{quote(ep['name'])}&nextEpisode=1"
+        embed_referer = (
+            f"https://vixcloud.co/embed/{json_win_video['id']}"
+            f"?token={json_win_param['token']}&title={quote(tv_name)}"
+            f"&referer=1&expires={json_win_param['expires']}"
+            f"&description=S{season}%3AE{ep['n']}+{quote(ep['name'])}&nextEpisode=1"
+        )
+        return StreamSource(
+            m3u8_url=_get_m3u8_url(json_win_video, json_win_param),
+            key_hex=_get_m3u8_key(json_win_video, json_win_param, embed_referer),
+            referer=embed_referer,
+            provider="vixcloud",
+        )
+
+    stream = resolve_stream(
+        _primary, tmdb_id=tmdb_id, media_type="tv", season=season, episode=ep["n"],
     )
-    m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
-    m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_referer)
+    m3u8_url, m3u8_key, embed_referer = stream.m3u8_url, stream.key_hex, stream.referer
+    if stream.provider != "vixcloud":
+        logger.info("Resolved S%02dE%s through the %s fallback",
+                    season, fmt_ep(ep["n"]), stream.provider)
 
     audio_track_urls = _collect_audio_tracks(
         m3u8_url, embed_referer, audio_languages, strict=strict_audio
