@@ -1845,12 +1845,13 @@
               <i class="ti ti-trash me-1"></i>Rimuovi completati
             </button>
           </div>
-          <div id="jobs-container">
-            <div id="jobs-empty" class="text-center py-6">
-              <i class="ti ti-download d-block mb-2" style="font-size:2.5rem;opacity:.2"></i>
-              <span style="font-size:13px;opacity:.5">Nessun download in corso</span>
-            </div>
+          <!-- Sibling of the container, never inside it: rendering the job list
+               clears the container, and a node living in there would be gone. -->
+          <div id="jobs-empty" class="text-center py-6">
+            <i class="ti ti-download d-block mb-2" style="font-size:2.5rem;opacity:.2"></i>
+            <span style="font-size:13px;opacity:.5">Nessun download in corso</span>
           </div>
+          <div id="jobs-container"></div>
         </div>
 
         <!-- ── Files ───────────────────────────────────────────── -->

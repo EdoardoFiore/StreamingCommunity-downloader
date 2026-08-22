@@ -2070,7 +2070,7 @@ function renderAllJobCards() {
   const container = document.getElementById('jobs-container');
   const empty = document.getElementById('jobs-empty');
   if (!_jobs.size) {
-    empty.style.display=''; container.innerHTML=''; container.appendChild(empty);
+    empty.style.display=''; container.innerHTML='';
     return;
   }
   // Sort: active first, then by created_at desc
@@ -2318,7 +2318,6 @@ async function clearFinished() {
     const empty = document.getElementById('jobs-empty');
     empty.style.display='';
     container.innerHTML='';
-    container.appendChild(empty);
   }
   updateActiveBadge();
 }
