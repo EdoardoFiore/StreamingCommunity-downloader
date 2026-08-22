@@ -35,9 +35,9 @@ def get_title_props(id_film: int, title_name: str, site_version: str, domain: st
     """The full ``props.title`` payload of a title page.
 
     This request was already being made to read one integer out of it, throwing
-    away the plot, the genres, the images, the trailers and — the one that
-    matters most — ``tmdb_id``, which is what lets the panel show real metadata
-    and gives the vixsrc fallback something to resolve against.
+    away the plot, the genres, the images, the trailers and ``tmdb_id``, which
+    is what lets the panel show real metadata and is the identifier any
+    fallback stream provider would resolve against.
 
     The same route serves films, despite living in tv.py: the site has one title
     page, and splitting this in two would mean two copies of the Inertia header

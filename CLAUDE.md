@@ -55,8 +55,8 @@ request before any route runs.
 - `m3u8.py` — `M3U8_Parser`, `M3U8_Segments`, `M3U8_Downloader`, `Decryption`, `download_m3u8()`
 - `paths.py` — destination paths (`film_path`, `episode_path`, `anime_path`). The request system's library check goes through these, so a change here changes both. Names come from `naming.py`; the optional `templates=` argument is what lets the library check ask for the *legacy* layout.
 - `headers.py` — user-agent rotation, `sanitize_filename`
-- `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`, and the vixsrc
-  fallback (`resolve_stream`, `fetch_vixsrc`, `fetch_key_from_playlist`)
+- `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`, and stream
+  resolution (`resolve_stream`, `fetch_key_from_playlist`, `_FALLBACK_PROVIDERS`)
 
 **`app/auth/`** — Jellyfin SSO, permissions, users
 - `jellyfin.py` — HTTP client (MediaBrowser header, stable DeviceId, X-Forwarded-For with retry)
@@ -169,11 +169,17 @@ anything under a mounted static directory is readable by unauthenticated visitor
   whether a stream fallback is possible; a download that is about to succeed must not pay a round
   trip to find that out. The cache key includes whether a TMDB key is configured, or adding one
   keeps serving the keyless answer for six hours.
-- **The vixsrc fallback runs only after the primary has already failed**, and when there is no
-  `tmdb_id` the *original* exception is re-raised — a user told "missing tmdb id" when the real
-  failure was Cloudflare has been sent to debug the wrong thing. AnimeUnity is excluded on purpose:
-  no TMDB id, different embed host. Its AES key is read from the playlist with an allowlisted host,
-  never assumed; guessing wrong produces correctly-downloaded garbage instead of an error.
+- **When stream resolution has nothing to fall back to, the primary error must survive.**
+  `_FALLBACK_PROVIDERS` is empty: a second road through vixsrc was built and removed, because that
+  site is now a client-rendered app whose HTML carries no playlist, token or `.m3u8` at all — the
+  data would have to come from reverse-engineered internal calls that break silently on any of
+  their deploys. `resolve_stream()` is the seam a replacement plugs into, and the resolution
+  context (`tmdb_id`, media type, season, episode) is already threaded from every caller.
+  A user told "no alternative source" when the real failure was Cloudflare has been sent to debug
+  the wrong thing, so the original exception is re-raised unchanged. AnimeUnity is excluded from
+  all of it on purpose: no TMDB id, different embed host. `fetch_key_from_playlist()` exists so a
+  new provider does not have to solve the key again — it is read from the playlist with an
+  allowlisted host, never assumed.
 - **Download hooks are HTTP-only, and blind.** There is no shell hook and there must not be one:
   open mode grants `MANAGE_SETTINGS` to every anonymous visitor, so a command would be RCE for
   anyone who can reach the panel. A webhook pointing at a private address is the *point* (that is

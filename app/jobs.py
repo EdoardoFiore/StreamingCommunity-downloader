@@ -467,8 +467,8 @@ class JobManager:
         )
 
     # AnimeUnity deliberately gains no tmdb_id: an anime here has no TMDB
-    # identifier, and its embed lives on a different host, so the vixsrc
-    # fallback has nothing to resolve against.
+    # identifier and its embed lives on a different host, so a fallback
+    # provider would have nothing to resolve against.
     def submit_anime_episode(self, anime_id: str, episode: dict, anime_name: str,
                              anime_type: str = "tv", year: str = None,
                              schedule_id: str = None,

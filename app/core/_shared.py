@@ -129,23 +129,35 @@ def _get_m3u8_url(json_win_video, json_win_param, add_b1=False):
     return url
 
 
-# ── Alternative stream resolution ─────────────────────────────────────────────
+# ── Stream resolution ─────────────────────────────────────────────────────────
 #
-# The panel had one road to a playlist: the source's iframe, then the vixcloud
-# embed page. When Cloudflare answers that page with a challenge the scraper
-# cannot clear, or the page changes shape, every download of every title stops
-# and there is nothing to fall back on.
+# There is one road to a playlist: the source's iframe, then the vixcloud embed
+# page. When Cloudflare answers that page with a challenge the scraper cannot
+# clear, every download of that title stops.
 #
-# vixsrc.to serves the same streams keyed by TMDB id, which the title page hands
-# us for free. It is a second road, not a replacement: the primary is tried
-# first and unchanged, and this runs only when it has already failed.
-
-VIXSRC_HOST = "vixsrc.to"
+# A second road was built through vixsrc.to, which serves the same streams keyed
+# by TMDB id — an id the title page hands us for free. It was removed again
+# after testing: vixsrc is now a client-rendered Next.js app whose HTML carries
+# no playlist, no token and no .m3u8 at all, so the data would have to come from
+# reverse-engineered internal calls that break silently on any of their deploys.
+#
+# What is left is the seam. resolve_stream() is where a fallback plugs in, the
+# resolution context (tmdb_id, media type, season, episode) is already threaded
+# from every caller, and fetch_key_from_playlist() can read a key from a
+# playlist that does not put it where vixcloud does. Adding a provider means
+# writing one function and listing it below.
 
 # Hosts a playlist may name as the source of its AES key. The playlist is
-# published by the stream page, so an unconstrained URI here would have the
-# panel fetching whatever that page asked it to.
-_KEY_HOSTS = ("vixcloud.co", "vixsrc.to")
+# published by the stream page, so an unconstrained URI would have the panel
+# fetching whatever that page asked it to.
+_KEY_HOSTS = ("vixcloud.co",)
+
+# Fallback providers, tried in order when the primary fails. Each takes
+# (tmdb_id, media_type, season, episode) and returns a StreamSource.
+#
+# Empty: with none registered, resolve_stream() re-raises the primary failure
+# unchanged, which is exactly the behaviour the panel had before any of this.
+_FALLBACK_PROVIDERS: tuple = ()
 
 
 @dataclass
@@ -155,14 +167,14 @@ class StreamSource:
     m3u8_url: str
     key_hex: str | None
     referer: str
-    provider: str  # "vixcloud" | "vixsrc"
+    provider: str
 
 
 class StreamResolutionError(RuntimeError):
-    """Both roads to a playlist failed.
+    """Every road to a playlist failed.
 
     Carries each failure separately, because they say different things: the
-    primary one is what usually needs fixing, and the fallback's is what says
+    primary one is what usually needs fixing, and a fallback's is what says
     whether there was ever a second chance. The message is one Italian sentence
     because it lands on job.error, on the notification bell and in a webhook.
     """
@@ -174,71 +186,6 @@ class StreamResolutionError(RuntimeError):
         if fallback is not None:
             detail += f"; sorgente alternativa: {fallback}"
         super().__init__(f"Impossibile risolvere lo stream ({detail})")
-
-
-def parse_vixsrc_page(html: str, page_url: str) -> tuple[str, dict, bool]:
-    """Playlist URL, its query parameters, and whether 1080p is on offer."""
-    url_match = re.search(
-        r"window\.masterPlaylist\s*=\s*\{[\s\S]*?url\s*:\s*['\"]([^'\"]+)['\"]", html
-    )
-    if not url_match:
-        raise RuntimeError(f"Nessuna playlist in {page_url}")
-
-    params_match = re.search(
-        r"window\.masterPlaylist[^:]*?params\s*:\s*\{([^}]*)\}", html, re.DOTALL
-    )
-    if not params_match:
-        raise RuntimeError(f"Nessun token di playlist in {page_url}")
-
-    # Same tolerant normalisation the vixcloud embed needs: this is JavaScript
-    # object syntax, not JSON — single quotes and a trailing comma.
-    raw = "{" + params_match.group(1).replace("\n", "").replace(" ", "") + "}"
-    params = json.loads(raw.replace(",}", "}").replace("'", '"'))
-
-    can_play_fhd = bool(
-        re.search(r"window\.canPlayFHD\s*=\s*true", html)
-    )
-    return url_match.group(1), params, can_play_fhd
-
-
-def build_vixsrc_playlist_url(url: str, params: dict, can_play_fhd: bool) -> str:
-    """Attach the token to the playlist URL.
-
-    The separator is computed rather than assumed: the URL on the page may
-    already carry a query, and a second '?' produces a link the CDN rejects.
-    """
-    separator = "&" if urlparse(url).query else "?"
-    full = f"{url}{separator}expires={params['expires']}&token={params['token']}"
-    if can_play_fhd:
-        full += "&h=1"
-    return full
-
-
-def fetch_vixsrc(tmdb_id: int, media_type: str, season=None, episode=None) -> StreamSource:
-    """Resolve a playlist from vixsrc.to using the title's TMDB id."""
-    if media_type == "movie":
-        page_url = f"https://{VIXSRC_HOST}/movie/{tmdb_id}"
-    else:
-        if season is None or episode is None:
-            raise RuntimeError("Stagione o episodio mancanti per la sorgente alternativa")
-        page_url = f"https://{VIXSRC_HOST}/tv/{tmdb_id}/{season}/{episode}"
-
-    # Through the shared cloudscraper session: vixsrc sits behind Cloudflare in
-    # the same way vixcloud does.
-    response = _get_scraper().get(
-        page_url, headers={"user-agent": get_headers()}, timeout=15
-    )
-    response.raise_for_status()
-
-    url, params, can_play_fhd = parse_vixsrc_page(response.text, page_url)
-    playlist_url = build_vixsrc_playlist_url(url, params, can_play_fhd)
-    referer = f"https://{VIXSRC_HOST}/"
-    return StreamSource(
-        m3u8_url=playlist_url,
-        key_hex=fetch_key_from_playlist(playlist_url, referer),
-        referer=referer,
-        provider="vixsrc",
-    )
 
 
 def _key_uri_from(text: str) -> tuple[str | None, str | None]:
@@ -257,9 +204,11 @@ def fetch_key_from_playlist(master_url: str, referer: str) -> str | None:
     """The AES key a playlist names, or None when it is not encrypted.
 
     Read rather than assumed. The vixcloud path can hardcode
-    ``vixcloud.co/storage/enc.key`` because that is where it has always been;
-    a different provider has no obligation to agree, and guessing produces a
-    file full of correctly-downloaded garbage rather than an error.
+    ``vixcloud.co/storage/enc.key`` because that is where it has always been; a
+    different provider has no obligation to agree, and guessing produces a file
+    full of correctly-downloaded garbage rather than an error. Unused while no
+    fallback is registered, and the reason a new one would not have to solve
+    this again.
     """
     from app.core.m3u8 import _fetch_text_with_b1_fallback
 
@@ -299,23 +248,27 @@ def fetch_key_from_playlist(master_url: str, referer: str) -> str | None:
 
 def resolve_stream(primary, *, tmdb_id=None, media_type="movie",
                    season=None, episode=None) -> StreamSource:
-    """Try the source's own embed, then vixsrc.
+    """Resolve a playlist: the source's own embed, then any fallback provider.
 
     ``primary`` is a callable returning a StreamSource. When it fails and there
-    is no tmdb_id, the *original* exception is re-raised rather than a complaint
-    about the missing id: the caller needs to know Cloudflare blocked them, not
-    that a second road they never had was unavailable.
+    is nothing else to try — no provider registered, or no tmdb_id to try one
+    with — the *original* exception is re-raised rather than a complaint about
+    the missing alternative: the caller needs to know Cloudflare blocked them,
+    not that a second road they never had was unavailable.
     """
     try:
         return primary()
     except Exception as primary_error:
-        if not tmdb_id:
-            logger.info("No tmdb_id available, no fallback to try: %s", primary_error)
+        if not _FALLBACK_PROVIDERS or not tmdb_id:
             raise
 
-        logger.warning("Primary stream resolution failed (%s), trying vixsrc", primary_error)
-        try:
-            return fetch_vixsrc(int(tmdb_id), media_type, season, episode)
-        except Exception as fallback_error:
-            logger.warning("vixsrc fallback failed too: %s", fallback_error)
-            raise StreamResolutionError(primary_error, fallback_error) from primary_error
+        logger.warning("Primary stream resolution failed (%s), trying %d fallback(s)",
+                       primary_error, len(_FALLBACK_PROVIDERS))
+        last_error: Exception | None = None
+        for provider in _FALLBACK_PROVIDERS:
+            try:
+                return provider(int(tmdb_id), media_type, season, episode)
+            except Exception as exc:
+                logger.warning("Fallback %s failed: %s", getattr(provider, "__name__", provider), exc)
+                last_error = exc
+        raise StreamResolutionError(primary_error, last_error) from primary_error

@@ -327,12 +327,16 @@ Metadata is fetched when you open a title, never for a whole page of search resu
 
 ## When the stream will not resolve
 
-Films and series have a second route to the video. If the usual embed page is unreachable — it sits
-behind Cloudflare and sometimes refuses — the panel retries through vixsrc using the title's TMDB
-id. Failures are visible in the title's page now instead of leaving you with a download button that
-looks fine and a job that fails minutes later.
+The video is resolved through the source's embed page, which sits behind
+Cloudflare and occasionally refuses. When that happens the title's page now says
+so, instead of leaving you with a download button that looks fine and a job that
+fails minutes later.
 
-AnimeUnity has no second route: no TMDB id, different host.
+A second route through another provider was built and then removed: the service
+it relied on no longer publishes anything usable without reverse-engineering its
+internals, which would break silently every time they deploy. The seam it plugged
+into is still there, so adding one later is a small change rather than a new
+feature.
 
 ---
 

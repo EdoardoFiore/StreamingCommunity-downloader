@@ -1,37 +1,19 @@
-"""The second road to a playlist.
+"""Stream resolution: the seam where a fallback provider would plug in.
 
-The panel had one: the source's iframe, then the vixcloud embed page. When
-Cloudflare answers that page with a challenge the scraper cannot clear, every
-download of every title stops. vixsrc.to serves the same streams keyed by TMDB
-id, so a title whose id we already know has somewhere else to go.
+A second road through vixsrc.to was built and then removed — that site is now a
+client-rendered app whose HTML carries no playlist at all. What survives is the
+shape a future provider would use, and these tests pin the parts that are easy
+to get wrong when one is added.
 
-Two behaviours here matter more than the parsing:
-
-The fallback is only ever tried after the primary has failed, so a working
-download never changes shape.
-
-Without a tmdb_id the *original* error is re-raised. A user told "missing tmdb
-id" when what actually happened was a Cloudflare block has been sent to debug
-the wrong thing.
+The load-bearing behaviour: with nothing to fall back to, the *original*
+exception must survive. A user told "no alternative source" when what actually
+happened was a Cloudflare block has been sent to debug the wrong thing.
 """
 
 import pytest
 
 from app.core import _shared
 
-
-PAGE = """
-<html><body><script>
-  window.canPlayFHD = true;
-  window.masterPlaylist = {
-    params: {
-      'token': 'abc123',
-      'expires': '1799999999',
-    },
-    url: 'https://vixcloud.co/playlist/55555',
-  }
-</script></body></html>
-"""
 
 MASTER = """#EXTM3U
 #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
@@ -68,54 +50,6 @@ class _Response:
     def raise_for_status(self):
         if not self.ok:
             raise RuntimeError(f"HTTP {self.status_code}")
-
-
-# ── Parsing ───────────────────────────────────────────────────────────────────
-
-def test_the_playlist_and_its_token_are_read_from_the_page():
-    url, params, fhd = _shared.parse_vixsrc_page(PAGE, "https://vixsrc.to/movie/1")
-    assert url == "https://vixcloud.co/playlist/55555"
-    assert params == {"token": "abc123", "expires": "1799999999"}
-    assert fhd is True
-
-
-def test_a_page_without_a_playlist_is_an_error():
-    with pytest.raises(RuntimeError, match="Nessuna playlist"):
-        _shared.parse_vixsrc_page("<html></html>", "https://vixsrc.to/movie/1")
-
-
-def test_a_page_without_a_token_is_an_error():
-    html = "<script>window.masterPlaylist = { url: 'https://x/playlist/1' }</script>"
-    with pytest.raises(RuntimeError, match="Nessun token"):
-        _shared.parse_vixsrc_page(html, "https://vixsrc.to/movie/1")
-
-
-def test_fhd_is_off_when_the_page_says_so():
-    _, _, fhd = _shared.parse_vixsrc_page(
-        PAGE.replace("canPlayFHD = true", "canPlayFHD = false"), "x"
-    )
-    assert fhd is False
-
-
-# ── URL building ──────────────────────────────────────────────────────────────
-
-PARAMS = {"token": "abc123", "expires": "1799999999"}
-
-
-def test_a_clean_url_gets_a_question_mark():
-    url = _shared.build_vixsrc_playlist_url("https://h/playlist/1", PARAMS, False)
-    assert url == "https://h/playlist/1?expires=1799999999&token=abc123"
-
-
-def test_a_url_that_already_has_a_query_gets_an_ampersand():
-    """A second '?' produces a link the CDN rejects."""
-    url = _shared.build_vixsrc_playlist_url("https://h/playlist/1?lang=it", PARAMS, False)
-    assert url == "https://h/playlist/1?lang=it&expires=1799999999&token=abc123"
-    assert url.count("?") == 1
-
-
-def test_fhd_adds_the_height_flag():
-    assert _shared.build_vixsrc_playlist_url("https://h/p/1", PARAMS, True).endswith("&h=1")
 
 
 # ── The AES key, read rather than assumed ─────────────────────────────────────
@@ -194,25 +128,41 @@ def test_a_working_primary_is_never_second_guessed(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("the fallback ran despite a working primary")
 
-    monkeypatch.setattr(_shared, "fetch_vixsrc", boom)
+    monkeypatch.setattr(_shared, "_FALLBACK_PROVIDERS", (boom,))
 
     assert _shared.resolve_stream(_source, tmdb_id=1396).provider == "vixcloud"
 
 
-def test_the_fallback_runs_when_the_primary_fails(monkeypatch):
+def test_a_registered_provider_runs_when_the_primary_fails(monkeypatch):
     monkeypatch.setattr(
-        _shared, "fetch_vixsrc",
-        lambda *a, **k: _shared.StreamSource("https://v/p.m3u8", None, "r", "vixsrc"),
+        _shared, "_FALLBACK_PROVIDERS",
+        (lambda *a: _shared.StreamSource("https://v/p.m3u8", None, "r", "other"),),
     )
 
     def failing():
         raise RuntimeError("403 Cloudflare")
 
-    assert _shared.resolve_stream(failing, tmdb_id=1396).provider == "vixsrc"
+    assert _shared.resolve_stream(failing, tmdb_id=1396).provider == "other"
+
+
+def test_with_no_provider_registered_the_primary_error_survives():
+    """The shipped state: nothing is registered, so this is what users see."""
+    assert _shared._FALLBACK_PROVIDERS == ()
+
+    def failing():
+        raise RuntimeError("403 Cloudflare")
+
+    with pytest.raises(RuntimeError, match="403 Cloudflare"):
+        _shared.resolve_stream(failing, tmdb_id=1396)
 
 
 def test_without_a_tmdb_id_the_original_error_survives(monkeypatch):
     """Reporting a missing id sends the user to debug something that is not wrong."""
+    monkeypatch.setattr(
+        _shared, "_FALLBACK_PROVIDERS",
+        (lambda *a: _shared.StreamSource("https://v/p.m3u8", None, "r", "other"),),
+    )
+
     def failing():
         raise RuntimeError("403 Cloudflare")
 
@@ -222,9 +172,9 @@ def test_without_a_tmdb_id_the_original_error_survives(monkeypatch):
 
 def test_both_failures_are_reported_together(monkeypatch):
     def boom(*a, **k):
-        raise RuntimeError("vixsrc 404")
+        raise RuntimeError("provider 404")
 
-    monkeypatch.setattr(_shared, "fetch_vixsrc", boom)
+    monkeypatch.setattr(_shared, "_FALLBACK_PROVIDERS", (boom,))
 
     def failing():
         raise RuntimeError("403 Cloudflare")
@@ -234,44 +184,7 @@ def test_both_failures_are_reported_together(monkeypatch):
 
     message = str(excinfo.value)
     assert "403 Cloudflare" in message
-    assert "vixsrc 404" in message
-
-
-def test_an_episode_needs_a_season_and_an_episode(monkeypatch):
-    monkeypatch.setattr(_shared, "_get_scraper", lambda: pytest.fail("should not fetch"))
-
-    with pytest.raises(RuntimeError, match="Stagione o episodio"):
-        _shared.fetch_vixsrc(1396, "tv")
-
-
-def test_the_episode_url_carries_season_and_episode(monkeypatch, playlists):
-    asked = []
-
-    class _Scraper:
-        def get(self, url, *args, **kwargs):
-            asked.append(url)
-            return _Response(PAGE)
-
-    monkeypatch.setattr(_shared, "_get_scraper", lambda: _Scraper())
-
-    _shared.fetch_vixsrc(1396, "tv", season=2, episode=5)
-    assert asked == ["https://vixsrc.to/tv/1396/2/5"]
-
-
-def test_the_movie_url_has_no_season(monkeypatch, playlists):
-    asked = []
-
-    class _Scraper:
-        def get(self, url, *args, **kwargs):
-            asked.append(url)
-            return _Response(PAGE)
-
-    monkeypatch.setattr(_shared, "_get_scraper", lambda: _Scraper())
-
-    source = _shared.fetch_vixsrc(1396, "movie")
-    assert asked == ["https://vixsrc.to/movie/1396"]
-    assert source.provider == "vixsrc"
-    assert "token=abc123" in source.m3u8_url
+    assert "provider 404" in message
 
 
 # ── Wiring ────────────────────────────────────────────────────────────────────
@@ -291,18 +204,18 @@ def test_the_anime_path_has_no_fallback_to_offer():
     assert "tmdb_id" in inspect.signature(job_manager.submit_episode).parameters
 
 
-def test_a_film_falls_back_when_the_embed_is_blocked(monkeypatch, tmp_path):
+def test_a_film_uses_a_registered_provider_when_the_embed_is_blocked(monkeypatch, tmp_path):
     from app.core import film
 
     monkeypatch.setattr(
         film, "_get_iframe",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("403 Cloudflare")),
     )
-    # Patched on _shared, not on film: resolve_stream lives there and calls
-    # fetch_vixsrc as its own module global.
+    # Patched on _shared, not on film: resolve_stream lives there and reads the
+    # provider tuple as its own module global.
     monkeypatch.setattr(
-        _shared, "fetch_vixsrc",
-        lambda *a, **k: _shared.StreamSource("https://v/p.m3u8", "aa" * 16, "r", "vixsrc"),
+        _shared, "_FALLBACK_PROVIDERS",
+        (lambda *a: _shared.StreamSource("https://v/p.m3u8", "aa" * 16, "r", "other"),),
     )
     monkeypatch.setattr(film, "_collect_audio_tracks", lambda *a, **k: [])
     monkeypatch.setattr(film, "_collect_subtitle_tracks", lambda *a, **k: [])
