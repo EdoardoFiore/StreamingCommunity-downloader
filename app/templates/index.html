@@ -960,6 +960,34 @@
       box-shadow: 0 8px 28px rgba(0,0,0,.40) !important;
     }
 
+    /* Backdrop behind the detail modal header.
+       Masked down to the panel background so the text below keeps its contrast
+       whatever the artwork happens to be. */
+    #detail-backdrop {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 190px;
+      background-size: cover;
+      background-position: center 25%;
+      opacity: .38;
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .detail-plot {
+      color: var(--text-muted) !important;
+      font-size: 13px !important;
+      line-height: 1.5 !important;
+      margin: 0 0 10px !important;
+      /* Long synopses would push the action button off a short viewport. */
+      max-height: 6.6em;
+      overflow-y: auto;
+    }
+
+    #detail-genres .badge { margin-right: 4px; }
+
     /* Nav tabs */
     .nav-tabs {
       border-bottom: 1px solid var(--border) !important;
@@ -2133,6 +2161,27 @@
           </div>
         </div>
 
+        <!-- ── Metadata ──────────────────────────────────────────────────── -->
+        <div class="settings-section">
+          <p class="settings-section-label">Metadata</p>
+          <p class="settings-section-hint">
+            Con una chiave <a href="https://www.themoviedb.org/settings/api" target="_blank"
+            rel="noopener noreferrer">TMDB</a> la scheda di un titolo mostra trama, generi,
+            immagine di sfondo e trailer in italiano. Senza chiave il pannello usa quello che
+            pubblica la sorgente, che &egrave; meno ricco ma non richiede nulla.
+          </p>
+          <label class="form-label" for="tmdb-key-input">Chiave API TMDB</label>
+          <input type="password" id="tmdb-key-input" class="form-control" autocomplete="off"
+                 placeholder="Vuoto = nessuna chiave, metadata dalla sorgente">
+          <div class="form-text" id="tmdb-status"></div>
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="saveTmdbKey()" id="save-tmdb-btn">
+              Salva
+            </button>
+            <div id="tmdb-feedback" class="form-text"></div>
+          </div>
+        </div>
+
         <!-- ── Recupero automatico del dominio ───────────────────────────── -->
         <div class="settings-section">
           <p class="settings-section-label">Recupero automatico</p>
@@ -2370,12 +2419,17 @@
 
 <!-- ── Detail Modal ──────────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="detail-modal" tabindex="-1" style="display:none" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered" style="max-width:520px">
-    <div class="modal-content">
-      <div class="modal-header border-0 pb-0">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:640px">
+    <div class="modal-content" style="position:relative;overflow:hidden">
+      <!--
+        Sits behind the header, faded into the panel background. The poster
+        stays where it is: this is behind it, not instead of it.
+      -->
+      <div id="detail-backdrop" style="display:none"></div>
+      <div class="modal-header border-0 pb-0" style="position:relative;z-index:1">
         <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body pt-1">
+      <div class="modal-body pt-1" style="position:relative;z-index:1">
         <div class="row g-3">
           <div class="col-auto">
             <img id="detail-poster" src="" alt=""
@@ -2390,12 +2444,20 @@
             <h3 id="detail-title"></h3>
             <div id="detail-meta" class="text-muted mb-2"></div>
             <div id="detail-score" class="mb-2"></div>
+            <div id="detail-genres" class="mb-2" style="display:none"></div>
+            <!-- Last in the text column stays the interactive part: the
+                 language chips belong nearest the action button. -->
+            <p id="detail-plot" class="detail-plot" style="display:none"></p>
             <div id="detail-langs" class="small" style="color:var(--text-muted)"></div>
           </div>
         </div>
       </div>
-      <div class="modal-footer border-0 pt-0" style="flex-wrap:wrap;gap:8px">
+      <div class="modal-footer border-0 pt-0" style="flex-wrap:wrap;gap:8px;position:relative;z-index:1">
         <button type="button" class="btn btn-secondary me-auto" data-bs-dismiss="modal">Chiudi</button>
+        <a id="detail-trailer-btn" class="btn btn-ghost-secondary" href="#" target="_blank"
+           rel="noopener noreferrer" style="display:none">
+          <i class="ti ti-brand-youtube me-1"></i>Trailer
+        </a>
         <div class="d-flex align-items-center gap-2 flex-shrink-0" id="detail-schedule-wrap" style="display:none!important">
           <i class="ti ti-clock text-muted" style="font-size:15px"></i>
           <input type="datetime-local" id="detail-scheduled-at" class="form-control form-control-sm" style="max-width:196px" title="Lascia vuoto per scaricare subito">

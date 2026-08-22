@@ -735,7 +735,7 @@ const ALL_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_GROUPS.flatMap(g => g.events)
 const _SETTINGS_FEEDBACK_IDS = [
   'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
-  'domain-recovery-feedback',
+  'domain-recovery-feedback', 'tmdb-feedback',
 ];
 
 function _feedback(id, message = '', kind = 'muted') {
@@ -749,7 +749,7 @@ function _feedback(id, message = '', kind = 'muted') {
 // modal no longer waits on the slowest section (disk usage stats every library
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
-  sorgente: () => loadDomainRecoverySettings(),
+  sorgente: () => Promise.all([loadDomainRecoverySettings(), loadTmdbSettings()]),
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),
   notifiche: () => loadNotificationChannels(),
@@ -1182,6 +1182,49 @@ async function loadDomainRecoverySettings() {
     data.domain_check_interval_minutes ?? 360;
 }
 
+async function loadTmdbSettings() {
+  try {
+    const res = await fetch('/api/metadata/settings');
+    if (!res.ok) return;
+    const data = await safeJson(res);
+    // The key itself never comes back from the server, so the field starts
+    // empty and the status line says whether one is stored.
+    document.getElementById('tmdb-key-input').value = '';
+    const status = document.getElementById('tmdb-status');
+    status.textContent = data.tmdb_configured
+      ? 'Chiave configurata. Incollane una nuova per sostituirla, o salva vuoto per rimuoverla.'
+      : 'Nessuna chiave: i metadata arrivano dalla sorgente.';
+  } catch (e) { /* ignore */ }
+}
+
+async function saveTmdbKey() {
+  const btn = document.getElementById('save-tmdb-btn');
+  const key = document.getElementById('tmdb-key-input').value.trim();
+  if (!key && !await scConfirm(
+      'Il campo \u00e8 vuoto: la chiave TMDB verr\u00e0 rimossa e i metadata torneranno ' +
+      'a quelli della sorgente. Continuare?')) {
+    return;
+  }
+  btn.disabled = true;
+  _feedback('tmdb-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/metadata/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({tmdb_api_key: key}),
+    });
+    if (res.ok) {
+      _feedback('tmdb-feedback', 'Salvato.', 'success');
+      showToast('Impostazioni metadata salvate', 'success');
+      await loadTmdbSettings();
+    } else {
+      const d = await safeJson(res);
+      _feedback('tmdb-feedback', d.detail || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('tmdb-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
 async function saveDomainRecovery() {
   const btn = document.getElementById('save-domain-recovery-btn');
   const interval = parseInt(document.getElementById('domain-check-interval').value, 10);
@@ -1536,9 +1579,60 @@ function _getLangSelections() {
   };
 }
 
+// Guards against a stale response painting over a newer one: open a title, close
+// it, open another before the first reply lands, and the first one used to win.
+let _detailToken = 0;
+
+function _resetDetailExtras() {
+  document.getElementById('detail-backdrop').style.display = 'none';
+  const plot = document.getElementById('detail-plot');
+  plot.textContent = ''; plot.style.display = 'none';
+  const genres = document.getElementById('detail-genres');
+  genres.innerHTML = ''; genres.style.display = 'none';
+  document.getElementById('detail-trailer-btn').style.display = 'none';
+}
+
+function renderTitleMetadata(meta) {
+  if (!meta) return;
+
+  if (meta.backdrop) {
+    const backdrop = document.getElementById('detail-backdrop');
+    backdrop.style.backgroundImage = `url("${encodeURI(meta.backdrop)}")`;
+    backdrop.style.display = '';
+  }
+  if (meta.plot) {
+    const plot = document.getElementById('detail-plot');
+    plot.textContent = meta.plot;
+    plot.style.display = '';
+  }
+  if (meta.genres?.length) {
+    const genres = document.getElementById('detail-genres');
+    genres.innerHTML = meta.genres.slice(0, 4)
+      .map(g => `<span class="badge bg-secondary-lt">${escapeHtml(g)}</span>`).join('');
+    genres.style.display = '';
+  }
+  if (meta.trailer_url) {
+    const trailer = document.getElementById('detail-trailer-btn');
+    trailer.href = meta.trailer_url;
+    trailer.style.display = '';
+  }
+  // The source carries no rating for many titles; TMDB's fills that gap rather
+  // than replacing a score already on screen.
+  const scoreEl = document.getElementById('detail-score');
+  if (meta.rating && !scoreEl.innerHTML) {
+    scoreEl.innerHTML =
+      `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${meta.rating}</span>`;
+  }
+}
+
 function openDetailModal(idx) {
   const item = _searchResults[idx];
   if (!item) return;
+  // The modal is reused, so anything filled in asynchronously has to be cleared
+  // first — a plot left over from the previous title under a new heading reads
+  // as fact — and late responses have to be able to tell they are late.
+  const token = ++_detailToken;
+  _resetDetailExtras();
   const isAnime = item.type === 'anime';
   const isMovie = item.type === 'movie';
   const year = itemYear(item);
@@ -1616,9 +1710,18 @@ function openDetailModal(idx) {
   showModal('detail-modal');
 
   const p = new URLSearchParams({ type:isMovie?'movie':'tv', slug:item.slug||'', version:currentVersion||'' });
+
+  // Independent of the languages call and started alongside it: one is metadata,
+  // the other reaches the stream host, and neither should wait on the other.
+  fetch(`/api/metadata/${isMovie ? 'movie' : 'tv'}/${item.id}?${p}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(meta => { if (token === _detailToken) renderTitleMetadata(meta); })
+    .catch(() => { /* the modal simply stays as it was */ });
+
   fetch(`/api/search/languages/${item.id}?${p}`)
     .then(r => r.ok ? r.json() : null)
     .then(info => {
+      if (token !== _detailToken) return;
       if (!info) { langsEl.innerHTML=''; return; }
       let html='';
       if (info.audio?.length) {
