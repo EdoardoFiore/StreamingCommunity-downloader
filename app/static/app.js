@@ -742,7 +742,20 @@ const _SETTINGS_FEEDBACK_IDS = [
   'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
   'domain-recovery-feedback', 'tmdb-feedback',
+  'jf-refresh-feedback', 'hooks-feedback',
 ];
+
+// FastAPI answers a validation failure with an *array* of error objects, so the
+// `data.detail || 'Errore'` idiom used throughout renders "[object Object]".
+function _detailText(data) {
+  const detail = data && data.detail;
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(e => (e && (e.msg || e.message)) || '').filter(Boolean).join('; ');
+  }
+  return String(detail);
+}
 
 function _feedback(id, message = '', kind = 'muted') {
   const el = document.getElementById(id);
@@ -759,6 +772,7 @@ const _SETTINGS_TAB_LOADERS = {
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),
   notifiche: () => loadNotificationChannels(),
+  hook: () => Promise.all([loadJellyfinRefresh(), loadHooks()]),
 };
 
 // Two panes read the same endpoint. Shared per modal-open so switching between
@@ -776,7 +790,7 @@ function _loadAppSettings() {
 
 // Tabs whose panes only talk to MANAGE_SETTINGS endpoints: without it they would
 // render as empty panes fed by 403s.
-const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'download', 'notifiche'];
+const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'download', 'notifiche', 'hook'];
 
 let _settingsTab = 'sorgente';
 const _settingsLoaded = new Set();
@@ -1187,6 +1201,188 @@ async function loadDomainRecoverySettings() {
   document.getElementById('domain-check-interval').value =
     data.domain_check_interval_minutes ?? 360;
 }
+
+
+// ── Post-download hooks ────────────────────────────────────────────────────────
+//
+// Webhooks only: open mode grants MANAGE_SETTINGS to every anonymous visitor, so
+// a shell hook would be remote code execution for whoever can reach the panel.
+// See app/downloads_hooks.py.
+
+let _hooks = [];
+
+const HOOK_EVENT_LABELS = {
+  done: 'Completato',
+  error: 'Fallito',
+  cancelled: 'Annullato',
+};
+
+async function loadJellyfinRefresh() {
+  const data = await _loadAppSettings();
+  if (!data) return;
+  document.getElementById('jf-refresh-on-download').checked =
+    !!data.jellyfin_refresh_on_download;
+
+}
+
+// Set from the hooks payload, which reports whether the refresh has credentials
+// to use. Inferring it from the auth status would report an installation that
+// skipped the wizard and connected Jellyfin later as unconnected.
+function renderJellyfinRefreshAvailability(connected) {
+  const toggle = document.getElementById('jf-refresh-on-download');
+  if (!toggle) return;
+  toggle.disabled = !connected;
+  document.getElementById('jf-refresh-status').textContent = connected
+    ? ''
+    : 'Jellyfin non è collegato: collegalo da Accesso e utenti perché questa opzione abbia effetto.';
+}
+
+async function saveJellyfinRefresh() {
+  const btn = document.getElementById('save-jf-refresh-btn');
+  btn.disabled = true;
+  _feedback('jf-refresh-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/domain/settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        jellyfin_refresh_on_download:
+          document.getElementById('jf-refresh-on-download').checked,
+      }),
+    });
+    if (res.ok) {
+      _feedback('jf-refresh-feedback', 'Salvato.', 'success');
+      showToast('Impostazione salvata', 'success');
+    } else {
+      const d = await safeJson(res);
+      _feedback('jf-refresh-feedback', d.detail || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('jf-refresh-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function loadHooks() {
+  try {
+    const res = await fetch('/api/download-hooks');
+    if (!res.ok) return;
+    const data = await safeJson(res);
+    _hooks = data.hooks || [];
+    renderJellyfinRefreshAvailability(!!data.jellyfin_connected);
+    renderHooksList();
+  } catch (e) { /* the list simply stays as it was */ }
+}
+
+function _hookEventSummary(hook) {
+  // An empty list means every event — the same convention the notification
+  // channels use, and the one thing here that is easy to read backwards.
+  if (!hook.events || !hook.events.length) return 'Tutti gli esiti';
+  return hook.events.map(e => HOOK_EVENT_LABELS[e] || e).join(', ');
+}
+
+function renderHooksList() {
+  const container = document.getElementById('hooks-list');
+  if (!_hooks.length) {
+    container.innerHTML = '<p class="text-muted small mb-0">Nessun webhook configurato.</p>';
+    return;
+  }
+  container.innerHTML = _hooks.map(hook => `
+    <div class="border-bottom pb-1 mb-1">
+      <div class="d-flex align-items-center gap-2 py-1">
+        <label class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" ${hook.enabled ? 'checked' : ''}
+                 onchange="toggleHook(${hook.id}, this.checked)">
+        </label>
+        <div class="flex-fill text-truncate">
+          <span style="color:var(--text)">${escapeHtml(hook.name)}</span>
+          <span class="text-muted small ms-2">${escapeHtml(hook.method)} ${escapeHtml(hook.url_masked || '')}</span>
+        </div>
+        <span class="badge bg-secondary-lt">${escapeHtml(_hookEventSummary(hook))}</span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="testHook(${hook.id})">
+          <i class="ti ti-send me-1"></i>Test
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteHook(${hook.id})">
+          <i class="ti ti-trash"></i>
+        </button>
+      </div>
+    </div>`).join('');
+}
+
+function toggleHookForm() {
+  const form = document.getElementById('hook-form');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function saveHook() {
+  const btn = document.getElementById('hook-save-btn');
+  const name = document.getElementById('hook-name').value.trim();
+  const url = document.getElementById('hook-url').value.trim();
+  if (!name || !url) {
+    _feedback('hooks-feedback', 'Nome e URL sono obbligatori.', 'danger'); return;
+  }
+  btn.disabled = true;
+  _feedback('hooks-feedback', 'Salvataggio...');
+  try {
+    const res = await fetch('/api/download-hooks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name, url,
+        method: document.getElementById('hook-method').value,
+        body_template: document.getElementById('hook-body').value,
+      }),
+    });
+    if (res.ok) {
+      document.getElementById('hook-name').value = '';
+      document.getElementById('hook-url').value = '';
+      document.getElementById('hook-body').value = '';
+      document.getElementById('hook-form').style.display = 'none';
+      _feedback('hooks-feedback', 'Aggiunto.', 'success');
+      await loadHooks();
+    } else {
+      const d = await safeJson(res);
+      _feedback('hooks-feedback', _detailText(d) || 'Errore salvataggio.', 'danger');
+    }
+  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function toggleHook(id, enabled) {
+  try {
+    await fetch(`/api/download-hooks/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled}),
+    });
+  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+  await loadHooks();
+}
+
+async function deleteHook(id) {
+  if (!await scConfirm('Eliminare questo webhook?')) return;
+  try {
+    await fetch(`/api/download-hooks/${id}`, {method: 'DELETE'});
+    await loadHooks();
+  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+}
+
+async function testHook(id) {
+  _feedback('hooks-feedback', 'Invio chiamata di prova...');
+  try {
+    const res = await fetch(`/api/download-hooks/${id}/test`, {method: 'POST'});
+    const data = await safeJson(res);
+    // Only an outcome and a status code come back: the panel never relays what
+    // the other end said.
+    if (res.ok && data.ok) {
+      _feedback('hooks-feedback', `Riuscito (HTTP ${data.status}).`, 'success');
+      showToast('Webhook raggiunto', 'success');
+    } else {
+      _feedback('hooks-feedback',
+        data.status ? `Fallito (HTTP ${data.status}).` : 'Nessuna risposta.', 'danger');
+    }
+  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+}
+
+// ── Post-download hooks end ────────────────────────────────────────────────────
 
 async function loadTmdbSettings() {
   try {
