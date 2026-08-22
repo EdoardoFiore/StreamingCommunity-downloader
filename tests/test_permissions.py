@@ -36,7 +36,6 @@ CASES = [
     ((Permission.REQUEST, Permission.DOWNLOAD), "GET",
      "/api/search?q=abc&domain=example.test", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/domain/settings", None),
-    ((Permission.MANAGE_SETTINGS,), "GET", "/api/metadata/settings", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/download-hooks", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/domain/settings/naming-defaults", None),
     ((Permission.MANAGE_SETTINGS,), "POST", "/api/domain/settings/naming-preview",

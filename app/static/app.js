@@ -741,7 +741,7 @@ const ALL_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_GROUPS.flatMap(g => g.events)
 const _SETTINGS_FEEDBACK_IDS = [
   'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
-  'domain-recovery-feedback', 'tmdb-feedback',
+  'domain-recovery-feedback',
   'jf-refresh-feedback', 'hooks-feedback', 'naming-feedback',
 ];
 
@@ -768,7 +768,7 @@ function _feedback(id, message = '', kind = 'muted') {
 // modal no longer waits on the slowest section (disk usage stats every library
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
-  sorgente: () => Promise.all([loadDomainRecoverySettings(), loadTmdbSettings()]),
+  sorgente: () => loadDomainRecoverySettings(),
   librerie: () => loadNamingTemplates(),
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),
@@ -1485,49 +1485,6 @@ async function testHook(id) {
 
 // ── Post-download hooks end ────────────────────────────────────────────────────
 
-async function loadTmdbSettings() {
-  try {
-    const res = await fetch('/api/metadata/settings');
-    if (!res.ok) return;
-    const data = await safeJson(res);
-    // The key itself never comes back from the server, so the field starts
-    // empty and the status line says whether one is stored.
-    document.getElementById('tmdb-key-input').value = '';
-    const status = document.getElementById('tmdb-status');
-    status.textContent = data.tmdb_configured
-      ? 'Chiave configurata. Incollane una nuova per sostituirla, o salva vuoto per rimuoverla.'
-      : 'Nessuna chiave: i metadata arrivano dalla sorgente.';
-  } catch (e) { /* ignore */ }
-}
-
-async function saveTmdbKey() {
-  const btn = document.getElementById('save-tmdb-btn');
-  const key = document.getElementById('tmdb-key-input').value.trim();
-  if (!key && !await scConfirm(
-      'Il campo \u00e8 vuoto: la chiave TMDB verr\u00e0 rimossa e i metadata torneranno ' +
-      'a quelli della sorgente. Continuare?')) {
-    return;
-  }
-  btn.disabled = true;
-  _feedback('tmdb-feedback', 'Salvataggio...');
-  try {
-    const res = await fetch('/api/metadata/settings', {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({tmdb_api_key: key}),
-    });
-    if (res.ok) {
-      _feedback('tmdb-feedback', 'Salvato.', 'success');
-      showToast('Impostazioni metadata salvate', 'success');
-      await loadTmdbSettings();
-    } else {
-      const d = await safeJson(res);
-      _feedback('tmdb-feedback', d.detail || 'Errore salvataggio.', 'danger');
-    }
-  } catch (e) { _feedback('tmdb-feedback', 'Errore di rete.', 'danger'); }
-  finally { btn.disabled = false; }
-}
-
 async function saveDomainRecovery() {
   const btn = document.getElementById('save-domain-recovery-btn');
   const interval = parseInt(document.getElementById('domain-check-interval').value, 10);
@@ -1887,10 +1844,10 @@ function _getLangSelections() {
 let _detailToken = 0;
 // The two fetches of one open land in either order, and each needs something
 // the other has: the failure message depends on whether a fallback exists.
-let _detailState = { tmdbId: null, langsError: null };
+let _detailState = { langsError: null };
 
 function _resetDetailExtras() {
-  _detailState = { tmdbId: null, langsError: null };
+  _detailState = { langsError: null };
   document.getElementById('detail-backdrop').style.display = 'none';
   const plot = document.getElementById('detail-plot');
   plot.textContent = ''; plot.style.display = 'none';
@@ -1904,10 +1861,6 @@ function _resetDetailExtras() {
 
 function renderTitleMetadata(meta) {
   if (!meta) return;
-  _detailState.tmdbId = meta.tmdb_id || null;
-  // A failure that landed before the metadata was worded without knowing
-  // whether there was a second source to try. Now it can be.
-  if (_detailState.langsError) renderDetailSourceError(_detailState.langsError);
 
   if (meta.backdrop) {
     const backdrop = document.getElementById('detail-backdrop');
@@ -1943,13 +1896,14 @@ function renderDetailSourceError(detail) {
   _detailState.langsError = detail;
   const langsEl = document.getElementById('detail-langs');
   const trimmed = (detail || '').slice(0, 140);
-  const hasFallback = !!_detailState.tmdbId;
+  // No alternative provider is registered (see app/core/_shared.py), so this
+  // must not promise one. Saying "the alternative source will be tried" when
+  // nothing will be tried is worse than the silence this replaced.
   langsEl.innerHTML =
     `<div class="alert bg-warning py-1 px-2 mb-0 small" style="border-color:#e6a23c">
        <i class="ti ti-alert-triangle me-1"></i>
-       Sorgente non raggiungibile per questo titolo${hasFallback
-         ? ': verr&agrave; tentata la sorgente alternativa.'
-         : '. Le lingue non sono selezionabili.'}
+       Sorgente non raggiungibile per questo titolo. Le lingue non sono selezionabili
+       e il download potrebbe fallire.
        ${trimmed ? `<div class="text-muted mt-1">${escapeHtml(trimmed)}</div>` : ''}
      </div>`;
 

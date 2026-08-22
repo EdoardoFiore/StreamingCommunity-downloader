@@ -46,8 +46,8 @@ request before any route runs.
 - `page.py` — domain check, search
 - `domain_recovery.py` — finds the source domain again when it rotates: scrapes a
   third-party page, guards the candidate, verifies it, and *proposes* it
-- `metadata.py` — plot/genres/rating/artwork/trailer, TMDB first then the title page's own
-  props, behind an in-process TTL cache
+- `metadata.py` — plot/genres/rating/artwork/trailer, all from the title page's own props,
+  behind an in-process TTL cache
 - `naming.py` — the file/folder naming templates and their validation
 - `film.py` — movie resolve + download; also owns `_collect_audio_tracks` / `_collect_subtitle_tracks`, which `tv.py` and `animeunity.py` import
 - `tv.py` — seasons, episodes, per-episode languages, episode download
@@ -86,8 +86,7 @@ for downloads that skipped the queue, one summary per season/series), `downloads
 ### Persistence
 
 - `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications, notification
-  channels, download hooks, followed series, and the TMDB API key (in the key/value `jf_setting`
-  table, which needs no migration to gain a row). Migrations are the ordered `MIGRATIONS` list in `app/db.py`, applied
+  channels, download hooks, followed series. Migrations are the ordered `MIGRATIONS` list in `app/db.py`, applied
   against `PRAGMA user_version`. Never edit an applied migration; append a new one.
 - `data.json` — source domain, library paths, performance settings, domain-recovery switches,
   naming templates. Anything carrying a secret goes in `panel.db` instead. Written only through
@@ -162,18 +161,17 @@ anything under a mounted static directory is readable by unauthenticated visitor
   deliberately stricter than `PUT /api/domain`, which accepts an empty version string: an admin
   typing a host in is making a decision, a web page is not. `domain_auto_apply` opts out of all of
   this and is off by default.
-- **`/api/image/tmdb/...` must be declared before `/api/image/{filename:path}`.** The catch-all
-  matches it, and `SAFE_FILENAME` accepts `tmdb/w1280/x.jpg`, so the wrong order answers every TMDB
-  request by asking the source's CDN for a file it has never heard of.
-- **The keyless metadata path is the title page props, not the site's preview endpoint.** That
-  endpoint answers 419 (Laravel CSRF) to every request the panel can make, and carries neither
-  score nor trailers — it was removed after being caught never having worked. The props are
-  fetched anyway to find `tmdb_id`, so the keyless answer costs no extra request and is close to
-  the TMDB one: plot, genres, score, trailer and artwork.
-- **`metadata.cached_tmdb_id()` never does I/O.** The direct download path reads it to decide
-  whether a stream fallback is possible; a download that is about to succeed must not pay a round
-  trip to find that out. The cache key includes whether a TMDB key is configured, or adding one
-  keeps serving the keyless answer for six hours.
+- **Title metadata has one provider and needs no credential.** It comes from the title page's own
+  props — the payload already fetched to find `tmdb_id` — so it costs no request of its own. Two
+  other providers were tried and removed after being measured, and the measurements are the reason:
+  the site's `/api/titles/preview` endpoint answers 419 (Laravel CSRF) to every request the panel
+  can make and never once worked, while TMDB turned out not to be an upgrade at all — the site
+  copies its synopses from TMDB, so the text was usually identical, and the round trip *lost* a
+  trailer on one title, a logo on another and 1100 characters of plot on a third. Do not re-add a
+  provider without measuring it against the props on real titles first.
+- **`metadata.cached_tmdb_id()` never does I/O.** A stream fallback would read it at download time,
+  and a download that is about to succeed must not pay a round trip to discover a fallback it will
+  not use.
 - **When stream resolution has nothing to fall back to, the primary error must survive.**
   `_FALLBACK_PROVIDERS` is empty: a second road through vixsrc was built and removed, because that
   site is now a client-rendered app whose HTML carries no playlist, token or `.m3u8` at all — the

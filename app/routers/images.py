@@ -32,13 +32,6 @@ router = APIRouter(
 # constrained to what a filename can actually be.
 SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
 
-# TMDB serves artwork from one host at a fixed set of widths. Both are pinned
-# here rather than taken from the path: the size is part of the upstream URL and
-# an unbounded one would let a caller ask TMDB for anything.
-TMDB_IMAGE_HOST = "https://image.tmdb.org/t/p"
-TMDB_SIZES = frozenset({"w300", "w500", "w780", "w1280", "original"})
-TMDB_PATH = re.compile(r"^[A-Za-z0-9._-]{1,120}\.(jpg|png|svg)$")
-
 
 def _fetch_image(domain: str, filename: str) -> tuple[bytes, str]:
     """Fetch image from CDN or main domain (blocking, runs in thread)."""
@@ -69,47 +62,6 @@ def _fetch_image(domain: str, filename: str) -> tuple[bytes, str]:
             logger.warning("Image proxy error for %s: %s", url, e)
 
     raise HTTPException(status_code=last_status, detail="Image not found")
-
-
-def _fetch_tmdb_image(size: str, path: str) -> tuple[bytes, str]:
-    url = f"{TMDB_IMAGE_HOST}/{size}/{path}"
-    try:
-        res = requests.get(url, headers={"user-agent": get_headers()}, timeout=10)
-    except Exception as e:
-        logger.warning("TMDB image proxy error for %s: %s", url, e)
-        raise HTTPException(status_code=502, detail="Image not available")
-
-    content_type = res.headers.get("content-type", "")
-    if not (res.ok and content_type.startswith("image/")):
-        logger.warning("TMDB image miss: %s -> HTTP %d ct=%r", url, res.status_code, content_type)
-        raise HTTPException(status_code=res.status_code, detail="Image not found")
-    return res.content, content_type
-
-
-# Declared BEFORE the catch-all below, which would otherwise swallow it:
-# "tmdb/w1280/abc.jpg" satisfies SAFE_FILENAME, so the request would be
-# answered — by asking the source's CDN for a file it has never heard of.
-@router.get("/api/image/tmdb/{size}/{path}")
-async def proxy_tmdb_image(size: str, path: str):
-    """Artwork from TMDB, through the panel.
-
-    Nothing forces this: there is no CSP here today, so the browser could fetch
-    image.tmdb.org directly. It goes through the panel anyway to keep the
-    property the source proxy already has — a page in this panel talks to this
-    panel and to nowhere else — and so that adding `img-src 'self'` later does
-    not silently blank every backdrop.
-    """
-    if size not in TMDB_SIZES or not TMDB_PATH.match(path):
-        raise HTTPException(status_code=400, detail="Immagine non valida")
-
-    content, content_type = await asyncio.to_thread(_fetch_tmdb_image, size, path)
-    return Response(
-        content=content,
-        media_type=content_type,
-        # Artwork at a given path never changes; TMDB publishes a new path
-        # instead.
-        headers={"Cache-Control": "public, max-age=86400"},
-    )
 
 
 @router.get("/api/image/{filename:path}")

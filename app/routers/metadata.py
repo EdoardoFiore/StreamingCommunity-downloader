@@ -1,17 +1,14 @@
-"""Metadata for the detail view, and the TMDB key that improves it.
+"""Metadata for the detail view.
 
-Separate from the domain router on purpose: that one owns data.json, this one
-owns a credential in panel.db, and keeping them apart makes it obvious which
-kind of setting a given endpoint is touching.
+One endpoint: everything comes from the title page's own props, so there is
+nothing to configure and no credential to hold.
 """
 
 import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from pydantic import BaseModel
 
-from app.auth import models as auth_models
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.core import metadata
@@ -19,30 +16,8 @@ from app.core import metadata
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/metadata", tags=["metadata"])
 
-CAN_MANAGE = [Depends(require(Permission.MANAGE_SETTINGS))]
-
 # The same gate as search: this is the detail view of a search result.
 CAN_READ = [Depends(require(Permission.REQUEST, Permission.DOWNLOAD, mode="or"))]
-
-
-class TmdbSettingsUpdate(BaseModel):
-    tmdb_api_key: str
-
-
-@router.get("/settings", dependencies=CAN_MANAGE)
-def get_metadata_settings():
-    """Whether a key is set — never the key itself, as with the Jellyfin one."""
-    return {"tmdb_configured": metadata.tmdb_api_key() is not None}
-
-
-@router.put("/settings", dependencies=CAN_MANAGE)
-def set_metadata_settings(body: TmdbSettingsUpdate):
-    value = body.tmdb_api_key.strip()
-    auth_models.set_setting(auth_models.SETTING_TMDB_API_KEY, value)
-    # Entries cached under the old key-configured flag would otherwise keep
-    # serving the keyless answer for six hours after a key was added.
-    metadata.clear_cache()
-    return {"tmdb_configured": bool(value)}
 
 
 @router.get("/{media_type}/{title_id}", dependencies=CAN_READ)

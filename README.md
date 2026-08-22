@@ -315,16 +315,15 @@ turn it on, and a "Controlla ora" button.
 
 ## Metadata
 
-Opening a title shows its plot, genres, rating, backdrop and trailer. **No API key is needed for
-any of that** — the source's own title page carries all of it, and the panel is already reading
-that page, so the keyless path costs nothing extra.
+Opening a title shows its plot, genres, rating, backdrop and trailer. All of it comes from the
+source's own title page — the same page the panel already reads — so there is **nothing to
+configure, no account anywhere, and no request beyond the one already being made**.
 
-A [TMDB](https://www.themoviedb.org/settings/api) API key in **Impostazioni → Sorgente** is
-optional, and changes where the same fields come from: curated Italian synopses, a wider backdrop,
-a clean transparent logo and TMDB's own rating. It is an upgrade in quality, not the difference
-between having metadata and not having it.
+TMDB was tried as a second provider and dropped. Measured on real titles it was not an upgrade: the
+site copies its synopses from TMDB, so the text was usually identical, while the round trip lost a
+trailer on one title, a logo on another and 1100 characters of plot on a third.
 
-Artwork is proxied through the panel either way, so the browser never talks to anybody else.
+Artwork is proxied through the panel, so the browser never talks to anybody else.
 Metadata is fetched when you open a title, never for a whole page of search results.
 
 ---

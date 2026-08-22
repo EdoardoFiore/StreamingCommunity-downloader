@@ -1,14 +1,20 @@
-"""Title metadata: where it comes from, and what happens when it does not arrive.
+"""Title metadata: one provider, the title page's own props.
 
-The regression pin here is that ``get_info_tv`` still returns an ``int``. It is
-called by the watch poller, the seasons endpoint and the batch download path,
-and several other test files monkeypatch it; widening it to return the whole
-props dict is the obvious refactor and would have broken all of them silently.
+Two regression pins here, both for mistakes that were actually made.
+
+``get_info_tv`` must still return an ``int``. It is called by the watch poller,
+the seasons endpoint and the batch download path, and several other test files
+monkeypatch it; widening it to return the whole props dict is the obvious
+refactor and would have broken all of them silently.
+
+And the answer must carry the score and the trailer. It was once documented as
+having neither, on the strength of reading the code rather than calling it — the
+site publishes both, and an intermediate provider that never worked was hiding
+them.
 """
 
 import pytest
 
-from app.auth import models as auth_models
 from app.auth.permissions import ALL_PERMISSIONS
 from app.core import metadata, tv
 from tests.conftest import do_setup, make_user, session_for
@@ -20,7 +26,13 @@ PROPS = {
     "tmdb_id": 1396,
     "imdb_id": "tt0903747",
     "plot": "Un professore di chimica.",
-    "score": "8.9",
+    "score": "9.4",
+    "trailers": [{"youtube_id": "siteTrailer"}],
+    "genres": [{"name": "Dramma"}, {"name": "Crime"}],
+    "images": [
+        {"type": "background", "filename": "bg.jpg"},
+        {"type": "logo", "filename": "logo.jpg"},
+    ],
 }
 
 
@@ -32,6 +44,13 @@ class _FakeResponse:
 
     def json(self):
         return self._payload
+
+
+@pytest.fixture(autouse=True)
+def _empty_cache():
+    metadata.clear_cache()
+    yield
+    metadata.clear_cache()
 
 
 @pytest.fixture
@@ -46,10 +65,25 @@ def title_page(monkeypatch):
     return calls
 
 
+@pytest.fixture
+def props(monkeypatch):
+    """The provider, recording how often it is asked."""
+    calls = []
+
+    def fake_props(title_id, slug, version, domain):
+        calls.append(title_id)
+        return dict(PROPS)
+
+    monkeypatch.setattr(tv, "get_title_props", fake_props)
+    return calls
+
+
+# ── The title page ────────────────────────────────────────────────────────────
+
 def test_the_title_props_carry_everything_the_page_had(title_page):
-    props = tv.get_title_props(1, "test-series", "v1", "example.test")
-    assert props["tmdb_id"] == 1396
-    assert props["plot"]
+    result = tv.get_title_props(1, "test-series", "v1", "example.test")
+    assert result["tmdb_id"] == 1396
+    assert result["plot"]
 
 
 def test_get_info_tv_still_returns_an_int(title_page):
@@ -77,90 +111,19 @@ def test_a_failed_page_still_raises_the_same_error(monkeypatch):
         tv.get_info_tv(1, "test-series", "v1", "example.test")
 
 
-# ── Providers ─────────────────────────────────────────────────────────────────
+# ── What the provider produces ────────────────────────────────────────────────
 
-
-TMDB_PAYLOAD = {
-    "overview": "Trama da TMDB.",
-    "genres": [{"name": "Dramma"}, {"name": "Crime"}],
-    "vote_average": 8.876,
-    "backdrop_path": "/backdrop.jpg",
-    "runtime": 49,
-    "images": {"logos": [{"file_path": "/logo.png"}]},
-    "videos": {"results": [{"site": "YouTube", "type": "Trailer", "key": "abc123"}]},
-}
-
-# The title page props, which are the keyless provider. Deliberately carrying a
-# score and a trailer: the site publishes both, and an earlier version of this
-# module dropped them on the floor.
-SITE_PROPS = {
-    **PROPS,
-    "score": "9.4",
-    "trailers": [{"youtube_id": "siteTrailer"}],
-    "genres": [{"name": "Azione"}],
-    "images": [{"type": "background", "filename": "bg.jpg"},
-               {"type": "logo", "filename": "logo.jpg"}],
-}
-
-
-@pytest.fixture(autouse=True)
-def _empty_cache():
-    metadata.clear_cache()
-    yield
-    metadata.clear_cache()
-
-
-@pytest.fixture
-def outbound(monkeypatch):
-    """Record every outbound call and serve canned payloads."""
-    calls = {"tmdb": [], "props": []}
-
-    def fake_props(title_id, slug, version, domain):
-        calls["props"].append(title_id)
-        return dict(SITE_PROPS)
-
-    def fake_tmdb_get(url, *args, **kwargs):
-        calls["tmdb"].append((url, kwargs))
-        return _FakeResponse(TMDB_PAYLOAD)
-
-    monkeypatch.setattr(tv, "get_title_props", fake_props)
-    monkeypatch.setattr(metadata.requests, "get", fake_tmdb_get)
-    return calls
-
-
-def _with_key(value="tmdb-key"):
-    auth_models.set_setting(auth_models.SETTING_TMDB_API_KEY, value)
-
-
-def test_tmdb_is_used_when_a_key_is_configured(client, outbound):
-    _with_key()
-    result = metadata.title_metadata("tv", "1", "test-series", "v1")
-
-    assert result["source"] == "tmdb"
-    assert result["plot"] == "Trama da TMDB."
-    assert result["genres"] == ["Dramma", "Crime"]
-    assert result["rating"] == 8.9
-    assert result["trailer_url"].endswith("abc123")
-    assert result["backdrop"] == "/api/image/tmdb/w1280/backdrop.jpg"
-    assert result["tmdb_id"] == 1396
-
-
-def test_without_a_key_tmdb_is_never_contacted(client, outbound):
-    """A panel with no key must not leak title lookups to an API it cannot use."""
+def test_the_provider_fills_every_field(client, props):
     result = metadata.title_metadata("tv", "1", "test-series", "v1")
 
     assert result["source"] == "site"
     assert result["plot"] == PROPS["plot"]
-    assert outbound["tmdb"] == []
+    assert result["genres"] == ["Dramma", "Crime"]
+    assert result["tmdb_id"] == 1396
 
 
-def test_without_a_key_the_score_and_trailer_still_arrive(client, outbound):
-    """The site publishes both. An earlier version of this module dropped them.
-
-    This is the regression pin for a real mistake: the keyless answer was
-    documented as having no rating and no trailer, on the strength of reading
-    the code rather than calling it.
-    """
+def test_the_score_and_trailer_are_not_dropped(client, props):
+    """The regression pin: the site publishes both, and they were once lost."""
     result = metadata.title_metadata("tv", "1", "test-series", "v1")
 
     assert result["rating"] == 9.4
@@ -169,56 +132,46 @@ def test_without_a_key_the_score_and_trailer_still_arrive(client, outbound):
     assert result["backdrop"] == "/api/image/bg.jpg"
 
 
-def test_the_keyless_answer_costs_no_extra_request(client, outbound):
-    """The props are fetched anyway, to find tmdb_id. Nothing else is called."""
+def test_metadata_costs_no_request_of_its_own(client, props):
+    """The props are fetched to find tmdb_id anyway; nothing else is called."""
     metadata.title_metadata("tv", "1", "test-series", "v1")
-
-    assert len(outbound["props"]) == 1
-    assert outbound["tmdb"] == []
+    assert len(props) == 1
 
 
-def test_a_failing_tmdb_falls_through_to_the_source(client, monkeypatch, outbound):
-    _with_key()
-
-    def boom(*a, **k):
-        raise RuntimeError("TMDB down")
-
-    monkeypatch.setattr(metadata, "tmdb_details", boom)
-
-    result = metadata.title_metadata("tv", "1", "test-series", "v1")
-    assert result["source"] == "site"
-    assert result["plot"] == PROPS["plot"]
+def test_a_cover_stands_in_for_a_missing_backdrop(client, monkeypatch):
+    monkeypatch.setattr(tv, "get_title_props", lambda *a, **k: {
+        **PROPS, "images": [{"type": "cover", "filename": "cover.jpg"}],
+    })
+    assert metadata.title_metadata("tv", "1", "s", "v1")["backdrop"] == "/api/image/cover.jpg"
 
 
-def test_everything_failing_is_not_an_error(client, monkeypatch):
-    monkeypatch.setattr(tv, "get_title_props",
-                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+def test_a_title_page_that_fails_is_not_an_error(client, monkeypatch):
+    monkeypatch.setattr(
+        tv, "get_title_props", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+    )
 
     result = metadata.title_metadata("tv", "1", "test-series", "v1")
     assert result["source"] == "none"
     assert result["plot"] is None
 
 
-def test_outbound_metadata_calls_have_timeouts(client, outbound):
-    _with_key()
-    metadata.title_metadata("tv", "1", "test-series", "v1")
-    assert outbound["tmdb"][-1][1].get("timeout") is not None
+def test_no_slug_means_no_lookup(client, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("asked for props without a slug")
 
-    metadata.clear_cache()
-    auth_models.set_setting(auth_models.SETTING_TMDB_API_KEY, "")
-    metadata.title_metadata("tv", "2", "test-series", "v1")
-    assert outbound["props"]
+    monkeypatch.setattr(tv, "get_title_props", boom)
+    assert metadata.title_metadata("tv", "1", "", "v1")["source"] == "none"
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
 
-def test_a_second_lookup_costs_nothing(client, outbound):
+def test_a_second_lookup_costs_nothing(client, props):
     metadata.title_metadata("tv", "1", "test-series", "v1")
     metadata.title_metadata("tv", "1", "test-series", "v1")
-    assert len(outbound["props"]) == 1
+    assert len(props) == 1
 
 
-def test_the_cache_expires(client, monkeypatch, outbound):
+def test_the_cache_expires(client, monkeypatch, props):
     clock = [1000.0]
     monkeypatch.setattr(metadata, "_now", lambda: clock[0])
 
@@ -226,13 +179,7 @@ def test_the_cache_expires(client, monkeypatch, outbound):
     clock[0] += metadata._TTL_HIT + 1
     metadata.title_metadata("tv", "1", "test-series", "v1")
 
-    assert len(outbound["props"]) == 2
-
-
-def test_adding_a_key_does_not_keep_serving_the_keyless_answer(client, outbound):
-    assert metadata.title_metadata("tv", "1", "test-series", "v1")["source"] == "site"
-    _with_key()
-    assert metadata.title_metadata("tv", "1", "test-series", "v1")["source"] == "tmdb"
+    assert len(props) == 2
 
 
 def test_a_miss_expires_sooner_than_a_hit(client, monkeypatch):
@@ -242,11 +189,17 @@ def test_a_miss_expires_sooner_than_a_hit(client, monkeypatch):
 
     metadata.title_metadata("tv", "9", "test-series", "v1")
     clock[0] += metadata._TTL_MISS + 1
-    assert metadata._cached(metadata._cache_key("tv", "9", False)) is None
+    assert metadata._cached(metadata._cache_key("tv", "9")) is None
 
 
-def test_cached_tmdb_id_never_does_io(client, outbound, monkeypatch):
-    """The download path reads this; it must not pay for a lookup."""
+def test_films_and_series_do_not_share_a_cache_entry(client, props):
+    metadata.title_metadata("tv", "1", "test-series", "v1")
+    metadata.title_metadata("movie", "1", "test-series", "v1")
+    assert len(props) == 2
+
+
+def test_cached_tmdb_id_never_does_io(client, props, monkeypatch):
+    """A stream fallback would read this; it must not pay for a lookup."""
     assert metadata.cached_tmdb_id("tv", "1") is None
 
     metadata.title_metadata("tv", "1", "test-series", "v1")
@@ -254,12 +207,11 @@ def test_cached_tmdb_id_never_does_io(client, outbound, monkeypatch):
     def boom(*a, **k):
         raise AssertionError("cached_tmdb_id made a request")
 
-    monkeypatch.setattr(metadata.requests, "get", boom)
     monkeypatch.setattr(tv, "get_title_props", boom)
     assert metadata.cached_tmdb_id("tv", "1") == 1396
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def admin(client, admin_credentials):
@@ -269,7 +221,7 @@ def admin(client, admin_credentials):
     return user, session_for(client, user.id)
 
 
-def test_the_endpoint_returns_normalised_metadata(client, admin, outbound):
+def test_the_endpoint_returns_normalised_metadata(client, admin, props):
     res = client.get("/api/metadata/tv/1?slug=test-series&version=v1")
     assert res.status_code == 200
     assert res.json()["plot"] == PROPS["plot"]
@@ -277,8 +229,9 @@ def test_the_endpoint_returns_normalised_metadata(client, admin, outbound):
 
 def test_a_metadata_miss_is_a_200_not_a_502(client, admin, monkeypatch):
     """A modal with no plot is a modal with no plot, not an error page."""
-    monkeypatch.setattr(tv, "get_title_props",
-                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    monkeypatch.setattr(
+        tv, "get_title_props", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+    )
 
     res = client.get("/api/metadata/movie/1?slug=x&version=v1")
     assert res.status_code == 200
@@ -293,87 +246,6 @@ def test_a_non_numeric_title_id_is_refused(client, admin):
     assert client.get("/api/metadata/tv/abc").status_code == 400
 
 
-def test_the_tmdb_key_is_never_echoed_back(client, admin):
-    client.put("/api/metadata/settings", json={"tmdb_api_key": "super-secret"},
-               headers={"X-CSRF-Token": admin[1]})
-
-    body = client.get("/api/metadata/settings").json()
-    assert body == {"tmdb_configured": True}
-    assert "super-secret" not in str(body)
-
-
-# ── TMDB image proxy ──────────────────────────────────────────────────────────
-
-@pytest.fixture
-def tmdb_image(monkeypatch):
-    """Serve a fake image and record the upstream URL asked for."""
-    from app.routers import images
-
-    calls = []
-
-    class _Image:
-        ok = True
-        status_code = 200
-        headers = {"content-type": "image/jpeg"}
-        content = b"\xff\xd8\xff"
-
-    def fake_get(url, *args, **kwargs):
-        calls.append(url)
-        return _Image()
-
-    monkeypatch.setattr(images.requests, "get", fake_get)
-    return calls
-
-
-def test_the_tmdb_route_is_not_swallowed_by_the_catch_all(client, admin, tmdb_image):
-    """/api/image/{filename:path} matches "tmdb/w1280/x.jpg" perfectly happily.
-
-    If it wins, the request is answered by asking the source's CDN for a file it
-    has never heard of. Declaration order is the whole fix, so it is pinned.
-    """
-    res = client.get("/api/image/tmdb/w1280/backdrop.jpg")
-
-    assert res.status_code == 200
-    assert tmdb_image == ["https://image.tmdb.org/t/p/w1280/backdrop.jpg"]
-
-
-def test_tmdb_artwork_is_cached_by_the_browser(client, admin, tmdb_image):
-    res = client.get("/api/image/tmdb/w500/logo.png")
-    assert "max-age" in res.headers.get("cache-control", "")
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "/api/image/tmdb/w9999/backdrop.jpg",  # size not on the allowlist
-        "/api/image/tmdb/w1280/backdrop.sh",   # not an image extension
-        "/api/image/tmdb/w1280/back drop.jpg",  # space
-    ],
-)
-def test_bad_tmdb_image_requests_are_refused(client, admin, tmdb_image, path):
-    assert client.get(path).status_code in (400, 404)
-    # Nothing reached TMDB. A request carrying a slash falls through to the
-    # source catch-all instead, which is its own (host-pinned) proxy — so the
-    # assertion is about where the bytes were asked for, not about silence.
-    assert not [url for url in tmdb_image if "image.tmdb.org" in url]
-
-
-@pytest.mark.parametrize(
-    "path", ["../../etc/passwd", "..%2F..%2Fetc", "sub/dir.jpg", "a" * 200 + ".jpg"]
-)
-def test_the_tmdb_path_validator_rejects_directly(path):
-    """Checked against the regex rather than over HTTP.
-
-    A "../.." in a URL is normalised away by the client before the request is
-    sent, so going through TestClient would test the client's path handling
-    rather than this validator.
-    """
-    from app.routers.images import TMDB_PATH
-
-    assert not TMDB_PATH.match(path)
-
-
-def test_the_tmdb_image_host_cannot_be_influenced(client, admin, tmdb_image):
-    """The host is a constant: the path never gets to say where the bytes come from."""
-    client.get("/api/image/tmdb/w500/logo.png")
-    assert all(url.startswith("https://image.tmdb.org/t/p/") for url in tmdb_image)
+def test_there_is_nothing_left_to_configure(client, admin):
+    """The provider needs no credential, so there is no settings endpoint."""
+    assert client.get("/api/metadata/settings").status_code in (400, 404, 422)

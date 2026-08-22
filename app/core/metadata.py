@@ -1,40 +1,32 @@
-"""Plot, genres, artwork and a trailer for one title.
+"""Plot, genres, rating, artwork and a trailer for one title.
 
-Two providers, tried in order:
+All of it comes from the title page's own props — the Inertia payload the panel
+already fetches to find ``tmdb_id``. So metadata costs no request of its own,
+needs no account anywhere, and works on a fresh install with nothing configured.
 
-1. **TMDB**, when an API key is configured. Curated Italian text, a wide
-   backdrop, a clean logo and a trailer.
-2. **The title page's own props**, which need no key and no extra request —
-   fetching them is how ``tmdb_id`` is found in the first place. They carry the
-   plot, the genres, the score, a trailer and the artwork, so a panel with no
-   TMDB key is a long way from empty.
+TMDB was tried as a second provider and removed. Measured against the props on
+real titles it was not an upgrade: the site copies its synopses from TMDB, so
+the text was usually identical, while the round trip lost a trailer on one
+title, a logo on another, and 1100 characters of plot on a third. Paying an API
+key to fetch a worse copy of data already in hand is a bad trade, and the
+"three providers" this module started with are now honestly one.
 
-A third was tried and removed: the site's /api/titles/preview endpoint answers
-419 (Laravel's CSRF refusal) to every request the panel can make, so it never
-produced an answer — and it carried neither score nor trailers, making it poorer
-than the props it was sitting in front of.
-
-The result has the same shape whichever answered, so the frontend never branches
-on where a plot came from.
+``tmdb_id`` is still read and still exposed: it is free here, and it is the
+identifier a fallback stream provider would resolve against (see
+``app.core._shared.resolve_stream``).
 
 Enrichment happens when a detail modal opens, one title at a time — never per
-search card. Twenty-one titles per search is twenty-one requests to somebody
-else's API for data nineteen of which nobody will read.
+search card. Twenty-one titles per search is twenty-one requests for data
+nineteen of which nobody will read.
 """
 
 import logging
 import threading
 import time
 
-import requests
-
 from app.config import configured_domain
-from app.core.headers import get_headers
 
 logger = logging.getLogger(__name__)
-
-TMDB_API = "https://api.themoviedb.org/3"
-TMDB_IMAGE_SIZES = {"backdrop": "w1280", "logo": "w500", "poster": "w500"}
 
 # Cache lifetimes. A hit is stable — a film's plot does not change — while a
 # miss is usually a title the source has no metadata for, and re-asking on every
@@ -69,10 +61,8 @@ EMPTY: dict = {
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
 
-def _cache_key(media_type: str, title_id, tmdb_configured: bool) -> tuple:
-    # The key includes whether a TMDB key is configured: without it, adding one
-    # would keep serving the keyless answer for six hours.
-    return (media_type, str(title_id), tmdb_configured)
+def _cache_key(media_type: str, title_id) -> tuple:
+    return (media_type, str(title_id))
 
 
 def _cached(key: tuple) -> dict | None:
@@ -107,55 +97,17 @@ def clear_cache() -> None:
 def cached_tmdb_id(media_type: str, title_id) -> int | None:
     """The TMDB id for this title if it is already known. Never does any I/O.
 
-    The stream fallback needs a tmdb_id at download time but must not pay for a
-    lookup to get one — a download that cannot resolve is worth a fallback, a
-    download that is about to work is not worth an extra round trip. In practice
-    the detail modal has just fetched this title's metadata, so it is warm; cold
-    means None, which is exactly the behaviour there was before.
+    A stream fallback would need an id at download time but must not pay for a
+    lookup to get one: a download that is about to succeed should not spend a
+    round trip discovering a fallback it will not use. In practice the detail
+    modal has just filled this in; cold means None, which is exactly the
+    behaviour there has always been.
     """
-    for configured in (True, False):
-        hit = _cached(_cache_key(media_type, title_id, configured))
-        if hit and hit.get("tmdb_id"):
-            return hit["tmdb_id"]
-    return None
-
-
-# ── Providers ─────────────────────────────────────────────────────────────────
-
-def tmdb_api_key() -> str | None:
-    from app.auth import models as auth_models
-
-    return (auth_models.get_setting(auth_models.SETTING_TMDB_API_KEY) or "").strip() or None
-
-
-def tmdb_details(tmdb_id: int, media_type: str, api_key: str) -> dict:
-    kind = "movie" if media_type == "movie" else "tv"
-    res = requests.get(
-        f"{TMDB_API}/{kind}/{tmdb_id}",
-        params={
-            "api_key": api_key,
-            "language": "it-IT",
-            "append_to_response": "videos,images",
-            # Italian first, then English, then language-neutral artwork: a logo
-            # with no text on it is fine in any language.
-            "include_image_language": "it,en,null",
-        },
-        headers={"accept": "application/json"},
-        timeout=10,
-    )
-    if not res.ok:
-        raise RuntimeError(f"TMDB failed: HTTP {res.status_code}")
-    return res.json()
+    hit = _cached(_cache_key(media_type, title_id))
+    return hit.get("tmdb_id") if hit else None
 
 
 # ── Normalisation ─────────────────────────────────────────────────────────────
-
-def _tmdb_image(path: str | None, kind: str) -> str | None:
-    if not path:
-        return None
-    size = TMDB_IMAGE_SIZES.get(kind, "w500")
-    return f"/api/image/tmdb/{size}{path if path.startswith('/') else '/' + path}"
-
 
 def _source_image(images: list | None, kind: str) -> str | None:
     for image in images or []:
@@ -164,46 +116,8 @@ def _source_image(images: list | None, kind: str) -> str | None:
     return None
 
 
-def _from_tmdb(payload: dict, tmdb_id: int) -> dict:
-    videos = (payload.get("videos") or {}).get("results") or []
-    trailer = next(
-        (
-            v for v in videos
-            if v.get("site") == "YouTube" and v.get("type") in ("Trailer", "Teaser")
-        ),
-        None,
-    )
-    logos = (payload.get("images") or {}).get("logos") or []
-    runtime = payload.get("runtime")
-    if runtime is None:
-        episode_runtimes = payload.get("episode_run_time") or []
-        runtime = episode_runtimes[0] if episode_runtimes else None
-
-    return {
-        "source": "tmdb",
-        "plot": payload.get("overview") or None,
-        "genres": [g["name"] for g in payload.get("genres") or [] if g.get("name")],
-        "rating": round(payload["vote_average"], 1) if payload.get("vote_average") else None,
-        "runtime": runtime,
-        "backdrop": _tmdb_image(payload.get("backdrop_path"), "backdrop"),
-        "logo": _tmdb_image(logos[0].get("file_path") if logos else None, "logo"),
-        "trailer_url": (
-            f"https://www.youtube.com/watch?v={trailer['key']}" if trailer else None
-        ),
-        "tmdb_id": tmdb_id,
-    }
-
-
 def _from_props(props: dict) -> dict:
-    """Everything the title page carries — which is nearly everything.
-
-    This used to be a last resort behind the site's /api/titles/preview
-    endpoint. That endpoint answers 419 (Laravel's CSRF refusal) to every
-    request the panel can make, so it never once produced an answer, and it was
-    also the *poorer* one: it has no score and no trailers. The props do, and
-    they are already in hand — _resolve fetches them to find tmdb_id — so this
-    path costs nothing at all.
-    """
+    """Everything the title page carries — which is nearly everything."""
     score = props.get("score")
     trailers = props.get("trailers") or []
     youtube_id = trailers[0].get("youtube_id") if trailers else None
@@ -226,44 +140,32 @@ def _from_props(props: dict) -> dict:
 # ── The orchestrator ──────────────────────────────────────────────────────────
 
 def title_metadata(media_type: str, title_id, slug: str, version: str) -> dict:
-    """Everything known about one title, from whichever provider answered.
+    """Everything known about one title.
 
     Never raises for a missing answer: a detail modal with no plot is a modal
-    with no plot, not an error page. Only a caller passing nonsense gets an
-    exception.
+    with no plot, not an error page.
     """
-    api_key = tmdb_api_key()
-    key = _cache_key(media_type, title_id, api_key is not None)
+    key = _cache_key(media_type, title_id)
     hit = _cached(key)
     if hit is not None:
         return hit
 
-    result = _resolve(media_type, title_id, slug, version, api_key)
+    result = _resolve(title_id, slug, version)
     _store(key, result)
     return result
 
 
-def _resolve(media_type: str, title_id, slug: str, version: str,
-             api_key: str | None) -> dict:
+def _resolve(title_id, slug: str, version: str) -> dict:
     domain = configured_domain()
-    props: dict = {}
+    if not domain or not slug:
+        return dict(EMPTY)
 
-    if domain and slug:
-        try:
-            from app.core.tv import get_title_props
+    try:
+        from app.core.tv import get_title_props
 
-            props = get_title_props(title_id, slug, version or "", domain) or {}
-        except Exception as exc:
-            logger.info("Cannot read title props for %s: %s", title_id, exc)
+        props = get_title_props(title_id, slug, version or "", domain) or {}
+    except Exception as exc:
+        logger.info("Cannot read title props for %s: %s", title_id, exc)
+        return dict(EMPTY)
 
-    tmdb_id = props.get("tmdb_id")
-
-    if api_key and tmdb_id:
-        try:
-            return _from_tmdb(tmdb_details(int(tmdb_id), media_type, api_key), int(tmdb_id))
-        except Exception as exc:
-            logger.info("TMDB lookup failed for %s: %s", tmdb_id, exc)
-
-    if props:
-        return _from_props(props)
-    return dict(EMPTY)
+    return _from_props(props) if props else dict(EMPTY)
