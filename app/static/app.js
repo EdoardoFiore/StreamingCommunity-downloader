@@ -1582,18 +1582,29 @@ function _getLangSelections() {
 // Guards against a stale response painting over a newer one: open a title, close
 // it, open another before the first reply lands, and the first one used to win.
 let _detailToken = 0;
+// The two fetches of one open land in either order, and each needs something
+// the other has: the failure message depends on whether a fallback exists.
+let _detailState = { tmdbId: null, langsError: null };
 
 function _resetDetailExtras() {
+  _detailState = { tmdbId: null, langsError: null };
   document.getElementById('detail-backdrop').style.display = 'none';
   const plot = document.getElementById('detail-plot');
   plot.textContent = ''; plot.style.display = 'none';
   const genres = document.getElementById('detail-genres');
   genres.innerHTML = ''; genres.style.display = 'none';
   document.getElementById('detail-trailer-btn').style.display = 'none';
+  // The class is rewritten further down on every open; the tooltip is not, so
+  // a stale warning would follow the modal onto the next title.
+  document.getElementById('detail-action-btn').title = '';
 }
 
 function renderTitleMetadata(meta) {
   if (!meta) return;
+  _detailState.tmdbId = meta.tmdb_id || null;
+  // A failure that landed before the metadata was worded without knowing
+  // whether there was a second source to try. Now it can be.
+  if (_detailState.langsError) renderDetailSourceError(_detailState.langsError);
 
   if (meta.backdrop) {
     const backdrop = document.getElementById('detail-backdrop');
@@ -1622,6 +1633,34 @@ function renderTitleMetadata(meta) {
   if (meta.rating && !scoreEl.innerHTML) {
     scoreEl.innerHTML =
       `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${meta.rating}</span>`;
+  }
+}
+
+function renderDetailSourceError(detail) {
+  _detailState.langsError = detail;
+  const langsEl = document.getElementById('detail-langs');
+  const trimmed = (detail || '').slice(0, 140);
+  const hasFallback = !!_detailState.tmdbId;
+  langsEl.innerHTML =
+    `<div class="alert bg-warning py-1 px-2 mb-0 small" style="border-color:#e6a23c">
+       <i class="ti ti-alert-triangle me-1"></i>
+       Sorgente non raggiungibile per questo titolo${hasFallback
+         ? ': verr&agrave; tentata la sorgente alternativa.'
+         : '. Le lingue non sono selezionabili.'}
+       ${trimmed ? `<div class="text-muted mt-1">${escapeHtml(trimmed)}</div>` : ''}
+     </div>`;
+
+  // Deliberately still enabled. The fallback may well work, and disabling the
+  // button removes the one path that might; saying so is the honest version of
+  // taking the choice away.
+  const btn = document.getElementById('detail-action-btn');
+  if (btn) {
+    // The title goes on regardless: "Richiedi" is already btn-warning for its
+    // own reason, and the tooltip is what actually carries the warning.
+    btn.title = hasFallback
+      ? 'La sorgente principale non risponde: verr\u00e0 tentata quella alternativa.'
+      : 'La sorgente non risponde: il download potrebbe fallire.';
+    if (!btn.className.includes('btn-warning')) btn.className = 'btn btn-warning';
   }
 }
 
@@ -1719,7 +1758,13 @@ function openDetailModal(idx) {
     .catch(() => { /* the modal simply stays as it was */ });
 
   fetch(`/api/search/languages/${item.id}?${p}`)
-    .then(r => r.ok ? r.json() : null)
+    .then(async r => {
+      if (r.ok) return r.json();
+      // Used to be swallowed: no chips, no explanation, and a download button
+      // that looked entirely fine.
+      const body = await safeJson(r).catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${r.status}`);
+    })
     .then(info => {
       if (token !== _detailToken) return;
       if (!info) { langsEl.innerHTML=''; return; }
@@ -1742,7 +1787,10 @@ function openDetailModal(idx) {
       }
       langsEl.innerHTML=html;
     })
-    .catch(()=>{ langsEl.innerHTML=''; });
+    .catch(err => {
+      if (token !== _detailToken) return;
+      renderDetailSourceError(err && err.message);
+    });
 }
 
 // ── Requesting ─────────────────────────────────────────────────────────────────
