@@ -45,6 +45,11 @@ WATCH_AUTO_APPROVED = "watch_auto_approved"
 SOURCE_DOMAIN_FOUND = "source_domain_found"
 SOURCE_DOMAIN_APPLIED = "source_domain_applied"
 
+# A post-download hook that did not land. Reported rather than logged: a
+# webhook failing quietly is worse than not having configured one, because
+# whatever was waiting on the other end is now silently out of date.
+HOOK_FAILED = "hook_failed"
+
 # The single vocabulary: the per-channel event picker, the server-side validator
 # and the bell's icon table all key off this.
 ALL_EVENTS = (
@@ -65,6 +70,7 @@ ALL_EVENTS = (
     WATCH_AUTO_APPROVED,
     SOURCE_DOMAIN_FOUND,
     SOURCE_DOMAIN_APPLIED,
+    HOOK_FAILED,
 )
 
 # Outcome vocabulary, kept as plain strings so this module never imports apprise.
@@ -92,6 +98,7 @@ EVENT_NOTIFY_TYPE = {
     WATCH_AUTO_APPROVED: SUCCESS,
     SOURCE_DOMAIN_FOUND: WARNING,
     SOURCE_DOMAIN_APPLIED: SUCCESS,
+    HOOK_FAILED: WARNING,
 }
 
 

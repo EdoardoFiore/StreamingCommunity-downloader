@@ -681,6 +681,7 @@ const NOTIFICATION_ICONS = {
   watch_auto_approved: 'ti-bell-check',
   source_domain_found: 'ti-world-search',
   source_domain_applied: 'ti-world-check',
+  hook_failed: 'ti-webhook-off',
 };
 
 const NOTIFICATION_LABELS = {
@@ -701,6 +702,7 @@ const NOTIFICATION_LABELS = {
   watch_auto_approved: 'Serie approvata',
   source_domain_found: 'Nuovo dominio trovato',
   source_domain_applied: 'Dominio aggiornato',
+  hook_failed: 'Hook fallito',
 };
 
 // Explicit order, so the picker does not depend on object key order.
@@ -723,6 +725,10 @@ const NOTIFICATION_EVENT_GROUPS = [
   {
     label: 'Sorgente',
     events: ['source_domain_found', 'source_domain_applied'],
+  },
+  {
+    label: 'Hook',
+    events: ['hook_failed'],
   },
 ];
 

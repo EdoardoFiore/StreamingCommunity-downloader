@@ -98,6 +98,9 @@ SETTINGS_DEFAULTS = {
     # its own. See app.core.domain_recovery.
     "domain_auto_apply": False,
     "domain_check_interval_minutes": 360,
+    # Ask Jellyfin to scan when a download lands, instead of waiting for its
+    # own schedule. Inert unless Jellyfin is connected.
+    "jellyfin_refresh_on_download": False,
 }
 
 
