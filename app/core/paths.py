@@ -21,6 +21,12 @@ from app.core.headers import sanitize_filename
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
+# Named rather than inlined so the tests can point them at a temp file: the
+# only other way to exercise the detection is to run the suite in a container.
+_DOCKERENV_FILE = "/.dockerenv"
+_CGROUP_FILE = "/proc/1/cgroup"
+_CONTAINER_MARKS = ("docker", "containerd", "kubepods", "libpod")
+
 
 def _host_is_windows() -> bool:
     """Whether this machine genuinely uses Windows paths.
@@ -31,6 +37,28 @@ def _host_is_windows() -> bool:
     PosixPath objects the platform cannot instantiate.
     """
     return os.name == "nt"
+
+
+def _in_container() -> bool:
+    """Whether this looks like a container, so the advice can name the volume.
+
+    Only consulted once the path is already known to be wrong, so the cost of
+    reading two files does not land on any download that is fine. ``/.dockerenv``
+    is what Docker itself drops in; the cgroup scan catches Podman, containerd
+    and Kubernetes, where that file does not exist.
+    """
+    if os.path.exists(_DOCKERENV_FILE):
+        return True
+    try:
+        with open(_CGROUP_FILE, encoding="utf-8", errors="replace") as handle:
+            # Read once into a name. Calling handle.read() inside the genexp
+            # would leave the file at EOF after the first mark, so every mark
+            # but "docker" would be tested against an empty string.
+            cgroups = handle.read()
+    except OSError:
+        # No /proc at all, which is every non-Linux host.
+        return False
+    return any(mark in cgroups for mark in _CONTAINER_MARKS)
 
 
 def looks_like_windows_path(path: str) -> bool:
@@ -50,17 +78,29 @@ def windows_path_problem(path: str) -> str | None:
     handed the name at the very end of the download and answers "Protocol not
     found" — after every segment has already been fetched.
 
-    Docker is where this happens. The host path belongs on the left of the
-    volume mapping; the panel has to be given the path inside the container.
+    Nothing is said about a Windows path on a Windows host: a manual install
+    there is the case this must not get in the way of, and ``N:\Jellyfin\Anime``
+    is simply correct.
+
+    The advice differs by deployment, because the fix does. In a container the
+    host path belongs on the left of the volume mapping and the panel needs the
+    right-hand side; on bare-metal Linux there is no mapping to point at and the
+    answer is just a local absolute path.
     """
     text = (path or "").strip()
     if _host_is_windows() or not looks_like_windows_path(text):
         return None
+    if _in_container():
+        return (
+            f"«{text}» è un percorso Windows, ma il pannello gira in un container Linux. "
+            "Indica il percorso interno al container, cioè la parte a destra dei due "
+            f"punti nel volume del docker-compose: con «{text}:/media/anime» qui va "
+            "«/media/anime»."
+        )
     return (
-        f"«{text}» è un percorso Windows, ma il pannello gira su Linux (Docker). "
-        "Indica il percorso interno al container, cioè la parte a destra dei due "
-        f"punti nel volume del docker-compose: con «{text}:/media/anime» qui va "
-        "«/media/anime»."
+        f"«{text}» è un percorso Windows, ma il pannello gira su Linux. "
+        "Indica un percorso assoluto del filesystem locale, per esempio "
+        "«/srv/media/anime»."
     )
 
 

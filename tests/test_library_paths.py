@@ -20,6 +20,7 @@ FFmpeg *should* accept is never read as a protocol name to begin with.
 """
 
 import json
+import os
 
 import pytest
 
@@ -31,8 +32,16 @@ from tests.conftest import ALL, do_setup, make_user, session_for
 
 @pytest.fixture
 def posix_host(monkeypatch):
-    """Pretend to be the Linux container, which is where this bites."""
+    """Pretend to be the Linux container the report came from."""
     monkeypatch.setattr(paths, "_host_is_windows", lambda: False)
+    monkeypatch.setattr(paths, "_in_container", lambda: True)
+
+
+@pytest.fixture
+def bare_linux_host(monkeypatch):
+    """A manual install on Linux: still wrong, but for a different reason."""
+    monkeypatch.setattr(paths, "_host_is_windows", lambda: False)
+    monkeypatch.setattr(paths, "_in_container", lambda: False)
 
 
 @pytest.fixture
@@ -80,6 +89,15 @@ def test_the_message_names_the_volume_mapping(posix_host):
     assert "/media/anime" in problem
 
 
+def test_bare_metal_linux_is_not_told_about_volumes(bare_linux_host):
+    """There is no mapping to point at, so the advice must not invent one."""
+    problem = windows_path_problem(r"N:\Jellyfin\Anime")
+
+    assert problem is not None
+    assert "docker" not in problem.lower()
+    assert "/srv/media/anime" in problem
+
+
 def test_a_windows_host_is_not_told_off(monkeypatch):
     """The same path is correct when the panel really does run on Windows."""
     monkeypatch.setattr(paths, "_host_is_windows", lambda: True)
@@ -95,6 +113,53 @@ def test_an_empty_path_is_refused_everywhere():
 
 def test_a_valid_path_comes_back_trimmed(posix_host):
     assert validate_library_path("  /media/anime  ") == "/media/anime"
+
+
+# ── which deployment this is ────────────────────────────────────────
+
+def test_the_real_host_has_the_last_word():
+    """No patching at all, on whatever machine the suite is running.
+
+    The check must never get in the way of a manual Windows install, where a
+    drive path is simply the correct answer; and it must fire on Linux, where
+    it is not. Running on both platforms, this asserts the same rule from
+    opposite sides.
+    """
+    problem = windows_path_problem(r"N:\Jellyfin\Anime")
+
+    assert (problem is None) == (os.name == "nt")
+
+
+def test_dockerenv_is_enough(monkeypatch):
+    monkeypatch.setattr(paths, "_DOCKERENV_FILE", __file__)
+
+    assert paths._in_container()
+
+
+def test_a_cgroup_marker_is_enough(monkeypatch, tmp_path):
+    """Podman and Kubernetes leave no /.dockerenv behind."""
+    cgroup = tmp_path / "cgroup"
+    cgroup.write_text("0::/kubepods/besteffort/pod4f2\n", encoding="utf-8")
+    monkeypatch.setattr(paths, "_DOCKERENV_FILE", str(tmp_path / "absent"))
+    monkeypatch.setattr(paths, "_CGROUP_FILE", str(cgroup))
+
+    assert paths._in_container()
+
+
+def test_an_ordinary_host_is_not_a_container(monkeypatch, tmp_path):
+    """A bare-metal Linux box: no marker file, and /proc/1/cgroup names none.
+
+    A missing file has to read as "not a container" rather than raising —
+    Windows has no /proc at all.
+    """
+    cgroup = tmp_path / "cgroup"
+    cgroup.write_text("0::/user.slice/user-1000.slice\n", encoding="utf-8")
+    monkeypatch.setattr(paths, "_DOCKERENV_FILE", str(tmp_path / "absent"))
+    monkeypatch.setattr(paths, "_CGROUP_FILE", str(cgroup))
+    assert paths._in_container() is False
+
+    monkeypatch.setattr(paths, "_CGROUP_FILE", str(tmp_path / "absent"))
+    assert paths._in_container() is False
 
 
 # ── refused when saved ────────────────────────────────────────────────────────
