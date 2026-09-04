@@ -5,7 +5,7 @@ import subprocess
 import requests
 import ffmpeg
 
-from app.core.ffmpeg_path import get_ffmpeg_exe
+from app.core.ffmpeg_path import ffmpeg_file_arg, get_ffmpeg_exe
 from app.core.m3u8 import M3U8_Parser
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,10 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
     # OUTPUT options and MUST come after all -i inputs but before the output file.
     # (ffmpeg-python's .global_args put them after the output filename, where ffmpeg
     # silently ignores them — hence subtitle language tags never applied.)
-    cmd = [get_ffmpeg_exe(), "-y", "-i", video_path]
+    # file: on the library-side paths only. The temp inputs below are ours and
+    # cannot carry a colon, but video_path and output_path are built from a
+    # configured library root, where a stray colon would be read as a protocol.
+    cmd = [get_ffmpeg_exe(), "-y", "-i", ffmpeg_file_arg(video_path)]
     for track in audio_tracks:
         cmd += ["-i", track["path"]]
     for track in subtitle_tracks:
@@ -88,7 +91,7 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
         cmd += [f"-metadata:s:s:{i}", f"title={name}"]
         cmd += [f"-disposition:s:{i}", "forced" if forced else "0"]
 
-    cmd += [output_path]
+    cmd += [ffmpeg_file_arg(output_path)]
 
     logger.info("Remuxing to MKV: video + %d audio + %d subtitle tracks",
                 len(audio_tracks), len(subtitle_tracks))

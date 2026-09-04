@@ -59,7 +59,7 @@ def segment_server(monkeypatch):
     calls: list[str] = []
     replies: list = []
 
-    def fake_get(url, *args, **kwargs):
+    def fake_get(self, url, *args, **kwargs):
         calls.append(url)
         if replies:
             reply = replies.pop(0)
@@ -69,7 +69,7 @@ def segment_server(monkeypatch):
             raise reply
         return reply
 
-    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests.Session, "get", fake_get)
     return replies, calls
 
 
@@ -310,14 +310,14 @@ def test_a_source_that_only_throttles_is_not_written_off(tmp_path, monkeypatch, 
     refused = set(range(84))
     attempts: dict[str, int] = {}
 
-    def fake_get(url, *args, **kwargs):
+    def fake_get(self, url, *args, **kwargs):
         attempts[url] = attempts.get(url, 0) + 1
         index = int(url.rsplit("seg-", 1)[1].removesuffix(".ts"))
         if index in refused and attempts[url] <= 3:
             return _Response(503)
         return _Response(200)
 
-    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests.Session, "get", fake_get)
     seg = _segments(tmp_path, count=1525)
 
     seg.download_ts()

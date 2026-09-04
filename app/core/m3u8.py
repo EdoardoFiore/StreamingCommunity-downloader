@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 import ffmpeg
+from requests.adapters import HTTPAdapter
 from m3u8 import M3U8 as M3U8_Lib
 from tqdm.rich import tqdm
 from tqdm import TqdmExperimentalWarning
@@ -17,8 +18,9 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
 from app.config import get_settings
-from app.core.ffmpeg_path import get_ffmpeg_exe
+from app.core.ffmpeg_path import ffmpeg_file_arg, get_ffmpeg_exe
 from app.core.headers import get_headers
+from app.core.paths import windows_path_problem
 from app.progress import DownloadCancelledError
 
 warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
@@ -87,6 +89,61 @@ def _segment_backoff(attempt: int) -> float:
     place.
     """
     return min(2 ** attempt, MAX_SEGMENT_BACKOFF) * (0.5 + random.random())
+
+
+# Segment requests in flight across the whole process, not per download.
+#
+# ``max_segment_workers`` used to size each download's pool on its own, so the
+# default queue of three concurrent downloads opened three pools of sixteen —
+# 48 requests at once against the same CDN edge. That is what the reports of
+# "one download in three fails" were: the edge shed the load with 503s, and the
+# container's resolver started answering "Temporary failure in name resolution",
+# which the retry loop cannot tell apart from a source that is simply gone.
+#
+# The setting keeps its meaning — how many segments to fetch at once — but now
+# describes the panel rather than each download, so a queue of three is as
+# polite to the source as a queue of one and merely takes longer to drain.
+_segment_budget_guard = threading.Lock()
+_segment_budget: threading.Semaphore | None = None
+_segment_budget_size = 0
+
+
+def segment_budget(size: int) -> threading.Semaphore:
+    """The process-wide budget, resized when the setting changes.
+
+    Resizing replaces the semaphore rather than adjusting it: a thread holding
+    a permit releases the object it acquired, so the old one drains on its own
+    and the two can briefly overlap. That window is bounded and self-correcting,
+    and the alternative is tracking every outstanding permit to rebalance it.
+    """
+    global _segment_budget, _segment_budget_size
+    size = max(1, int(size))
+    with _segment_budget_guard:
+        if _segment_budget is None or _segment_budget_size != size:
+            _segment_budget = threading.Semaphore(size)
+            _segment_budget_size = size
+        return _segment_budget
+
+
+def _new_session(pool_size: int) -> requests.Session:
+    """One session per download, sized to the workers that will share it.
+
+    Every segment used to go through a bare ``requests.get``, which opens a new
+    TCP connection, a new TLS handshake and — the part that actually broke
+    things — a new DNS lookup, for each of a playlist's thousands of segments.
+    A session keeps the connection alive, so the host is resolved once per
+    download instead of once per request.
+
+    The pool is sized explicitly: urllib3's default of ten would leave sixteen
+    workers discarding connections and reopening them, which is the same
+    problem in miniature. Retries stay at zero because ``get_req_ts`` owns that
+    policy, and urllib3's would silently multiply it.
+    """
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size, max_retries=0)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
 class Decryption:
@@ -206,6 +263,19 @@ class M3U8_Segments:
         self._failed_lock = threading.Lock()
         self._abort = threading.Event()
 
+        # Read once here rather than per segment: get_settings() opens and
+        # parses data.json on every call, and this is on the path taken a few
+        # thousand times per download.
+        self._workers = max(1, int(get_settings().get("max_segment_workers", 16)))
+        self._budget = segment_budget(self._workers)
+        self._session = _new_session(self._workers)
+
+        # One user-agent for the whole download, not one per request.
+        # get_headers() builds a rotator and picks again on every call, so a
+        # single film sent thousands of different agents down what is now one
+        # connection — wasted work, and exactly the shape a CDN rate-limits.
+        self._user_agent = get_headers()
+
     def parse_data(self, m3u8_content):
         m3u8_parser = M3U8_Parser()
         m3u8_parser.parse_data(m3u8_content)
@@ -216,7 +286,7 @@ class M3U8_Segments:
         self.segments = m3u8_parser.segments
 
     def _headers(self):
-        h = {"user-agent": get_headers()}
+        h = {"user-agent": self._user_agent}
         if self.referer:
             h["referer"] = self.referer
         return h
@@ -240,7 +310,7 @@ class M3U8_Segments:
         for attempt in range(max_retries):
             last = attempt == max_retries - 1
             try:
-                response = requests.get(current, headers=self._headers(), timeout=15)
+                response = self._session.get(current, headers=self._headers(), timeout=15)
             except requests.RequestException as e:
                 response = None
                 logger.warning("%s M3U8 fetch failed (%s) — tentativo %d/%d",
@@ -305,7 +375,13 @@ class M3U8_Segments:
             if self._cancel and self._cancel.is_set():
                 return None
             try:
-                response = requests.get(ts_url, headers={"user-agent": get_headers()}, timeout=10)
+                # The budget is held around the request alone. A thread waiting
+                # out its backoff below must not occupy a slot the source is
+                # willing to serve to someone else.
+                with self._budget:
+                    response = self._session.get(
+                        ts_url, headers=self._headers(), timeout=(10, 30)
+                    )
             except Exception as e:
                 logger.warning("Segment exception (attempt %d/%d): %s",
                                attempt + 1, self.max_retry, e)
@@ -415,7 +491,7 @@ class M3U8_Segments:
         timer_thread.start()
 
         try:
-            with ThreadPoolExecutor(max_workers=get_settings().get("max_segment_workers", 16)) as executor:
+            with ThreadPoolExecutor(max_workers=self._workers) as executor:
                 futures = []
                 for index in range(len(self.segments)):
                     if timeout_event.is_set() or self._abort.is_set():
@@ -473,6 +549,10 @@ class M3U8_Segments:
             progress_counter.close()
             quit_event.set()
             timer_thread.join()
+            # Nothing after this fetches anything — join() only reads the files
+            # already on disk — so the pooled connections are released here
+            # rather than waiting on the garbage collector.
+            self._session.close()
 
     def _retry_failed_sequentially(self, progress_counter):
         """Second pass over the segments the parallel pass gave up on.
@@ -593,8 +673,9 @@ class M3U8_Segments:
         os.makedirs(os.path.dirname(os.path.abspath(output_filename)), exist_ok=True)
         try:
             ffmpeg.input(combined_ts, fflags="+genpts", avoid_negative_ts="make_zero").output(
-                output_filename, **{"c:v": "copy", "c:a": "aac", "b:a": "192k",
-                                    "af": "aresample=async=1000", "movflags": "+faststart"}
+                ffmpeg_file_arg(output_filename),
+                **{"c:v": "copy", "c:a": "aac", "b:a": "192k",
+                   "af": "aresample=async=1000", "movflags": "+faststart"}
             ).overwrite_output().run(cmd=get_ffmpeg_exe(), capture_stdout=True, capture_stderr=True)
         except ffmpeg.Error as e:
             stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
@@ -728,9 +809,9 @@ class M3U8_Downloader:
             (
                 ffmpeg
                 .output(
-                    ffmpeg.input(self.video_path),
+                    ffmpeg.input(ffmpeg_file_arg(self.video_path)),
                     ffmpeg.input(audio_path),
-                    merged_path,
+                    ffmpeg_file_arg(merged_path),
                     vcodec="copy",
                     acodec="copy",
                     loglevel="quiet",
@@ -819,6 +900,15 @@ def _download_m3u8(
     audio_track_urls: list[dict] = None,
     subtitle_track_urls: list[dict] = None,
 ):
+    # Checked before a single segment is fetched. A library configured with a
+    # Windows path on a Linux host used to get all the way here, create a
+    # directory literally named "N:\Jellyfin\Anime" beside the app, download
+    # the whole episode, and only then fail in FFmpeg with "Protocol not found"
+    # — an error that says nothing about the actual mistake.
+    problem = windows_path_problem(output_filename)
+    if problem:
+        raise RuntimeError(f"Percorso di destinazione non valido. {problem}")
+
     key = bytes.fromhex(key) if key is not None else None
 
     # Jellyfin convention: subtitles live next to the video as {stem}.{lang}.vtt

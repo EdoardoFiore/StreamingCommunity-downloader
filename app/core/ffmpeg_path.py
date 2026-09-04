@@ -64,3 +64,20 @@ def get_ffprobe_exe() -> str | None:
             return candidate
 
     return shutil.which("ffprobe")
+
+
+def ffmpeg_file_arg(path: str) -> str:
+    r"""Return *path* explicitly marked as a filesystem path for FFmpeg.
+
+    FFmpeg reads everything before the first ':' in a filename as a protocol
+    name, so a Windows-style destination — ``N:\Jellyfin\Anime\…`` — is
+    taken for a protocol called ``N`` and rejected with "Protocol not found",
+    an error naming a protocol nobody asked for. The ``file:`` prefix says
+    which protocol it actually is and takes the guess away.
+
+    Applied to every input and output that comes from a configured library
+    path. Format detection is unaffected: FFmpeg still guesses the muxer from
+    the extension, which the prefix leaves at the end of the string.
+    """
+    text = str(path)
+    return text if text.startswith("file:") else f"file:{text}"

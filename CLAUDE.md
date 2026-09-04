@@ -117,6 +117,16 @@ anything under a mounted static directory is readable by unauthenticated visitor
   the request queue.
 - **Never substitute an audio track.** `strict_audio=True` on the request path turns a missing
   language into an error and parks the request for a human.
+- **`max_segment_workers` bounds the process, not a download.** `m3u8.segment_budget()` is a
+  process-wide semaphore held around each segment request; sizing a pool per download instead
+  multiplies it by `max_concurrent_downloads` and reproduces the 503 storms and container DNS
+  exhaustion it exists to prevent. Segments go through the download's pooled `requests.Session`,
+  never a bare `requests.get` — one DNS lookup per download instead of one per segment.
+- **A library path is validated before it is stored.** A Windows path on a Linux host is accepted by
+  every layer below (a backslash is a legal filename character there) and only surfaces as FFmpeg's
+  "Protocol not found" after a download has finished. `paths.windows_path_problem()` guards both
+  `PUT /api/domain/libraries` and the top of `_download_m3u8`; FFmpeg filenames built from a library
+  root go through `ffmpeg_file_arg()`.
 - **A watch never downloads anything itself.** `app/watches/poller.py` turns a new episode into an
   ordinary request and lets `service.create_request` / `service.approve` do the rest, so dedup, the
   library check and notifications keep working. Whether it is approved on the spot comes from the

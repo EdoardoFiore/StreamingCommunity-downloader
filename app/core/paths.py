@@ -14,9 +14,65 @@ a second implementation of any of it.
 """
 
 import os
+import re
 
 from app.core import naming
 from app.core.headers import sanitize_filename
+
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _host_is_windows() -> bool:
+    """Whether this machine genuinely uses Windows paths.
+
+    A function rather than ``os.name == "nt"`` inline, so the tests have a seam:
+    they must be able to describe a Linux deployment while themselves running
+    on Windows, and patching ``os.name`` globally makes ``pathlib`` hand out
+    PosixPath objects the platform cannot instantiate.
+    """
+    return os.name == "nt"
+
+
+def looks_like_windows_path(path: str) -> bool:
+    r"""A drive letter or a UNC share: ``N:\Jellyfin`` or ``\\nas\media``."""
+    text = (path or "").strip()
+    return bool(_WINDOWS_DRIVE_RE.match(text)) or text.startswith("\\\\")
+
+
+def windows_path_problem(path: str) -> str | None:
+    r"""Why *path* cannot work on this host, or None when it can.
+
+    A Windows path configured on a POSIX host is the one library
+    misconfiguration that fails late and reports the wrong thing.
+    ``os.makedirs`` accepts it, because a backslash is an ordinary character in
+    a Linux filename, and quietly creates a single directory literally called
+    ``N:\Jellyfin\Anime`` next to the app. Nothing complains until FFmpeg is
+    handed the name at the very end of the download and answers "Protocol not
+    found" — after every segment has already been fetched.
+
+    Docker is where this happens. The host path belongs on the left of the
+    volume mapping; the panel has to be given the path inside the container.
+    """
+    text = (path or "").strip()
+    if _host_is_windows() or not looks_like_windows_path(text):
+        return None
+    return (
+        f"«{text}» è un percorso Windows, ma il pannello gira su Linux (Docker). "
+        "Indica il percorso interno al container, cioè la parte a destra dei due "
+        f"punti nel volume del docker-compose: con «{text}:/media/anime» qui va "
+        "«/media/anime»."
+    )
+
+
+def validate_library_path(path: str) -> str:
+    """Return the trimmed path, or raise ValueError explaining what is wrong."""
+    text = (path or "").strip()
+    if not text:
+        raise ValueError("Il percorso della libreria non può essere vuoto.")
+    problem = windows_path_problem(text)
+    if problem:
+        raise ValueError(problem)
+    return text
 
 
 def fmt_ep(n) -> str:
