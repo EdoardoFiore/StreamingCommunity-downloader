@@ -20,10 +20,13 @@ from app.core.m3u8 import M3U8_Segments
 
 
 class _Response:
-    def __init__(self, status_code=200, content=b"x" * 10):
+    def __init__(self, status_code=200, content=b"x" * 10, headers=None):
         self.status_code = status_code
         self.content = content
         self.ok = 200 <= status_code < 300
+        # A real Response always has these, and get_req_ts reads Retry-After
+        # off a rejection now.
+        self.headers = headers or {}
 
 
 class _Bar:

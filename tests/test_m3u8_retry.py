@@ -27,10 +27,11 @@ RENDITION = (
 
 
 class _Response:
-    def __init__(self, status_code=200, text=""):
+    def __init__(self, status_code=200, text="", headers=None):
         self.status_code = status_code
         self.text = text
         self.ok = 200 <= status_code < 300
+        self.headers = headers or {}
 
 
 @pytest.fixture

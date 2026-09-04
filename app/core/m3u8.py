@@ -103,26 +103,157 @@ def _segment_backoff(attempt: int) -> float:
 # The setting keeps its meaning — how many segments to fetch at once — but now
 # describes the panel rather than each download, so a queue of three is as
 # polite to the source as a queue of one and merely takes longer to drain.
-_segment_budget_guard = threading.Lock()
-_segment_budget: threading.Semaphore | None = None
-_segment_budget_size = 0
+# A fixed number could not be right either. Sixteen at once is already more
+# than vixcloud's edge will serve — a single download, with nothing else
+# running, gets its first dozen segments and 503s from there on — while a
+# healthy source handles far more and a cautious constant would leave it idle.
+# The setting is therefore a ceiling to be discovered under, not a target: the
+# limiter starts there, halves what it asks for whenever the source pushes
+# back, and creeps up again while segments are arriving.
+MIN_SEGMENT_ALLOWANCE = 2
+
+# A 503 arrives in milliseconds, so a shrink per response would collapse the
+# allowance on one burst of a hundred replies that all describe the same
+# moment. One cut per this many seconds, and the rest of the burst is absorbed.
+PENALTY_INTERVAL = 2.0
+
+# Retry-After is the source saying exactly how long to wait. Honoured, but not
+# unboundedly: a very long value is a fetch that will outlive the segment's
+# attempts anyway, and the sequential pass is a better place to arrive late.
+MAX_RETRY_AFTER = 30.0
 
 
-def segment_budget(size: int) -> threading.Semaphore:
-    """The process-wide budget, resized when the setting changes.
+class AdaptiveLimiter:
+    """Concurrency that finds the source's tolerance instead of assuming it.
 
-    Resizing replaces the semaphore rather than adjusting it: a thread holding
-    a permit releases the object it acquired, so the old one drains on its own
-    and the two can briefly overlap. That window is bounded and self-correcting,
-    and the alternative is tracking every outstanding permit to rebalance it.
+    Additive increase, multiplicative decrease — the same loop TCP uses, and
+    for the same reason: nobody can be told the right number in advance, and
+    guessing high is punished far harder than guessing low. Overshoot costs a
+    burst of 503s and a halving; undershoot costs a few seconds of climbing.
+
+    Process-wide, like the ceiling it works under, so three queued downloads
+    share one view of how much the source is willing to serve rather than each
+    rediscovering it. Requests in flight are what is counted, because that is
+    what the edge counts too.
     """
-    global _segment_budget, _segment_budget_size
-    size = max(1, int(size))
+
+    def __init__(self, maximum: int, now=time.monotonic):
+        self._cond = threading.Condition()
+        self._now = now
+        self.maximum = max(1, int(maximum))
+        self._allowance = self.maximum
+        self._in_flight = 0
+        self._served = 0
+        self._last_penalty = None
+
+    @property
+    def allowance(self) -> int:
+        with self._cond:
+            return self._allowance
+
+    @property
+    def in_flight(self) -> int:
+        with self._cond:
+            return self._in_flight
+
+    def resize(self, maximum: int) -> None:
+        """Follow the setting, without discarding what has been learnt.
+
+        An allowance sitting at the old ceiling was never cut — nothing has
+        been learnt to preserve — so it moves with it, and raising the setting
+        takes effect at once instead of waiting to be climbed to. One that is
+        below the ceiling is there because the source put it there: it is only
+        clamped, and earns its way back up as before.
+        """
+        with self._cond:
+            maximum = max(1, int(maximum))
+            if maximum == self.maximum:
+                return
+            untouched = self._allowance >= self.maximum
+            self.maximum = maximum
+            self._allowance = maximum if untouched else max(1, min(self._allowance, maximum))
+            self._cond.notify_all()
+
+    def __enter__(self):
+        with self._cond:
+            while self._in_flight >= self._allowance:
+                # A timeout rather than a bare wait: a shrink can leave a
+                # thread parked with no release left to wake it, and one that
+                # rechecks every half second costs nothing next to a request.
+                self._cond.wait(0.5)
+            self._in_flight += 1
+        return self
+
+    def __exit__(self, *exc_info):
+        with self._cond:
+            self._in_flight -= 1
+            self._cond.notify()
+        return False
+
+    def penalise(self) -> None:
+        """The source pushed back. Ask it for half as much."""
+        with self._cond:
+            now = self._now()
+            if self._last_penalty is not None and now - self._last_penalty < PENALTY_INTERVAL:
+                return
+            self._last_penalty = now
+            self._served = 0
+            floor = min(MIN_SEGMENT_ALLOWANCE, self.maximum)
+            before = self._allowance
+            self._allowance = max(floor, before // 2)
+            after, ceiling = self._allowance, self.maximum
+        if before != after:
+            # Logged outside the lock, and only when the number really moved:
+            # this is the line that says whether the source is throttling us or
+            # refusing us, which the 503s alone never distinguished.
+            logger.info("Source pushing back — segment concurrency %d → %d (max %d)",
+                        before, after, ceiling)
+
+    def reward(self) -> None:
+        """A segment arrived. One extra slot per allowance served, no more.
+
+        Climbing by one only after a full round of successes is what keeps the
+        loop from oscillating: the allowance has to be *earned* at its current
+        width before it widens.
+        """
+        with self._cond:
+            if self._allowance >= self.maximum:
+                return
+            self._served += 1
+            if self._served >= self._allowance:
+                self._served = 0
+                self._allowance += 1
+                self._cond.notify()
+
+
+_segment_budget_guard = threading.Lock()
+_segment_budget: AdaptiveLimiter | None = None
+
+
+def segment_budget(size: int) -> AdaptiveLimiter:
+    """The process-wide limiter, following the configured ceiling."""
+    global _segment_budget
     with _segment_budget_guard:
-        if _segment_budget is None or _segment_budget_size != size:
-            _segment_budget = threading.Semaphore(size)
-            _segment_budget_size = size
+        if _segment_budget is None:
+            _segment_budget = AdaptiveLimiter(size)
+        else:
+            _segment_budget.resize(size)
         return _segment_budget
+
+
+def _retry_after(response) -> float | None:
+    """The wait the source asked for, in seconds, when it named one.
+
+    Only the delta-seconds form is read. The HTTP-date alternative needs a
+    clock both ends agree on, and a CDN shedding load sends the number.
+    """
+    raw = (response.headers or {}).get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return max(0.0, min(float(str(raw).strip()), MAX_RETRY_AFTER))
+    except (TypeError, ValueError):
+        return None
 
 
 def _new_session(pool_size: int) -> requests.Session:
@@ -374,24 +505,33 @@ class M3U8_Segments:
         for attempt in range(self.max_retry):
             if self._cancel and self._cancel.is_set():
                 return None
+            asked_for = None
             try:
-                # The budget is held around the request alone. A thread waiting
-                # out its backoff below must not occupy a slot the source is
-                # willing to serve to someone else.
+                # The slot is held around the request alone. A thread waiting
+                # out its backoff below must not occupy one the source is
+                # willing to give to someone else.
                 with self._budget:
                     response = self._session.get(
                         ts_url, headers=self._headers(), timeout=(10, 30)
                     )
             except Exception as e:
+                # A refused or timed-out connection under load says the same
+                # thing a 503 does, and used to be the one form of pushback the
+                # limiter never heard about.
+                self._budget.penalise()
                 logger.warning("Segment exception (attempt %d/%d): %s",
                                attempt + 1, self.max_retry, e)
             else:
                 if response.status_code == 200:
+                    self._budget.reward()
                     return response.content
                 logger.warning("Segment HTTP %d (attempt %d/%d): ...%s", response.status_code,
                                attempt + 1, self.max_retry, ts_url[-60:])
                 if response.status_code not in RETRIABLE_SEGMENT_STATUS:
+                    # A verdict, not congestion: nothing to back off from.
                     return None
+                self._budget.penalise()
+                asked_for = _retry_after(response)
             if attempt < self.max_retry - 1:
                 # Waiting is pointless once the source has been written off, but
                 # the attempt already made still counts: bailing out before ever
@@ -399,7 +539,9 @@ class M3U8_Segments:
                 # segment still in flight.
                 if self._abort.is_set():
                     return None
-                time.sleep(_segment_backoff(attempt))
+                # The source's own number wins over our guess when it sent one.
+                time.sleep(asked_for if asked_for is not None
+                           else _segment_backoff(attempt))
         return None
 
     def _write_ts(self, index, content):

@@ -117,10 +117,14 @@ anything under a mounted static directory is readable by unauthenticated visitor
   the request queue.
 - **Never substitute an audio track.** `strict_audio=True` on the request path turns a missing
   language into an error and parks the request for a human.
-- **`max_segment_workers` bounds the process, not a download.** `m3u8.segment_budget()` is a
-  process-wide semaphore held around each segment request; sizing a pool per download instead
-  multiplies it by `max_concurrent_downloads` and reproduces the 503 storms and container DNS
-  exhaustion it exists to prevent. Segments go through the download's pooled `requests.Session`,
+- **`max_segment_workers` is a process-wide ceiling, not a per-download target.**
+  `m3u8.segment_budget()` returns one `AdaptiveLimiter` for the whole panel, held around each
+  segment request. Sizing a pool per download instead multiplies it by `max_concurrent_downloads`
+  and reproduces the 503 storms and container DNS exhaustion it exists to prevent. The limiter
+  halves its allowance on pushback (`penalise()` on a retriable status or a connection error, once
+  per `PENALTY_INTERVAL`) and climbs back one slot per allowance served (`reward()` on a 200) —
+  a non-retriable status teaches it nothing, because a verdict is not congestion. `Retry-After`
+  wins over the computed backoff. Segments go through the download's pooled `requests.Session`,
   never a bare `requests.get` — one DNS lookup per download instead of one per segment.
 - **A library path is validated before it is stored.** A Windows path on a Linux host is accepted by
   every layer below (a backslash is a legal filename character there) and only surfaces as FFmpeg's

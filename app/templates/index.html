@@ -2348,7 +2348,7 @@
                 <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–128)</span>
               </label>
               <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
-              <div class="form-text">Limite complessivo del pannello, non per singolo download: più download in coda se lo dividono. Suggerito: 8–32.</div>
+              <div class="form-text">Tetto massimo complessivo del pannello, non per singolo download. Se la fonte risponde 503 il pannello scende sotto questo valore da solo e risale quando torna a servire. Suggerito: 8–16.</div>
             </div>
             <div class="col-sm-6">
               <label class="form-label" for="setting-watch-interval">
