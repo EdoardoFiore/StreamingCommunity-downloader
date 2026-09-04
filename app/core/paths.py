@@ -27,6 +27,13 @@ _DOCKERENV_FILE = "/.dockerenv"
 _CGROUP_FILE = "/proc/1/cgroup"
 _CONTAINER_MARKS = ("docker", "containerd", "kubepods", "libpod")
 
+# Where the shipped compose mounts the media volume, and what VIDEOS_DIR is set
+# to there. Named in the advice because "a path inside the container" is not
+# something anyone can guess: the answer is one specific directory, and telling
+# people to work it out from the compose file is how the reported deployment
+# ended up with the host path in the first place.
+CONTAINER_VIDEOS_DIR = "/app/videos"
+
 
 def _host_is_windows() -> bool:
     """Whether this machine genuinely uses Windows paths.
@@ -93,9 +100,10 @@ def windows_path_problem(path: str) -> str | None:
     if _in_container():
         return (
             f"«{text}» è un percorso Windows, ma il pannello gira in un container Linux. "
-            "Indica il percorso interno al container, cioè la parte a destra dei due "
-            f"punti nel volume del docker-compose: con «{text}:/media/anime» qui va "
-            "«/media/anime»."
+            f"Indica il percorso interno al container: «{CONTAINER_VIDEOS_DIR}/<cartella "
+            f"nel volume>», per esempio «{CONTAINER_VIDEOS_DIR}/Anime». Il percorso "
+            "dell'host va nel docker-compose, non qui: è la parte a sinistra dei due punti "
+            f"nel volume montato su «{CONTAINER_VIDEOS_DIR}»."
         )
     return (
         f"«{text}» è un percorso Windows, ma il pannello gira su Linux. "

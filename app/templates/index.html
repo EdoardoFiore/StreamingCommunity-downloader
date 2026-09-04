@@ -2216,6 +2216,14 @@
           <p class="settings-section-hint">
             Dove finiscono i file scaricati, una cartella per tipo di contenuto.
           </p>
+          <p class="settings-section-hint">
+            <strong>Su Docker serve il percorso interno al container</strong>, cioè
+            <code>/app/videos/&lt;cartella nel volume&gt;</code> — per esempio
+            <code>/app/videos/Anime</code>. Il percorso dell&rsquo;host
+            (<code>N:\Jellyfin\Anime</code>, <code>/srv/nfs/storage/Anime</code>) va nel
+            <code>docker-compose.yml</code>, non qui: è la parte a sinistra dei due punti nel
+            volume montato su <code>/app/videos</code>.
+          </p>
           <div id="libraries-list" class="mb-2"></div>
           <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
             <i class="ti ti-plus me-1"></i>Aggiungi libreria

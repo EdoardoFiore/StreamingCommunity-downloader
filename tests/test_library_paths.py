@@ -21,6 +21,7 @@ FFmpeg *should* accept is never read as a protocol name to begin with.
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -75,18 +76,29 @@ def test_a_container_path_is_left_alone(path):
     assert not looks_like_windows_path(path)
 
 
-def test_the_message_names_the_volume_mapping(posix_host):
+def test_the_message_names_the_mount_point(posix_host):
     """The whole point of catching it: saying what to type instead.
 
-    "Protocol not found" is true and useless. The offending path appears on
-    both sides of the example so the reader can see which half the panel wants.
+    "Protocol not found" is true and useless, and so is "use a path inside the
+    container" — nobody can guess which one. The shipped compose mounts the
+    media volume at exactly one place, so the advice names it and gives a
+    worked example rather than describing where to go and look.
     """
     problem = windows_path_problem(r"N:\Jellyfin\Anime")
 
     assert problem is not None
     assert r"N:\Jellyfin\Anime" in problem
     assert "docker-compose" in problem
-    assert "/media/anime" in problem
+    assert f"{paths.CONTAINER_VIDEOS_DIR}/Anime" in problem
+
+
+def test_the_mount_point_is_the_one_the_compose_uses(posix_host):
+    """The advice is only useful while it matches the shipped deployment: a
+    path this names but the image does not mount is worse than no advice."""
+    compose = Path("docker-compose.template.yml").read_text(encoding="utf-8")
+
+    assert f":{paths.CONTAINER_VIDEOS_DIR}\n" in compose
+    assert f"VIDEOS_DIR={paths.CONTAINER_VIDEOS_DIR}\n" in compose
 
 
 def test_bare_metal_linux_is_not_told_about_volumes(bare_linux_host):
