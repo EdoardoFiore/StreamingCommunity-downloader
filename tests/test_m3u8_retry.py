@@ -27,10 +27,11 @@ RENDITION = (
 
 
 class _Response:
-    def __init__(self, status_code=200, text=""):
+    def __init__(self, status_code=200, text="", headers=None):
         self.status_code = status_code
         self.text = text
         self.ok = 200 <= status_code < 300
+        self.headers = headers or {}
 
 
 @pytest.fixture
@@ -47,7 +48,7 @@ def responses(monkeypatch):
     queued: dict[str, list] = {}
     calls: list[str] = []
 
-    def fake_get(url, *args, **kwargs):
+    def fake_get(self, url, *args, **kwargs):
         calls.append(url)
         for prefix, replies in queued.items():
             if url.startswith(prefix) and replies:
@@ -57,7 +58,7 @@ def responses(monkeypatch):
                 return reply
         return _Response(404)
 
-    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests.Session, "get", fake_get)
     return queued, calls
 
 
@@ -149,18 +150,18 @@ def test_every_attempt_carries_a_timeout(responses, no_sleep, monkeypatch):
     """The reason this codebase has a timeout test at all: a stalled connection
     raises nothing and blocks a worker thread forever."""
     kwargs_seen = []
-    real_get = requests.get
+    real_get = requests.Session.get
 
-    def spy(url, *args, **kwargs):
+    def spy(self, url, *args, **kwargs):
         kwargs_seen.append(kwargs)
-        return real_get(url, *args, **kwargs)
+        return real_get(self, url, *args, **kwargs)
 
     queued, _ = responses
     queued["https://cdn.example.test/master.m3u8"] = [_Response(200, MASTER)]
     queued["https://cdn.example.test/1080/playlist.m3u8"] = [
         _Response(500), _Response(200, RENDITION),
     ]
-    monkeypatch.setattr(requests, "get", spy)
+    monkeypatch.setattr(requests.Session, "get", spy)
 
     _segments().get_info()
 

@@ -2216,6 +2216,14 @@
           <p class="settings-section-hint">
             Dove finiscono i file scaricati, una cartella per tipo di contenuto.
           </p>
+          <p class="settings-section-hint">
+            <strong>Su Docker serve il percorso interno al container</strong>, cioè
+            <code>/app/videos/&lt;cartella nel volume&gt;</code> — per esempio
+            <code>/app/videos/Anime</code>. Il percorso dell&rsquo;host
+            (<code>N:\Jellyfin\Anime</code>, <code>/srv/nfs/storage/Anime</code>) va nel
+            <code>docker-compose.yml</code>, non qui: è la parte a sinistra dei due punti nel
+            volume montato su <code>/app/videos</code>.
+          </p>
           <div id="libraries-list" class="mb-2"></div>
           <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
             <i class="ti ti-plus me-1"></i>Aggiungi libreria
@@ -2344,11 +2352,11 @@
             </div>
             <div class="col-sm-6">
               <label class="form-label" for="setting-max-workers">
-                Thread per segmento
+                Segmenti in parallelo
                 <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–128)</span>
               </label>
               <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
-              <div class="form-text">Suggerito: 8–32. Valori >64 raramente migliorano le prestazioni.</div>
+              <div class="form-text">Tetto massimo complessivo del pannello, non per singolo download. Se la fonte risponde 503 il pannello scende sotto questo valore da solo e risale quando torna a servire. Suggerito: 8–16.</div>
             </div>
             <div class="col-sm-6">
               <label class="form-label" for="setting-watch-interval">

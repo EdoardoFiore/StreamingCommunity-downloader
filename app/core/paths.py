@@ -14,9 +14,113 @@ a second implementation of any of it.
 """
 
 import os
+import re
 
 from app.core import naming
 from app.core.headers import sanitize_filename
+
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+# Named rather than inlined so the tests can point them at a temp file: the
+# only other way to exercise the detection is to run the suite in a container.
+_DOCKERENV_FILE = "/.dockerenv"
+_CGROUP_FILE = "/proc/1/cgroup"
+_CONTAINER_MARKS = ("docker", "containerd", "kubepods", "libpod")
+
+# Where the shipped compose mounts the media volume, and what VIDEOS_DIR is set
+# to there. Named in the advice because "a path inside the container" is not
+# something anyone can guess: the answer is one specific directory, and telling
+# people to work it out from the compose file is how the reported deployment
+# ended up with the host path in the first place.
+CONTAINER_VIDEOS_DIR = "/app/videos"
+
+
+def _host_is_windows() -> bool:
+    """Whether this machine genuinely uses Windows paths.
+
+    A function rather than ``os.name == "nt"`` inline, so the tests have a seam:
+    they must be able to describe a Linux deployment while themselves running
+    on Windows, and patching ``os.name`` globally makes ``pathlib`` hand out
+    PosixPath objects the platform cannot instantiate.
+    """
+    return os.name == "nt"
+
+
+def _in_container() -> bool:
+    """Whether this looks like a container, so the advice can name the volume.
+
+    Only consulted once the path is already known to be wrong, so the cost of
+    reading two files does not land on any download that is fine. ``/.dockerenv``
+    is what Docker itself drops in; the cgroup scan catches Podman, containerd
+    and Kubernetes, where that file does not exist.
+    """
+    if os.path.exists(_DOCKERENV_FILE):
+        return True
+    try:
+        with open(_CGROUP_FILE, encoding="utf-8", errors="replace") as handle:
+            # Read once into a name. Calling handle.read() inside the genexp
+            # would leave the file at EOF after the first mark, so every mark
+            # but "docker" would be tested against an empty string.
+            cgroups = handle.read()
+    except OSError:
+        # No /proc at all, which is every non-Linux host.
+        return False
+    return any(mark in cgroups for mark in _CONTAINER_MARKS)
+
+
+def looks_like_windows_path(path: str) -> bool:
+    r"""A drive letter or a UNC share: ``N:\Jellyfin`` or ``\\nas\media``."""
+    text = (path or "").strip()
+    return bool(_WINDOWS_DRIVE_RE.match(text)) or text.startswith("\\\\")
+
+
+def windows_path_problem(path: str) -> str | None:
+    r"""Why *path* cannot work on this host, or None when it can.
+
+    A Windows path configured on a POSIX host is the one library
+    misconfiguration that fails late and reports the wrong thing.
+    ``os.makedirs`` accepts it, because a backslash is an ordinary character in
+    a Linux filename, and quietly creates a single directory literally called
+    ``N:\Jellyfin\Anime`` next to the app. Nothing complains until FFmpeg is
+    handed the name at the very end of the download and answers "Protocol not
+    found" — after every segment has already been fetched.
+
+    Nothing is said about a Windows path on a Windows host: a manual install
+    there is the case this must not get in the way of, and ``N:\Jellyfin\Anime``
+    is simply correct.
+
+    The advice differs by deployment, because the fix does. In a container the
+    host path belongs on the left of the volume mapping and the panel needs the
+    right-hand side; on bare-metal Linux there is no mapping to point at and the
+    answer is just a local absolute path.
+    """
+    text = (path or "").strip()
+    if _host_is_windows() or not looks_like_windows_path(text):
+        return None
+    if _in_container():
+        return (
+            f"«{text}» è un percorso Windows, ma il pannello gira in un container Linux. "
+            f"Indica il percorso interno al container: «{CONTAINER_VIDEOS_DIR}/<cartella "
+            f"nel volume>», per esempio «{CONTAINER_VIDEOS_DIR}/Anime». Il percorso "
+            "dell'host va nel docker-compose, non qui: è la parte a sinistra dei due punti "
+            f"nel volume montato su «{CONTAINER_VIDEOS_DIR}»."
+        )
+    return (
+        f"«{text}» è un percorso Windows, ma il pannello gira su Linux. "
+        "Indica un percorso assoluto del filesystem locale, per esempio "
+        "«/srv/media/anime»."
+    )
+
+
+def validate_library_path(path: str) -> str:
+    """Return the trimmed path, or raise ValueError explaining what is wrong."""
+    text = (path or "").strip()
+    if not text:
+        raise ValueError("Il percorso della libreria non può essere vuoto.")
+    problem = windows_path_problem(text)
+    if problem:
+        raise ValueError(problem)
+    return text
 
 
 def fmt_ep(n) -> str:

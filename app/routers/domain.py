@@ -11,6 +11,7 @@ from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import get_settings, save_settings
 from app.core import domain_recovery, naming
+from app.core.paths import validate_library_path
 from app.core.page import get_domain_version
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,15 @@ def set_libraries(body: LibrariesUpdate):
     # Deduplicate: last entry per type wins
     seen: dict[str, dict] = {}
     for lib in body.libraries:
-        seen[lib.type] = {"type": lib.type, "path": lib.path}
+        # Rejected here rather than at download time. A host path saved on a
+        # Linux deployment is accepted by every layer below — a backslash is a
+        # legal filename character there — and only surfaces once FFmpeg is
+        # handed the name at the end of a finished download.
+        try:
+            path = validate_library_path(lib.path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        seen[lib.type] = {"type": lib.type, "path": path}
     _update_data({
         "libraries": list(seen.values()),
         "excluded_folders": body.excluded_folders,
