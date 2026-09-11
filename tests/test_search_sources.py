@@ -396,3 +396,83 @@ def test_an_expired_token_is_refetched(au, monkeypatch):
     animeunity.search("y")
 
     assert len(fake.gets) == 2
+
+
+# ── /api/search ───────────────────────────────────────────────────────────────
+
+from app.auth.permissions import ALL_PERMISSIONS  # noqa: E402
+from tests.conftest import do_setup, make_user, session_for  # noqa: E402
+
+
+@pytest.fixture
+def signed_in(client, admin_credentials):
+    do_setup(client, admin_credentials)
+    user = make_user("boss", "jf-boss-id", int(ALL_PERMISSIONS))
+    client.cookies.clear()
+    return session_for(client, user.id)
+
+
+@pytest.fixture
+def asked(monkeypatch):
+    """Record what each source was asked for, without reaching either."""
+    seen = {}
+    from app.core import animeunity as au
+    from app.routers import search as router
+
+    monkeypatch.setattr(router, "configured_domain", lambda: "source.test")
+    monkeypatch.setattr(router, "core_search",
+                        lambda q, domain, **kw: seen.update(sc=(q, domain, kw)) or [])
+    monkeypatch.setattr(au, "search", lambda q, **kw: seen.update(au=(q, kw)) or [])
+    return seen
+
+
+def test_the_page_and_kind_reach_streamingcommunity(client, signed_in, asked):
+    response = client.get("/api/search?q=abc&page=4&media_type=movie")
+
+    assert response.status_code == 200
+    q, domain, kwargs = asked["sc"]
+    assert (q, domain) == ("abc", "source.test")
+    assert kwargs["page"] == 4 and kwargs["media_type"] == "movie"
+
+
+def test_the_anime_filters_reach_animeunity(client, signed_in, asked):
+    response = client.get(
+        "/api/search?q=abc&source=animeunity&page=2&media_type=ova&dubbed=true")
+
+    assert response.status_code == 200
+    q, kwargs = asked["au"]
+    assert q == "abc"
+    assert (kwargs["page"], kwargs["media_type"], kwargs["dubbed"]) == (2, "ova", True)
+
+
+def test_an_unknown_source_is_refused(client, signed_in, asked):
+    """It used to fall through to StreamingCommunity in silence."""
+    assert client.get("/api/search?q=abc&source=nowhere").status_code == 422
+
+
+def test_a_page_past_the_bound_is_refused(client, signed_in, asked):
+    assert client.get("/api/search?q=abc&page=0").status_code == 422
+    assert client.get("/api/search?q=abc&page=9999").status_code == 422
+
+
+def test_an_anime_kind_is_refused_for_streamingcommunity(client, signed_in, asked):
+    """One pattern cannot express two vocabularies; the source has no OVAs."""
+    assert client.get("/api/search?q=abc&media_type=ova").status_code == 422
+
+
+def test_the_dub_filter_is_refused_for_streamingcommunity(client, signed_in, asked):
+    assert client.get("/api/search?q=abc&dubbed=true").status_code == 422
+
+
+def test_an_unasked_dub_filter_is_not_a_refusal(client, signed_in, asked):
+    """False is the default every search sends, not a request for a filter."""
+    assert client.get("/api/search?q=abc&dubbed=false").status_code == 200
+
+
+def test_no_configured_domain_is_still_a_409(client, signed_in, monkeypatch):
+    """The 409 has to survive the generic 502 wrapper below it."""
+    from app.routers import search as router
+    monkeypatch.setattr(router, "configured_domain", lambda: "")
+
+    assert client.get("/api/search?q=abc").status_code == 409
+    assert client.get("/api/search?q=abc&source=animeunity").status_code != 409

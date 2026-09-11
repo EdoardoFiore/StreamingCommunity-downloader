@@ -45,12 +45,14 @@ def test_search_ignores_a_domain_from_the_query_string(client, signed_in, monkey
     monkeypatch.setattr(search, "configured_domain", lambda: "trusted.example")
     monkeypatch.setattr(
         search, "core_search",
-        lambda query, domain: seen.setdefault("domain", domain) or [],
+        lambda query, domain, **kwargs: seen.update(domain=domain, extra=kwargs) or [],
     )
 
-    client.get("/api/search?q=abc&domain=attacker.example")
+    client.get("/api/search?q=abc&domain=attacker.example&page=2&media_type=movie")
 
     assert seen["domain"] == "trusted.example"
+    # Nor may a parameter added later become a second road for a host.
+    assert "attacker.example" not in repr(seen["extra"])
 
 
 def test_endpoints_refuse_to_run_without_a_configured_domain(client, signed_in, monkeypatch):
