@@ -1231,21 +1231,31 @@
     #settings-modal .modal-body { min-height: 340px; }
 
     @media (min-width: 992px) {
-      /* The three modals whose body swaps between panes of different heights,
-         all top-anchored for the same reason — see the note on the settings
-         dialog's markup. A fixed top, and a fixed height the panel may grow into
-         before its body starts scrolling: both constant whichever pane, tab or
-         season is showing, so the row you are clicking through holds still. */
-      #settings-modal .modal-dialog,
-      #episode-modal .modal-dialog,
-      #anime-modal .modal-dialog {
+      /* Both of these modals swap their body between panes of different heights,
+         and both used to let that move the row you were clicking through. Two
+         different answers, because they are read differently.
+
+         The settings dialog is top-anchored: a fixed top, and a fixed height to
+         grow into before the body scrolls. Reading down a form, a heading that
+         stays put matters more than where the panel sits. */
+      #settings-modal .modal-dialog {
         margin-top: 2.5rem;
         height: calc(100% - 5rem);
-      }
-      /* Wider than modal-lg's 720px: these panes are forms with side-by-side
-         fields and long library paths, and 720 wrapped them. */
-      #settings-modal .modal-dialog {
+        /* Wider than modal-lg's 720px: these panes are forms with side-by-side
+           fields and long library paths, and 720 wrapped them. */
         max-width: min(960px, calc(100vw - 3rem));
+      }
+
+      /* The episode lists stay centred, and hold their tabs still by being a
+         constant size instead: it was the panel changing height that moved the
+         season tabs, not where it sat. A fixed height centred in a full-height
+         dialog cannot re-centre, so picking a season with four episodes leaves
+         the tabs exactly where picking one with twenty-four did, and the list
+         scrolls inside. The cost is space under a short season, which is the
+         price of the tabs not moving. */
+      #episode-modal .modal-content,
+      #anime-modal .modal-content {
+        height: min(720px, calc(100vh - 5rem));
       }
     }
     .settings-section-hint {
@@ -2776,7 +2786,7 @@
 
 <!-- ── Episode Browser Modal ────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="episode-modal" tabindex="-1" style="display:none" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="episode-modal-title">Episodi</h5>
@@ -2803,7 +2813,7 @@
 
 <!-- ── Anime Browser Modal (AnimeUnity) ─────────────────────────────── -->
 <div class="modal modal-blur fade" id="anime-modal" tabindex="-1" style="display:none" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="anime-modal-title">Episodi</h5>
