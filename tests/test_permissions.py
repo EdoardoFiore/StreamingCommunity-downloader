@@ -28,11 +28,12 @@ def _no_outbound_source(monkeypatch):
     the source changes nothing they measure. Unmocked, the search case resolves
     a hostname for real on every parametrised run.
     """
-    from app.core import animeunity
+    from app.core import animeunity, home
     from app.routers import search as search_router
 
     monkeypatch.setattr(search_router, "core_search", lambda *a, **kw: [])
     monkeypatch.setattr(animeunity, "search", lambda *a, **kw: [])
+    monkeypatch.setattr(home, "shelves", lambda *a, **kw: [])
 
 
 # ── Endpoint coverage ──────────────────────────────────────────────────────────
@@ -51,6 +52,7 @@ CASES = [
      {"anime_id": "1", "anime_name": "x"}),
     ((Permission.REQUEST, Permission.DOWNLOAD), "GET",
      "/api/search?q=abc&domain=example.test", None),
+    ((Permission.REQUEST, Permission.DOWNLOAD), "GET", "/api/home", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/domain/settings", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/download-hooks", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/domain/settings/naming-defaults", None),

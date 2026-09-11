@@ -24,7 +24,7 @@ from app.watches import poller as watch_poller, router as watches_router
 from app.schedule import ScheduleStore
 from app.config import AUTH_ENABLED, SCHEDULE_FILE
 from app.routers import (
-    domain, search, tv, downloads, progress, files, images, anime, notification_channels,
+    domain, search, home, tv, downloads, progress, files, images, anime, notification_channels,
     metadata as metadata_router, download_hooks,
 )
 
@@ -138,6 +138,7 @@ app.include_router(notification_channels.router)
 app.include_router(download_hooks.router)
 app.include_router(watches_router.router)
 app.include_router(search.router)
+app.include_router(home.router)
 app.include_router(tv.router)
 app.include_router(downloads.router)
 app.include_router(progress.router)
