@@ -403,6 +403,9 @@ function showPage(page) {
   }[page] || 'Cerca';
   document.querySelectorAll('.nav-link[data-page]').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
+  // The search page had no loader at all. This covers the boot too, since
+  // DOMContentLoaded ends in showPage(defaultPage()).
+  if (page === 'search') maybeShowStartPage();
   if (page === 'downloads') refreshJobs();
   if (page === 'files') loadFiles();
   if (page === 'requests') loadRequestQueue();
@@ -1742,6 +1745,11 @@ function setupSearchDebounce() {
     const q = input.value.trim();
     if (q.length >= 3) {
       _searchDebounceTimer = setTimeout(() => doSearch(), 400);
+    } else if (q.length === 0) {
+      // Only on empty, never on one or two characters: that is somebody on
+      // their way to a three-letter query, and swapping the page out from
+      // under them is worse than a blank pause.
+      _searchDebounceTimer = setTimeout(() => showStartPage(), 200);
     }
   });
 }
@@ -1793,18 +1801,29 @@ function setKindFilter(kind) {
   if (kind === _kindFilter) return;
   _kindFilter = kind;
   renderSearchFilters();
-  _rerunSearch();
+  _afterFilterChange();
 }
 
 function setDubOnly(on) {
   _dubOnly = !!on;
   renderSearchFilters();
-  _rerunSearch();
+  _afterFilterChange();
 }
 
 function _rerunSearch() {
   const input = document.getElementById('search-input');
   if (input && input.value.trim()) doSearch();
+  else showStartPage();
+}
+
+// With a query the filter belongs to the source, or paging and filtering stop
+// composing: a page of sixty narrowed to four in the browser would page through
+// a window that has already been narrowed. On the rails there is nothing to
+// page, so it is applied where the cards already are.
+function _afterFilterChange() {
+  const input = document.getElementById('search-input');
+  if (input && input.value.trim()) doSearch();
+  else applyClientFilter();
 }
 
 function _searchParams(q, page) {
@@ -1886,6 +1905,7 @@ async function doSearch(options) {
     _searchExhausted = false;
     _searchResults = [];
     _requestStatus = {};
+    _setStartPageVisible(false);
   }
 
   const container = document.getElementById('search-results');
@@ -1955,6 +1975,115 @@ async function loadMoreResults() {
   if (_loadingMore || _searchExhausted) return;
   _searchPage += 1;
   await doSearch({append: true});
+}
+
+// ── Start page ────────────────────────────────────────────────────────────────
+//
+// With nothing typed, the source's own front page: what is trending, what was
+// added lately, today's top ten, the latest anime episodes. It is decoration, so
+// it degrades to a bare search box rather than to an error banner — a red box
+// where a carousel was is worse than no carousel.
+
+let _homeAbort = null;
+const _homeCache = {};   // source -> shelves, for a switch back and forth
+
+function _setStartPageVisible(on) {
+  const shelves = document.getElementById('home-shelves');
+  const results = document.getElementById('search-results');
+  if (shelves) shelves.style.display = on ? '' : 'none';
+  if (results) results.style.display = on ? 'none' : '';
+  if (on) _setMoreVisible(false);
+}
+
+function maybeShowStartPage() {
+  const input = document.getElementById('search-input');
+  if (input && !input.value.trim()) showStartPage();
+}
+
+function _shelfSkeletons() {
+  const card = '<div class="shelf-item"><div class="skeleton skeleton-card"></div></div>';
+  return ('<div class="shelf"><div class="shelf-rail">' + card.repeat(8) + '</div></div>').repeat(2);
+}
+
+async function showStartPage() {
+  const host = document.getElementById('home-shelves');
+  if (!host) return;
+  if (!currentDomain && currentSource !== 'animeunity') { _setStartPageVisible(false); return; }
+
+  _setStartPageVisible(true);
+  if (_homeCache[currentSource]) { renderShelves(); return; }
+
+  if (_homeAbort) _homeAbort.abort();
+  _homeAbort = new AbortController();
+  const source = currentSource;
+  host.innerHTML = _shelfSkeletons();
+  try {
+    const res = await fetch(`/api/home?source=${encodeURIComponent(source)}`,
+                            {signal: _homeAbort.signal});
+    const body = await safeJson(res);
+    // A 409 with no domain configured lands here too, and leaves the same
+    // bare search box.
+    if (!res.ok) { host.innerHTML = ''; return; }
+    _homeCache[source] = body.shelves || [];
+    if (source !== currentSource) return;  // switched away while it was in flight
+    renderShelves();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    host.innerHTML = '';
+  }
+}
+
+function renderShelves() {
+  const host = document.getElementById('home-shelves');
+  const shelves = _homeCache[currentSource] || [];
+  host.innerHTML = '';
+  // One flat array across every rail, reset once here and appended to in order,
+  // so openDetailModal(idx) needs no special case for the start page.
+  _searchResults = [];
+  _requestStatus = {};
+  const ribbonIds = [];
+
+  shelves.forEach(shelf => {
+    const section = document.createElement('div');
+    section.className = 'shelf';
+    section.innerHTML =
+      `<div class="shelf-head"><div class="shelf-title">${escapeHtml(shelf.title)}</div></div>` +
+      '<div class="shelf-rail"></div>';
+    renderResultCards(shelf.items, section.querySelector('.shelf-rail'),
+                      _searchResults.length, 'shelf-item');
+    _searchResults = _searchResults.concat(shelf.items);
+    shelf.items.forEach(i => { if (i.type !== 'movie') ribbonIds.push(String(i.id)); });
+    host.appendChild(section);
+  });
+
+  applyClientFilter();
+  loadRequestStatuses(ribbonIds);
+}
+
+function itemMatchesFilter(item) {
+  if (_kindFilter &&
+      String(item.media_type || item.type || '').toLowerCase() !== _kindFilter) return false;
+  if (_dubOnly && currentSource === 'animeunity' && !item.dubbed) return false;
+  return true;
+}
+
+// The rails are whatever the source's front page holds: there is no server-side
+// variant of them to ask for, and no paging to keep honest. So the chips hide
+// cards instead of refetching — instant, and it cannot desynchronise an index,
+// because nothing is removed and nothing is reordered.
+function applyClientFilter() {
+  const host = document.getElementById('home-shelves');
+  if (!host) return;
+  host.querySelectorAll('.shelf').forEach(section => {
+    let visible = 0;
+    section.querySelectorAll('.shelf-item').forEach(card => {
+      const item = _searchResults[Number(card.dataset.idx)];
+      const show = !item || itemMatchesFilter(item);
+      card.classList.toggle('d-none', !show);
+      if (show) visible++;
+    });
+    section.classList.toggle('d-none', visible === 0);
+  });
 }
 
 // ── Request status on the result cards ─────────────────────────────────────────

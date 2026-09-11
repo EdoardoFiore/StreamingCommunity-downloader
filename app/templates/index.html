@@ -432,6 +432,53 @@
     #search-more .source-btn { display: inline-flex; }
 
     /* ═══════════════════════════════════════════════════════
+       START PAGE — the source's own shelves
+       ═══════════════════════════════════════════════════════ */
+    .shelf { margin-bottom: 26px; }
+    .shelf-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .shelf-title {
+      font-family: var(--font-ui);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: .2px;
+    }
+    .shelf-rail {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-snap-type: x proximity;
+      scroll-behavior: smooth;
+      /* .result-card lifts 7px on hover, and an overflow-x container clips
+         vertically too, so the rail pays for the lift in padding. */
+      padding: 8px 4px 10px;
+      margin: 0 -4px;
+      scrollbar-width: thin;
+    }
+    .shelf-rail::-webkit-scrollbar { height: 6px; }
+    .shelf-rail::-webkit-scrollbar-track { background: transparent; }
+    .shelf-rail::-webkit-scrollbar-thumb {
+      background: var(--border-strong);
+      border-radius: 3px;
+    }
+    /* Grid cards are sized by their Bootstrap column; a rail item has to bring
+       its own width. Everything inside the card reuses unchanged. */
+    .shelf-item {
+      flex: 0 0 132px;
+      width: 132px;
+      scroll-snap-align: start;
+    }
+    @media (min-width: 992px) {
+      .shelf-item { flex-basis: 158px; width: 158px; }
+    }
+
+    /* ═══════════════════════════════════════════════════════
        RESULT CARDS
        ═══════════════════════════════════════════════════════ */
     .result-card {
@@ -1893,6 +1940,7 @@
             </div>
           </div>
           <div id="search-filters" class="search-filters"></div>
+          <div id="home-shelves" style="display:none"></div>
           <div id="search-results" class="row g-3"></div>
           <div id="search-more" class="text-center mt-4" style="display:none">
             <button class="source-btn" id="search-more-btn" onclick="loadMoreResults()">
