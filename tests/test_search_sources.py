@@ -172,3 +172,227 @@ def test_a_good_page_reports_its_version(monkeypatch, sc):
 
     assert page.get_domain_version("source.test") == "abc123"
     assert sc["calls"][0][0] == "https://source.test", "not /it: domain_recovery reads this page"
+
+
+# ── AnimeUnity ────────────────────────────────────────────────────────────────
+
+from app.core import animeunity  # noqa: E402
+
+_AU_HOME = ('<html><head><meta name="csrf-token" content="tok-1">'
+            '</head><body></body></html>')
+
+
+class _ArchiveResponse:
+    def __init__(self, payload=None, status_code=200, text=""):
+        self._payload = payload
+        self.status_code = status_code
+        self.text = text
+
+    @property
+    def ok(self):
+        return 200 <= self.status_code < 300
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+
+
+class _FakeScraper:
+    def __init__(self, replies):
+        self.gets, self.posts = [], []
+        self.replies = list(replies)
+
+    def get(self, url, **kwargs):
+        self.gets.append((url, kwargs))
+        return _ArchiveResponse(text=_AU_HOME)
+
+    def post(self, url, json=None, headers=None, **kwargs):
+        self.posts.append((url, json, headers))
+        assert self.replies, f"POST {len(self.posts)} is more than the test prepared"
+        return self.replies.pop(0)
+
+
+def _record(n, kind="TV", dub=0):
+    return {
+        "id": n, "slug": f"anime-{n}", "title_eng": f"Anime {n}", "type": kind,
+        "imageurl": f"https://cdn.animeunity.test/{n}.jpg", "episodes_count": 12,
+        "plot": "Una trama.", "genres": [{"name": "Azione"}, {"name": "Dramma"}],
+        "dub": dub, "score": "8.5", "date": "2023-01-05",
+    }
+
+
+def _records(*records, status_code=200):
+    return _ArchiveResponse({"records": list(records)}, status_code=status_code)
+
+
+@pytest.fixture
+def au(monkeypatch):
+    """Build a fake scraper serving the given POST replies in order.
+
+    Both the scraper and the CSRF token are module globals that outlive a test,
+    so the fixture has to reach both.
+    """
+    monkeypatch.setattr(animeunity, "_csrf", None)
+
+    def build(*replies):
+        fake = _FakeScraper(replies)
+        monkeypatch.setattr(animeunity, "_get_scraper", lambda: fake)
+        return fake
+
+    return build
+
+
+def test_the_archive_endpoint_is_used_not_livesearch(au):
+    """/livesearch is capped at eight records by the source, for every query."""
+    fake = au(_records(_record(1)))
+
+    animeunity.search("x")
+
+    assert fake.posts[0][0].endswith("/archivio/get-animes")
+    assert not any("livesearch" in url for url, *_ in fake.posts)
+
+
+def test_the_offset_is_thirty_per_page(au):
+    fake = au(_records(), _records())
+
+    animeunity.search("x")
+    animeunity.search("x", page=3)
+
+    assert fake.posts[0][1]["offset"] == 0
+    assert fake.posts[1][1]["offset"] == 60
+
+
+def test_the_dub_filter_is_sent_only_when_asked(au):
+    fake = au(_records(), _records())
+
+    animeunity.search("x")
+    animeunity.search("x", dubbed=True)
+
+    assert "dubbed" not in fake.posts[0][1]
+    assert fake.posts[1][1]["dubbed"] == 1
+
+
+def test_the_kind_is_translated_to_the_sources_own_word(au):
+    """The wire says "movie"; AnimeUnity says "Movie"."""
+    fake = au(_records(), _records())
+
+    animeunity.search("x", media_type="movie")
+    animeunity.search("x", media_type="special")
+
+    assert fake.posts[0][1]["type"] == "Movie"
+    assert fake.posts[1][1]["type"] == "Special"
+
+
+def test_the_source_classification_comes_back_beside_the_type(au):
+    """type stays "anime" — the whole anime flow keys off it — and the source's
+    own word rides in media_type. Folding one into the other is what used to
+    label every anime film a TV series."""
+    au(_records(_record(1, kind="Movie")))
+
+    result = animeunity.search("x")[0]
+
+    assert result["type"] == "anime"
+    assert result["media_type"] == "Movie"
+
+
+def test_plot_and_genres_are_passed_through(au):
+    """The archive sends them with the search, so the detail panel costs nothing."""
+    au(_records(_record(1)))
+
+    result = animeunity.search("x")[0]
+
+    assert result["plot"] == "Una trama."
+    assert result["genres"] == ["Azione", "Dramma"]
+
+
+def test_genres_survive_an_odd_shape(au):
+    """Laravel casts them differently by row; a TypeError inside a search is not
+    an acceptable answer to that."""
+    plain, as_json, broken = _record(1), _record(2), _record(3)
+    plain["genres"] = ["Azione"]
+    as_json["genres"] = '[{"name": "Commedia"}]'
+    broken["genres"] = None
+    au(_records(plain, as_json, broken))
+
+    results = animeunity.search("x")
+
+    assert [r["genres"] for r in results] == [["Azione"], ["Commedia"], []]
+
+
+def test_the_dub_flag_is_passed_through(au):
+    au(_records(_record(1, dub=1), _record(2, dub=0)))
+
+    assert [r["dubbed"] for r in animeunity.search("x")] == [True, False]
+
+
+def test_no_results_is_an_empty_list_not_an_error(au):
+    """An anime the source does not have is not a failure of the source. This
+    used to raise, and reached the panel as a red box saying search had broken."""
+    au(_records())
+
+    assert animeunity.search("nothing at all") == []
+
+
+def test_the_poster_is_an_absolute_url(au):
+    """Unlike StreamingCommunity's bare filename: the frontend branches on it."""
+    au(_records(_record(1)))
+
+    assert animeunity.search("x")[0]["poster"] == "https://cdn.animeunity.test/1.jpg"
+
+
+def test_the_same_record_twice_is_one_card(au):
+    au(_records(_record(1), _record(1)))
+
+    assert len(animeunity.search("x")) == 1
+
+
+def test_a_refused_status_is_reported(au):
+    au(_records(status_code=500))
+
+    with pytest.raises(RuntimeError, match="500"):
+        animeunity.search("x")
+
+
+# ── The CSRF token ────────────────────────────────────────────────────────────
+
+def test_a_stale_csrf_token_is_renewed_once(au):
+    """419 is Laravel saying the token expired. Fetching a new one and sending
+    the request again is re-authentication, not a retry."""
+    fake = au(_records(status_code=419), _records(_record(1)))
+
+    assert len(animeunity.search("x")) == 1
+    assert len(fake.posts) == 2, "renewed once, not retried in a loop"
+    assert len(fake.gets) == 2, "one home page for the first token, one for the new"
+
+
+def test_a_token_refused_twice_is_not_tried_a_third_time(au):
+    fake = au(_records(status_code=419), _records(status_code=419))
+
+    with pytest.raises(RuntimeError, match="419"):
+        animeunity.search("x")
+    assert len(fake.posts) == 2
+
+
+def test_the_csrf_token_is_not_refetched_per_search(au):
+    fake = au(_records(), _records())
+
+    animeunity.search("x")
+    animeunity.search("y")
+
+    assert len(fake.gets) == 1, "the token is good for a while and costs a page load"
+    assert fake.posts[1][2]["X-CSRF-TOKEN"] == "tok-1"
+
+
+def test_an_expired_token_is_refetched(au, monkeypatch):
+    fake = au(_records(), _records())
+    animeunity.search("x")
+
+    monkeypatch.setattr(animeunity, "_now", lambda: animeunity.time.time() + 3600)
+    animeunity.search("y")
+
+    assert len(fake.gets) == 2
