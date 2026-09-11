@@ -2597,8 +2597,18 @@ async function downloadWholeSeries() {
 // ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
 
 async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null, scheduledAt = null, audioLangs = null, subLangs = null) {
-  // Auto-detect if film (1 episode) but allow user override
-  const isAutoFilm = _searchResults.find(r => r.id === animeId)?.episodes_count === 1;
+  // Whether this is a film decides the layout on disk — Name (YYYY)/Name.mp4
+  // rather than a season folder — so it is worth getting from the source rather
+  // than inferring. AnimeUnity classifies its own catalogue, and the archive
+  // search now carries that word through as media_type.
+  //
+  // The episode count stays as the fallback, for a record whose media_type is
+  // missing. It is only ever a proxy: it called a one-episode Special a film,
+  // which is the layout that suits it, and it called a film listed in two parts
+  // a series, which is not. Keeping it means nothing already in a library moves.
+  const entry = _searchResults.find(r => r.id === animeId);
+  const isAutoFilm = String(entry?.media_type || '').toLowerCase() === 'movie'
+    || entry?.episodes_count === 1;
   const effectiveType = (isAutoFilm && animeType === 'anime') ? 'movie' : animeType;
 
   _animeCtx = { animeId, animeName, animeType: effectiveType, animeYear, scheduledAt, episodes: [], isAutoFilm,
