@@ -2046,22 +2046,69 @@ function renderShelves() {
   _requestStatus = {};
   const ribbonIds = [];
 
+  _shelfSyncs = [];
   shelves.forEach(shelf => {
     const section = document.createElement('div');
     section.className = 'shelf';
     section.innerHTML =
       `<div class="shelf-head"><div class="shelf-title">${escapeHtml(shelf.title)}</div></div>` +
-      '<div class="shelf-rail"></div>';
+      '<div class="shelf-rail-wrap">' +
+        '<button class="shelf-arrow shelf-arrow-prev" hidden aria-label="Titoli precedenti">' +
+          '<i class="ti ti-chevron-left"></i></button>' +
+        '<div class="shelf-rail"></div>' +
+        '<button class="shelf-arrow shelf-arrow-next" hidden aria-label="Titoli successivi">' +
+          '<i class="ti ti-chevron-right"></i></button>' +
+      '</div>';
     renderResultCards(shelf.items, section.querySelector('.shelf-rail'),
                       _searchResults.length, 'shelf-item');
     _searchResults = _searchResults.concat(shelf.items);
     shelf.items.forEach(i => { if (i.type !== 'movie') ribbonIds.push(String(i.id)); });
     host.appendChild(section);
+    _shelfSyncs.push(_wireShelfArrows(section));
   });
 
   applyClientFilter();
   loadRequestStatuses(ribbonIds);
 }
+
+// The arrows scroll a few titles at a time rather than a whole screenful: the
+// rail is a browse, and losing your place in it is worse than taking two clicks.
+// Each one hides itself at the end it points at, so a rail that already fits
+// shows neither.
+let _shelfSyncs = [];
+
+function _wireShelfArrows(section) {
+  const rail = section.querySelector('.shelf-rail');
+  const prev = section.querySelector('.shelf-arrow-prev');
+  const next = section.querySelector('.shelf-arrow-next');
+
+  function step() {
+    const card = rail.querySelector('.shelf-item:not(.d-none)');
+    const one = (card ? card.offsetWidth : 132) + 12;   // the rail's gap
+    // Three cards, unless the rail is too narrow to show three — then as many
+    // as fit, and never less than one.
+    return Math.max(one, Math.min(one * 3, Math.floor(rail.clientWidth / one) * one));
+  }
+
+  function sync() {
+    const max = rail.scrollWidth - rail.clientWidth;
+    const scrollable = max > 4;   // a couple of pixels of rounding is not overflow
+    prev.hidden = !scrollable || rail.scrollLeft <= 2;
+    next.hidden = !scrollable || rail.scrollLeft >= max - 2;
+  }
+
+  prev.addEventListener('click', () => rail.scrollBy({left: -step(), behavior: 'smooth'}));
+  next.addEventListener('click', () => rail.scrollBy({left: step(), behavior: 'smooth'}));
+  rail.addEventListener('scroll', sync, {passive: true});
+  sync();
+  return sync;
+}
+
+function _syncShelfArrows() {
+  _shelfSyncs.forEach(sync => sync());
+}
+
+window.addEventListener('resize', _syncShelfArrows);
 
 function itemMatchesFilter(item) {
   if (_kindFilter &&
@@ -2087,6 +2134,7 @@ function applyClientFilter() {
     });
     section.classList.toggle('d-none', visible === 0);
   });
+  _syncShelfArrows();
 }
 
 // ── Request status on the result cards ─────────────────────────────────────────

@@ -467,6 +467,42 @@
       background: var(--border-strong);
       border-radius: 3px;
     }
+    /* The arrows sit over the rail's own edges, on a fade of the page ground so
+       cards slide under them rather than being cut off. Kept off until the
+       pointer is on the shelf: it is a browse, not a control panel. */
+    .shelf-rail-wrap { position: relative; }
+    .shelf-arrow {
+      position: absolute;
+      top: 8px;
+      bottom: 10px;              /* clear of the rail's own padding */
+      width: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 0;
+      z-index: 2;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 20px;
+      opacity: 0;
+      transition: opacity .15s;
+    }
+    .shelf-arrow[hidden] { display: none; }
+    .shelf-rail-wrap:hover .shelf-arrow,
+    .shelf-arrow:focus-visible { opacity: 1; }
+    .shelf-arrow-prev {
+      left: -4px;
+      background: linear-gradient(to right, var(--bg-base) 45%, rgba(26,26,36,0));
+    }
+    .shelf-arrow-next {
+      right: -4px;
+      background: linear-gradient(to left, var(--bg-base) 45%, rgba(26,26,36,0));
+    }
+    .shelf-arrow:hover { color: var(--accent); }
+    /* Nothing hovers on a touch screen, and a finger already scrolls the rail. */
+    @media (hover: none) { .shelf-arrow { display: none !important; } }
+
     /* Grid cards are sized by their Bootstrap column; a rail item has to bring
        its own width. Everything inside the card reuses unchanged. */
     .shelf-item {
