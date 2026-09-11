@@ -475,7 +475,9 @@
       position: absolute;
       top: 8px;
       bottom: 10px;              /* clear of the rail's own padding */
-      width: 38px;
+      /* The whole strip is the target, full rail height by this width — the
+         chip below is only what you see of it. */
+      width: 56px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -484,20 +486,36 @@
       z-index: 2;
       cursor: pointer;
       color: var(--text);
-      font-size: 20px;
+      font-size: 26px;
       opacity: 0;
       transition: opacity .15s;
+    }
+    .shelf-arrow i {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(36,36,51,.94);
+      border: 1px solid var(--border-mid);
+      box-shadow: 0 6px 20px rgba(0,0,0,.4);
+      transition: background .15s, transform .15s;
+    }
+    .shelf-arrow:hover i {
+      background: var(--bg-hover);
+      transform: scale(1.06);
     }
     .shelf-arrow[hidden] { display: none; }
     .shelf-rail-wrap:hover .shelf-arrow,
     .shelf-arrow:focus-visible { opacity: 1; }
     .shelf-arrow-prev {
       left: -4px;
-      background: linear-gradient(to right, var(--bg-base) 45%, rgba(26,26,36,0));
+      background: linear-gradient(to right, var(--bg-base) 30%, rgba(26,26,36,0));
     }
     .shelf-arrow-next {
       right: -4px;
-      background: linear-gradient(to left, var(--bg-base) 45%, rgba(26,26,36,0));
+      background: linear-gradient(to left, var(--bg-base) 30%, rgba(26,26,36,0));
     }
     .shelf-arrow:hover { color: var(--accent); }
     /* Nothing hovers on a touch screen, and a finger already scrolls the rail. */
@@ -1213,13 +1231,20 @@
     #settings-modal .modal-body { min-height: 340px; }
 
     @media (min-width: 992px) {
-      #settings-modal .modal-dialog {
-        /* A fixed top, and the height the panel may grow into before its body
-           starts scrolling. Both constant across tabs, which is the point. */
+      /* The three modals whose body swaps between panes of different heights,
+         all top-anchored for the same reason — see the note on the settings
+         dialog's markup. A fixed top, and a fixed height the panel may grow into
+         before its body starts scrolling: both constant whichever pane, tab or
+         season is showing, so the row you are clicking through holds still. */
+      #settings-modal .modal-dialog,
+      #episode-modal .modal-dialog,
+      #anime-modal .modal-dialog {
         margin-top: 2.5rem;
         height: calc(100% - 5rem);
-        /* Wider than modal-lg's 720px: these panes are forms with side-by-side
-           fields and long library paths, and 720 wrapped them. */
+      }
+      /* Wider than modal-lg's 720px: these panes are forms with side-by-side
+         fields and long library paths, and 720 wrapped them. */
+      #settings-modal .modal-dialog {
         max-width: min(960px, calc(100vw - 3rem));
       }
     }
@@ -2751,7 +2776,7 @@
 
 <!-- ── Episode Browser Modal ────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="episode-modal" tabindex="-1" style="display:none" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="episode-modal-title">Episodi</h5>
@@ -2778,7 +2803,7 @@
 
 <!-- ── Anime Browser Modal (AnimeUnity) ─────────────────────────────── -->
 <div class="modal modal-blur fade" id="anime-modal" tabindex="-1" style="display:none" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="anime-modal-title">Episodi</h5>
