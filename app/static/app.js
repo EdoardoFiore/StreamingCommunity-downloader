@@ -173,6 +173,26 @@ function itemYear(item) {
   const d = item.release_date || item.last_air_date || '';
   return d ? d.slice(0, 4) : null;
 }
+
+// What a title is, in the source's own word. StreamingCommunity says movie/tv;
+// AnimeUnity says Movie/TV/OVA/ONA/Special and keeps it in media_type, beside a
+// type that is always "anime". Looked up lower case so one table serves both.
+// One colour per kind, so a grid can be read at a glance instead of word by word.
+const KIND_BADGES = {
+  movie:   {label: 'Film',     cls: 'bg-blue-lt'},
+  tv:      {label: 'Serie TV', cls: 'bg-green-lt'},
+  ova:     {label: 'OVA',      cls: 'bg-purple-lt'},
+  ona:     {label: 'ONA',      cls: 'bg-teal-lt'},
+  special: {label: 'Speciale', cls: 'bg-yellow-lt'},
+  anime:   {label: 'Anime',    cls: 'bg-purple-lt'},
+};
+function kindBadge(item) {
+  const key = String(item.media_type || item.type || '').toLowerCase();
+  // An unrecognised kind is shown as it came, in a neutral colour. Folding it
+  // into "TV" is exactly the bug this replaced: every anime, films included,
+  // was labelled a TV series.
+  return KIND_BADGES[key] || {label: item.type || '?', cls: 'bg-secondary-lt'};
+}
 async function safeJson(res) {
   const text = await res.text();
   try { return JSON.parse(text); }
@@ -1745,6 +1765,7 @@ async function doSearch() {
     container.innerHTML = '';
     results.forEach((item, idx) => {
       const isMovie = item.type==='movie';
+      const kind = kindBadge(item);
       const year = itemYear(item);
       const score = item.score ? parseFloat(item.score).toFixed(1) : null;
       const posterUrl = item.poster
@@ -1774,7 +1795,7 @@ async function doSearch() {
           <div class="card-meta">
             <div class="card-title-text" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
             <div class="card-badges">
-              <span class="badge ${isMovie?'bg-blue-lt':'bg-green-lt'}">${isMovie?'Film':'TV'}</span>
+              <span class="badge ${kind.cls}">${escapeHtml(kind.label)}</span>
               ${score?`<span class="badge bg-yellow-lt">★ ${score}</span>`:''}
               ${year?`<span style="font-size:10px;color:var(--text-muted)">${year}</span>`:''}
             </div>
@@ -1955,9 +1976,10 @@ function openDetailModal(idx) {
 
   document.getElementById('detail-title').textContent = item.name;
   const tb = document.getElementById('detail-type-badge');
-  if (isAnime) { tb.className='badge me-1 bg-purple-lt'; tb.textContent='Anime'; }
-  else if (isMovie) { tb.className='badge me-1 bg-blue-lt'; tb.textContent='Film'; }
-  else { tb.className='badge me-1 bg-green-lt'; tb.textContent='Serie TV'; }
+  // The same lookup the card uses, so the two never disagree about a title.
+  const kind = kindBadge(item);
+  tb.className = `badge me-1 ${kind.cls}`;
+  tb.textContent = kind.label;
   const ab = document.getElementById('detail-age-badge');
   if (item.age) { ab.textContent=`${item.age}+`; ab.style.display=''; } else ab.style.display='none';
 
