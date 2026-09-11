@@ -249,3 +249,31 @@ def test_a_non_numeric_title_id_is_refused(client, admin):
 def test_there_is_nothing_left_to_configure(client, admin):
     """The provider needs no credential, so there is no settings endpoint."""
     assert client.get("/api/metadata/settings").status_code in (400, 404, 422)
+
+
+def test_a_domain_rotation_does_not_serve_the_old_artwork(client, monkeypatch, props):
+    """Artwork URLs and the plot come from whichever domain served them. Without
+    the host in the key, a rotation kept handing back the old domain's images
+    for six hours, long after every one of them had stopped resolving."""
+    domain = ["old.test"]
+    monkeypatch.setattr(metadata, "configured_domain", lambda: domain[0])
+
+    metadata.title_metadata("tv", "1", "test-series", "v1")
+    domain[0] = "new.test"
+    metadata.title_metadata("tv", "1", "test-series", "v1")
+
+    assert len(props) == 2
+
+
+def test_applying_a_candidate_clears_the_metadata(client, monkeypatch, props):
+    from app.core import domain_recovery
+
+    metadata.title_metadata("tv", "1", "test-series", "v1")
+
+    monkeypatch.setattr(domain_recovery, "is_plausible", lambda host: (True, ""))
+    monkeypatch.setattr(domain_recovery, "verify", lambda host: "v9")
+    monkeypatch.setattr(domain_recovery.config, "update_data", lambda changes: None)
+    domain_recovery.apply_candidate("new.test")
+
+    metadata.title_metadata("tv", "1", "test-series", "v1")
+    assert len(props) == 2

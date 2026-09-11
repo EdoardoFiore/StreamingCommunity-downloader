@@ -33,7 +33,7 @@ from bs4 import BeautifulSoup
 
 from app import config
 from app.core.headers import get_headers
-from app.core import home
+from app.core import home, metadata
 from app.core.page import get_domain_version
 
 logger = logging.getLogger(__name__)
@@ -235,8 +235,9 @@ def apply_candidate(host: str) -> str:
         raise RuntimeError(f"«{host}» non risponde come la sorgente attesa")
 
     config.update_data({"domain": host})
-    # The shelves are the old domain's until they are dropped.
+    # The shelves and the artwork are the old domain's until they are dropped.
     home.clear_cache("streamingcommunity")
+    metadata.clear_cache()
     clear_pending()
     logger.info("Source domain set to %s (version %s)", host, version)
     return version

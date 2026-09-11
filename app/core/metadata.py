@@ -62,7 +62,14 @@ EMPTY: dict = {
 # ── Cache ─────────────────────────────────────────────────────────────────────
 
 def _cache_key(media_type: str, title_id) -> tuple:
-    return (media_type, str(title_id))
+    """Keyed on the host as well as the title.
+
+    Artwork URLs and the plot itself come from whichever domain served them, so
+    an entry outlives the domain it was fetched from only by accident. Without
+    the host here, a rotation kept serving the old domain's images for six
+    hours — long after every one of them had stopped resolving.
+    """
+    return (configured_domain(), media_type, str(title_id))
 
 
 def _cached(key: tuple) -> dict | None:

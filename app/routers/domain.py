@@ -10,7 +10,7 @@ from app import config
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import get_settings, save_settings
-from app.core import domain_recovery, home, naming
+from app.core import domain_recovery, home, metadata, naming
 from app.core.paths import validate_library_path
 from app.core.page import get_domain_version
 
@@ -271,4 +271,5 @@ async def set_domain(body: DomainUpdate):
 
     _update_data({"domain": domain})
     home.clear_cache("streamingcommunity")
+    metadata.clear_cache()
     return {"domain": domain, "version": version, "valid": True}
