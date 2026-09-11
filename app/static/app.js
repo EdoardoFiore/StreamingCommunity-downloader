@@ -190,8 +190,11 @@ function kindBadge(item) {
   const key = String(item.media_type || item.type || '').toLowerCase();
   // An unrecognised kind is shown as it came, in a neutral colour. Folding it
   // into "TV" is exactly the bug this replaced: every anime, films included,
-  // was labelled a TV series.
-  return KIND_BADGES[key] || {label: item.type || '?', cls: 'bg-secondary-lt'};
+  // was labelled a TV series. The source's own word first — AnimeUnity has a
+  // long tail of them ("TV Short" turns up in a normal search) and its own name
+  // for a thing says more than the "anime" every one of its records carries.
+  return KIND_BADGES[key] || {label: item.media_type || item.type || '?',
+                              cls: 'bg-secondary-lt'};
 }
 async function safeJson(res) {
   const text = await res.text();
