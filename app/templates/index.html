@@ -419,6 +419,18 @@
       border-color: var(--border-strong);
     }
 
+    /* The kind chips reuse .source-btn: same pill, same active state, one
+       vocabulary of controls above the results. */
+    .search-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .search-filters:empty { margin-bottom: 0; }
+
+    #search-more .source-btn { display: inline-flex; }
+
     /* ═══════════════════════════════════════════════════════
        RESULT CARDS
        ═══════════════════════════════════════════════════════ */
@@ -1880,7 +1892,13 @@
               </button>
             </div>
           </div>
+          <div id="search-filters" class="search-filters"></div>
           <div id="search-results" class="row g-3"></div>
+          <div id="search-more" class="text-center mt-4" style="display:none">
+            <button class="source-btn" id="search-more-btn" onclick="loadMoreResults()">
+              <i class="ti ti-plus"></i>Carica altri
+            </button>
+          </div>
         </div>
 
         <!-- ── Downloads ───────────────────────────────────────── -->

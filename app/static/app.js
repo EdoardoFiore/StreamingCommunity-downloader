@@ -267,6 +267,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (can('VIEW_LIBRARY')) setupFileManager();
   setupSettingsTabs();
   setupSearchDebounce();
+  renderSearchFilters();
   refreshNotifications();
   refreshQueueBadge();
   showPage(defaultPage());
@@ -369,6 +370,18 @@ function setSource(src) {
   const input = document.getElementById('search-input');
   if (input) input.placeholder = src === 'animeunity' ? 'Cerca anime...' : 'Film, serie TV...';
   document.getElementById('search-results').innerHTML = '';
+  // The kinds are each source's own vocabulary, so a filter does not carry over.
+  _searchResults = [];
+  _requestStatus = {};
+  _searchPage = 1;
+  _searchExhausted = false;
+  _kindFilter = '';
+  _dubOnly = false;
+  renderSearchFilters();
+  _setMoreVisible(false);
+  // Clearing the grid and leaving the query typed is what made the selector
+  // read as broken: nothing happened until you typed again.
+  _rerunSearch();
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
@@ -1744,74 +1757,204 @@ function _showSearchSkeletons() {
   }
 }
 
-async function doSearch() {
+// ── Result filters and paging ─────────────────────────────────────────────────
+
+let _searchPage = 1;
+let _searchExhausted = false;
+let _loadingMore = false;
+let _kindFilter = '';   // '' | movie | tv | ova | ona | special
+let _dubOnly = false;
+
+// Each source classifies its catalogue in its own vocabulary, so the chips are
+// rebuilt when the source changes rather than offering one of them a filter the
+// other cannot answer.
+const KIND_FILTERS = {
+  streamingcommunity: [['', 'Tutti'], ['movie', 'Film'], ['tv', 'Serie TV']],
+  animeunity: [['', 'Tutti'], ['movie', 'Film'], ['tv', 'Serie TV'],
+               ['ova', 'OVA'], ['ona', 'ONA'], ['special', 'Speciali']],
+};
+
+function renderSearchFilters() {
+  const bar = document.getElementById('search-filters');
+  if (!bar) return;
+  const chips = (KIND_FILTERS[currentSource] || []).map(([value, label]) =>
+    `<button class="source-btn${value === _kindFilter ? ' active' : ''}" ` +
+    `onclick="setKindFilter('${value}')">${label}</button>`).join('');
+  // AnimeUnity keeps an Italian dub as a record of its own, so this is a real
+  // filter there and meaningless on the other source.
+  const dub = currentSource === 'animeunity'
+    ? `<button class="source-btn${_dubOnly ? ' active' : ''}" onclick="setDubOnly(${!_dubOnly})">` +
+      `<i class="ti ti-microphone"></i>Solo doppiati IT</button>`
+    : '';
+  bar.innerHTML = chips + dub;
+}
+
+function setKindFilter(kind) {
+  if (kind === _kindFilter) return;
+  _kindFilter = kind;
+  renderSearchFilters();
+  _rerunSearch();
+}
+
+function setDubOnly(on) {
+  _dubOnly = !!on;
+  renderSearchFilters();
+  _rerunSearch();
+}
+
+function _rerunSearch() {
+  const input = document.getElementById('search-input');
+  if (input && input.value.trim()) doSearch();
+}
+
+function _searchParams(q, page) {
+  const params = new URLSearchParams({ q, source: currentSource, page: String(page) });
+  if (_kindFilter) params.set('media_type', _kindFilter);
+  // Sent only where it means something; the other source answers 422 for it.
+  if (_dubOnly && currentSource === 'animeunity') params.set('dubbed', 'true');
+  return params;
+}
+
+function _setMoreVisible(on) {
+  const wrap = document.getElementById('search-more');
+  if (wrap) wrap.style.display = on ? '' : 'none';
+}
+
+// Cards are rendered from a base index rather than from the array, so a page
+// appended later indexes into the same flat _searchResults and card n keeps
+// pointing at title n forever.
+function renderResultCards(items, container, baseIndex,
+                           wrapperClass = 'col-6 col-sm-4 col-md-3 col-lg-2') {
+  items.forEach((item, i) => {
+    const idx = baseIndex + i;
+    const isMovie = item.type === 'movie';
+    const kind = kindBadge(item);
+    const year = itemYear(item);
+    const score = item.score ? parseFloat(item.score).toFixed(1) : null;
+    const posterUrl = item.poster
+      ? (item.poster.startsWith('http') ? item.poster : `/api/image/${item.poster}`)
+      : '';
+    const card = document.createElement('div');
+    card.className = wrapperClass;
+    card.dataset.idx = String(idx);
+    const posterHtml = posterUrl
+      ? `<img src="${posterUrl}" alt="" onerror="this.closest('.poster-wrap').querySelector('.poster-noimg').style.display='flex';this.style.display='none'">`
+      : '';
+    // Movie cards carry no status ribbon: a movie can be requested again
+    // freely (denied/failed/cancelled never block it), so a "richiesto" chip
+    // would just read as blocked when it is not. TV and anime keep it — their
+    // status is read from the grouped request rows anyway, not per-title.
+    const ribbonHtml = isMovie
+      ? ''
+      : `<div class="status-ribbon" data-ribbon-for="${escapeHtml(String(item.id))}"></div>`;
+    card.innerHTML = `
+      <div class="result-card" onclick="openDetailModal(${idx})">
+        <div class="poster-wrap">
+          ${posterHtml}
+          <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
+          <div class="poster-overlay"></div>
+          ${ribbonHtml}
+          <div class="poster-play"><i class="ti ti-player-play-filled" style="font-size:16px"></i></div>
+        </div>
+        <div class="card-meta">
+          <div class="card-title-text" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
+          <div class="card-badges">
+            <span class="badge ${kind.cls}">${escapeHtml(kind.label)}</span>
+            ${score?`<span class="badge bg-yellow-lt">★ ${score}</span>`:''}
+            ${year?`<span style="font-size:10px;color:var(--text-muted)">${year}</span>`:''}
+          </div>
+        </div>
+      </div>`;
+    container.appendChild(card);
+  });
+}
+
+async function doSearch(options) {
+  const append = !!(options && options.append);
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
   if (!currentDomain && currentSource !== 'animeunity') { openSettings(); return; }
-  // Cancel previous in-flight request
-  if (_searchAbort) _searchAbort.abort();
-  _searchAbort = new AbortController();
+  if (append && (_loadingMore || _searchExhausted)) return;
+
+  if (!append) {
+    // Only a fresh search cancels what is in flight. A load-more must not abort
+    // itself, and must not be aborted by the debounce still pending from the
+    // last keystroke.
+    if (_searchAbort) _searchAbort.abort();
+    _searchAbort = new AbortController();
+    _searchPage = 1;
+    _searchExhausted = false;
+    _searchResults = [];
+    _requestStatus = {};
+  }
+
+  const container = document.getElementById('search-results');
   const btn = document.getElementById('search-btn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Cerca';
-  _showSearchSkeletons();
+  const moreBtn = document.getElementById('search-more-btn');
+  const moreLabel = moreBtn ? moreBtn.innerHTML : '';
+  if (append) {
+    _loadingMore = true;
+    if (moreBtn) {
+      moreBtn.disabled = true;
+      moreBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Carico...';
+    }
+  } else {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Cerca';
+    _showSearchSkeletons();
+    _setMoreVisible(false);
+  }
+
   try {
-    const searchParams = new URLSearchParams({ q, source: currentSource });
-    const res = await fetch(`/api/search?${searchParams}`, {signal: _searchAbort.signal});
-    const container = document.getElementById('search-results');
+    const res = await fetch(`/api/search?${_searchParams(q, _searchPage)}`,
+                            append ? {} : {signal: _searchAbort.signal});
     const results = await safeJson(res);
-    if (!res.ok) { container.innerHTML=`<div class="col-12"><div class="alert alert-danger">${results.detail||'Errore'}</div></div>`; return; }
-    if (!results.length) { container.innerHTML='<div class="col-12"><p class="text-muted">Nessun risultato.</p></div>'; return; }
-    container.innerHTML = '';
-    results.forEach((item, idx) => {
-      const isMovie = item.type==='movie';
-      const kind = kindBadge(item);
-      const year = itemYear(item);
-      const score = item.score ? parseFloat(item.score).toFixed(1) : null;
-      const posterUrl = item.poster
-        ? (item.poster.startsWith('http') ? item.poster : `/api/image/${item.poster}`)
-        : '';
-      const card = document.createElement('div');
-      card.className = 'col-6 col-sm-4 col-md-3 col-lg-2';
-      const posterHtml = posterUrl
-        ? `<img src="${posterUrl}" alt="" onerror="this.closest('.poster-wrap').querySelector('.poster-noimg').style.display='flex';this.style.display='none'">`
-        : '';
-      // Movie cards carry no status ribbon: a movie can be requested again
-      // freely (denied/failed/cancelled never block it), so a "richiesto" chip
-      // would just read as blocked when it is not. TV and anime keep it — their
-      // status is read from the grouped request rows anyway, not per-title.
-      const ribbonHtml = isMovie
-        ? ''
-        : `<div class="status-ribbon" data-ribbon-for="${escapeHtml(String(item.id))}"></div>`;
-      card.innerHTML = `
-        <div class="result-card" onclick="openDetailModal(${idx})">
-          <div class="poster-wrap">
-            ${posterHtml}
-            <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
-            <div class="poster-overlay"></div>
-            ${ribbonHtml}
-            <div class="poster-play"><i class="ti ti-player-play-filled" style="font-size:16px"></i></div>
-          </div>
-          <div class="card-meta">
-            <div class="card-title-text" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
-            <div class="card-badges">
-              <span class="badge ${kind.cls}">${escapeHtml(kind.label)}</span>
-              ${score?`<span class="badge bg-yellow-lt">★ ${score}</span>`:''}
-              ${year?`<span style="font-size:10px;color:var(--text-muted)">${year}</span>`:''}
-            </div>
-          </div>
-        </div>`;
-      container.appendChild(card);
-    });
-    _searchResults = results;
+    if (!res.ok) {
+      const detail = escapeHtml(results.detail || 'Errore');
+      if (append) showToast(detail, 'danger');
+      else container.innerHTML = `<div class="col-12"><div class="alert alert-danger">${detail}</div></div>`;
+      return;
+    }
+    if (!append) container.innerHTML = '';
+
+    renderResultCards(results, container, _searchResults.length);
+    _searchResults = _searchResults.concat(results);
+
+    // A filtered page coming back empty means "none of that kind here", not
+    // "no more results". StreamingCommunity has no filter of its own, so the
+    // panel applies one per page, and the source groups its results by kind:
+    // measured, a query whose first page is sixty series has its films on a
+    // later one. AnimeUnity filters at the source, where the offset walks the
+    // filtered catalogue, so there an empty page really is the end.
+    const filterIsPerPage = currentSource !== 'animeunity' && !!_kindFilter;
+    _searchExhausted = !results.length && !filterIsPerPage;
+
+    if (!_searchResults.length) {
+      container.innerHTML = '<div class="col-12"><p class="text-muted">Nessun risultato.</p></div>';
+    } else if (append && !results.length) {
+      showToast('Nessun altro risultato', 'info');
+    }
+    _setMoreVisible(!_searchExhausted);
+
     loadRequestStatuses(results.filter(r => r.type !== 'movie').map(r => String(r.id)));
   } catch(e) {
     if (e.name === 'AbortError') return; // cancelled by new search
-    const container = document.getElementById('search-results');
-    container.innerHTML=`<div class="col-12"><div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div></div>`;
+    if (append) showToast('Errore di rete', 'danger');
+    else container.innerHTML=`<div class="col-12"><div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div></div>`;
   } finally {
-    btn.disabled=false; btn.innerHTML='<i class="ti ti-search me-1"></i>Cerca';
+    if (append) {
+      _loadingMore = false;
+      if (moreBtn) { moreBtn.disabled = false; moreBtn.innerHTML = moreLabel; }
+    } else {
+      btn.disabled=false; btn.innerHTML='<i class="ti ti-search me-1"></i>Cerca';
+    }
   }
+}
+
+async function loadMoreResults() {
+  if (_loadingMore || _searchExhausted) return;
+  _searchPage += 1;
+  await doSearch({append: true});
 }
 
 // ── Request status on the result cards ─────────────────────────────────────────
@@ -1839,7 +1982,12 @@ async function loadRequestStatuses(externalIds) {
       body: JSON.stringify({ source: currentSource, external_ids: externalIds }),
     });
     if (!res.ok) return;
-    _requestStatus = await res.json();
+    // Merged, not replaced. Called with only the new page's ids, an
+    // assignment would wipe every ribbon already painted on the pages
+    // before it, because renderRequestRibbons re-reads the whole map.
+    // Staleness is bounded: _requestStatus is cleared on every fresh
+    // search and on a source switch.
+    Object.assign(_requestStatus, await res.json());
     renderRequestRibbons();
   } catch (e) { /* the cards simply stay plain */ }
 }
