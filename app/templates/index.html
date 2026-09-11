@@ -1208,8 +1208,21 @@
       margin-top: 24px;
     }
     .settings-pane { padding-top: 4px; }
-    /* Fixed floor so the dialog does not resize as you move between tabs. */
+    /* A floor, so the shortest tab is not a sliver of a panel. The tabs holding
+       still is the dialog's doing, not this — see the markup. */
     #settings-modal .modal-body { min-height: 340px; }
+
+    @media (min-width: 992px) {
+      #settings-modal .modal-dialog {
+        /* A fixed top, and the height the panel may grow into before its body
+           starts scrolling. Both constant across tabs, which is the point. */
+        margin-top: 2.5rem;
+        height: calc(100% - 5rem);
+        /* Wider than modal-lg's 720px: these panes are forms with side-by-side
+           fields and long library paths, and 720 wrapped them. */
+        max-width: min(960px, calc(100vw - 3rem));
+      }
+    }
     .settings-section-hint {
       font-size: 12px;
       color: var(--text-muted);
@@ -2214,7 +2227,13 @@
 
 <!-- ── Settings Modal ───────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="settings-modal" tabindex="-1" style="display:none" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down">
+  <!-- Deliberately not modal-dialog-centered. That gives the dialog
+       display:flex + align-items:center, which stops .modal-content stretching:
+       it takes its content's height and is centred inside a full-height dialog,
+       so every taller tab moved the row of tabs up, out from under the pointer
+       that had just clicked one. Top-anchored, the tabs hold still and the pane
+       grows downward until the body starts scrolling. -->
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">
