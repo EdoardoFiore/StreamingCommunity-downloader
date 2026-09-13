@@ -236,52 +236,6 @@
       background: transparent !important;
     }
 
-    /* Detail modal poster title */
-    #detail-title {
-      font-family: var(--font-brand) !important;
-      font-size: 26px !important;
-      font-weight: 400 !important;
-      letter-spacing: 1.5px !important;
-      color: var(--text) !important;
-      margin: 4px 0 3px !important;
-      line-height: 1.15 !important;
-    }
-
-    #detail-meta { color: var(--text-muted) !important; font-size: 12.5px !important; }
-
-    #detail-poster {
-      border-radius: var(--radius) !important;
-      box-shadow: 0 8px 28px rgba(0,0,0,.40) !important;
-    }
-
-    /* Backdrop behind the detail modal header.
-       Masked down to the panel background so the text below keeps its contrast
-       whatever the artwork happens to be. */
-    #detail-backdrop {
-      position: absolute;
-      inset: 0 0 auto 0;
-      height: 190px;
-      background-size: cover;
-      background-position: center 25%;
-      opacity: .38;
-      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
-      mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    .detail-plot {
-      color: var(--text-muted) !important;
-      font-size: 13px !important;
-      line-height: 1.5 !important;
-      margin: 0 0 10px !important;
-      /* Long synopses would push the action button off a short viewport. */
-      max-height: 6.6em;
-      overflow-y: auto;
-    }
-
-    #detail-genres .badge { margin-right: 4px; }
-
     /* Nav tabs */
     .nav-tabs {
       border-bottom: 1px solid var(--border) !important;

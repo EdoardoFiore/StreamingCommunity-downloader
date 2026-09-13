@@ -116,12 +116,6 @@
       .btn-sm { min-height: 34px; }
       .fm-check { width: 18px !important; height: 18px !important; }
 
-      /* Episode/anime/settings modals: use more screen space */
-      #settings-modal .modal-dialog {
-        margin: 0.5rem auto !important;
-        max-width: calc(100% - 1rem) !important;
-        max-height: calc(100vh - 1rem);
-      }
     }
 
     @media (max-width: 575px) {
@@ -158,29 +152,6 @@
 
       .page-body {
         padding-top: 16px !important;
-      }
-
-      /* Full-screen modals on phones */
-      #settings-modal .modal-dialog {
-        margin: 0 !important;
-        max-width: 100% !important;
-        width: 100%;
-        min-height: 100dvh;
-        display: flex;
-        flex-direction: column;
-      }
-      #settings-modal .modal-content {
-        border-radius: 0 !important;
-        flex: 1;
-      }
-
-      /* Detail modal: smaller poster on tiny screens */
-      #detail-poster {
-        width: 80px !important;
-        height: 120px !important;
-      }
-      #detail-title {
-        font-size: 20px !important;
       }
 
       /* Job cards: prevent overflow on tiny screens */

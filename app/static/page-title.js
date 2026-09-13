@@ -26,12 +26,6 @@ function openTitle(idx) {
 }
 let _tpSeed = null;
 
-function _tpParseHash() {
-  const m = (location.hash || '').match(/^#\/title\/(movie|tv|anime)\/([^/]+)(?:\/([^/]*))?$/);
-  if (!m) return null;
-  return { type: m[1], id: decodeURIComponent(m[2]), slug: decodeURIComponent(m[3] || '') };
-}
-
 // Every call below carries the site version, and it is fetched asynchronously
 // at boot - so a pasted link can arrive before it is known. It used to be sent
 // empty and the endpoint answered "field required".
@@ -563,29 +557,6 @@ function tpPrimary() {
 
 async function tpToggleFollow() { await toggleFollowSeries('page'); }
 async function tpRefreshFollow() { await checkWatchStatus('page'); }
-
-// ── Routing ───────────────────────────────────────────────────────────────────
-//
-// The only page with an address so far. Everything else is still driven by
-// showPage(); this hooks the hash so a title can be reloaded, shared, and
-// reached with the back button.
-
-function _tpRoute() {
-  const route = _tpParseHash();
-  if (route) {
-    // Re-entering the same title (back out of a tab, say) must not refetch it.
-    if (_tp && _tp.type === route.type && String(_tp.id) === route.id) { showPage('detail'); return; }
-    loadTitlePage(route);
-  } else if (_tp) {
-    _tp = null;
-    showPage(defaultPage());
-  }
-}
-
-window.addEventListener('hashchange', _tpRoute);
-// On a cold load the hash may already name a title. showPage(defaultPage())
-// has run by then, so this just takes over when there is something to take.
-window.addEventListener('DOMContentLoaded', () => { if (_tpParseHash()) _tpRoute(); });
 
 // Back to wherever the visitor came from, and to the search page when they
 // arrived by pasted link and there is no history to go back to.

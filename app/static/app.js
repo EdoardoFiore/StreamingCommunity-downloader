@@ -184,14 +184,14 @@ function showPage(page) {
   if (mobileMenu && mobileMenu.classList.contains('show')) {
     mobileMenu.classList.remove('show');
   }
-  ['search','downloads','files','requests','my-requests','watches','users','detail'].forEach(p => {
+  ['search','downloads','files','requests','my-requests','watches','users','detail','settings'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.style.display = p === page ? '' : 'none';
   });
   document.getElementById('page-title').textContent = {
     search:'Cerca', downloads:'Download', files:'File',
     requests:'Coda richieste', 'my-requests':'Le mie richieste',
-    watches:'Serie seguite', users:'Utenti', detail:'',
+    watches:'Serie seguite', users:'Utenti', detail:'', settings:'Impostazioni',
   }[page] ?? 'Cerca';
   document.querySelectorAll('.nav-link[data-page]').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
@@ -206,7 +206,7 @@ function showPage(page) {
   if (page === 'users') loadUsersPage();
   // The title page owns the hash. Navigating away has to release it, or the
   // next reload lands back on a title the user already left.
-  if (page !== 'detail' && (location.hash || '').startsWith('#/title/')) {
+  if (page !== 'detail' && page !== 'settings' && (location.hash || '').startsWith('#/')) {
     history.replaceState(null, '', location.pathname + location.search);
   }
 }
@@ -660,8 +660,13 @@ async function switchSettingsTab(name) {
     pane.style.display = pane.dataset.settingsPane === name ? '' : 'none';
   });
   _settingsTab = name;
-  const body = document.querySelector('#settings-modal .modal-body');
-  if (body) body.scrollTop = 0;
+  // The tab belongs in the address, but replaceState rather than assigning to
+  // location.hash: that would fire hashchange, and the router would route
+  // back into here.
+  if (document.getElementById('page-settings')?.style.display !== 'none') {
+    history.replaceState(null, '', `#/settings/${name}`);
+  }
+  window.scrollTo({ top: 0 });
 
   // Marked before awaiting, so a double click cannot fire two fetches.
   if (!_settingsLoaded.has(name)) {
@@ -670,7 +675,15 @@ async function switchSettingsTab(name) {
   }
 }
 
-async function openSettings() {
+// The sidebar's entry point. Settings is a page with an address now, so this
+// navigates; the router calls openSettingsPage() back.
+function openSettings() {
+  location.hash = '#/settings';
+}
+
+// Reached through the router, either from openSettings() or from a pasted
+// link naming a tab.
+async function openSettingsPage(tab) {
   document.getElementById('domain-input').value = currentDomain;
   _SETTINGS_FEEDBACK_IDS.forEach(id => _feedback(id));
   renderLibrariesList();
@@ -681,13 +694,19 @@ async function openSettings() {
     a.closest('.nav-item').style.display = restricted && !manage ? 'none' : '';
   });
 
-  // Cleared on every open so a value changed elsewhere is picked up; within one
-  // open, moving between tabs does not refetch.
+  // Cleared on every arrival so a value changed elsewhere is picked up; moving
+  // between tabs while here does not refetch.
   _settingsLoaded.clear();
   _appSettingsPromise = null;
-  showModal('settings-modal');
+  showPage('settings');
+
   const tabs = _visibleSettingsTabs();
-  await switchSettingsTab(tabs.includes('sorgente') ? 'sorgente' : tabs[0]);
+  // A tab named in the URL wins, unless the visitor cannot see it - linking
+  // someone to a tab their permissions hide must not leave them on a blank
+  // pane.
+  const wanted = tab && tabs.includes(tab) ? tab
+    : (tabs.includes('sorgente') ? 'sorgente' : tabs[0]);
+  if (wanted) await switchSettingsTab(wanted);
 }
 
 // ── Spazio disco ─────────────────────────────────────────────────────────────
