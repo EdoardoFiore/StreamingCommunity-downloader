@@ -48,6 +48,33 @@ async def fetch_seasons(tv_id: int, slug: str = Query(...), version: str = Query
     return {"seasons_count": count}
 
 
+def _mark_in_library(episodes: list[dict], title: str, season: int, year: str) -> None:
+    """Flag the episodes already sitting in the library.
+
+    The title arrives from the caller because the episode list has no other
+    way to know it, and it is the same value the caller would post to start
+    the download. It reaches the filesystem only through
+    ``paths.episode_path``, which runs it through ``sanitize_filename``: "/",
+    "\\", control characters and leading dots are stripped, so a crafted title
+    cannot walk out of the library directory. This only ever stats.
+    """
+    from app.core import naming, paths
+    from app.requests.resolver import EPISODE, first_existing, library_dir
+
+    output_dir = library_dir(EPISODE)
+    for episode in episodes:
+        try:
+            current = paths.episode_path(output_dir, title, season, episode["n"], year or None)
+            legacy = paths.episode_path(output_dir, title, season, episode["n"],
+                                        year or None, naming.LEGACY_TEMPLATES)
+            episode["in_library"] = first_existing(current, legacy) is not None
+        except Exception:
+            # A library check is a convenience. It must never be the reason an
+            # episode list fails to render.
+            logger.exception("Library check failed for episode %s", episode.get("n"))
+            episode["in_library"] = False
+
+
 @router.get("/{tv_id}/seasons/{season}/episodes")
 async def fetch_episodes(
     tv_id: int,
@@ -55,6 +82,8 @@ async def fetch_episodes(
     slug: str = Query(...),
     version: str = Query(...),
     token: str = Query(...),
+    title: str = Query("", max_length=200),
+    year: str = Query("", max_length=10),
 ):
     try:
         episodes = await asyncio.to_thread(
@@ -64,6 +93,12 @@ async def fetch_episodes(
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+    # Stats a filesystem that may be an asleep NFS mount, so it goes off the
+    # loop like the fetch above. Skipped when the caller sends no title, since
+    # there is then nothing to build a path from.
+    if title:
+        await asyncio.to_thread(_mark_in_library, episodes, title, season, year)
     return episodes
 
 
