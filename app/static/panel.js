@@ -2,8 +2,8 @@
 
 // The shell's live parts: the in-app notification bell and the sidebar's
 // pending-requests badge. Both run on every page, which is why they are not
-// in any page-*.js. Relies on core.js for escapeHtml/showToast/can/safeJson
-// and on its fetch wrapper for the CSRF token.
+// in any page-*.js. Relies on core.js for escapeHtml/showToast/can and on
+// api.js for the calls themselves.
 
 
 // ── Sidebar "Richieste" badge ───────────────────────────────────────────────────
@@ -16,9 +16,7 @@ async function refreshQueueBadge() {
   const badge = document.getElementById('queue-pending-count');
   if (!badge) return;
   try {
-    const res = await fetch('/api/requests/counts');
-    if (!res.ok) return;
-    const counts = await res.json();
+    const counts = await api.get('/api/requests/counts');
     const n = counts.action_required || 0;
     badge.textContent = n || '';
     badge.style.display = n ? '' : 'none';
@@ -29,9 +27,7 @@ async function refreshQueueBadge() {
 
 async function refreshNotifications() {
   try {
-    const res = await fetch('/api/notifications');
-    if (!res.ok) return;
-    const payload = await res.json();
+    const payload = await api.get('/api/notifications');
     const badge = document.getElementById('notif-badge');
     badge.textContent = payload.unread || '';
     badge.style.display = payload.unread ? '' : 'none';
@@ -66,24 +62,23 @@ function toggleNotifications() {
 }
 
 async function markAllNotificationsRead() {
-  await fetch('/api/notifications/read', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  });
+  try { await api.post('/api/notifications/read', {}); }
+  catch (e) { /* the badge will correct itself on the next poll */ }
   refreshNotifications();
 }
 
 async function _deleteNotifications(body) {
-  const res = await fetch('/api/notifications/delete', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    showToast('Eliminazione fallita', 'danger');
+  let result;
+  try {
+    // Always {deleted, unread}, so the object itself is the success signal
+    // the caller checks - as res.json() was before.
+    result = await api.post('/api/notifications/delete', body);
+  } catch (e) {
+    showToast(errText(e, 'Eliminazione fallita'), 'danger');
     return null;
   }
   await refreshNotifications();
-  return res.json();
+  return result;
 }
 
 // One row: no confirmation. It is a single line of history, and asking every

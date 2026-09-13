@@ -24,13 +24,11 @@ async function loadWatches() {
     // An approver sees every followed series, not only their own: arming a
     // series is their decision, and they cannot make it on a list that hides
     // the follows waiting for it.
-    const res = await fetch(can('MANAGE_REQUESTS') ? '/api/watches' : '/api/watches/mine');
-    if (!res.ok) { c.innerHTML = '<p class="text-muted">Impossibile caricare le serie seguite.</p>'; return; }
-    const data = await safeJson(res);
+    const data = await api.get(can('MANAGE_REQUESTS') ? '/api/watches' : '/api/watches/mine');
     _watches = data.watches || [];
     renderWatchesList();
   } catch (e) {
-    c.innerHTML = '<p class="text-muted">Errore di rete.</p>';
+    c.innerHTML = `<p class="text-muted">${escapeHtml(errText(e, 'Impossibile caricare le serie seguite.'))}</p>`;
   }
 }
 
@@ -207,12 +205,9 @@ async function checkWatchStatus(kind) {
   const target = _followTarget(kind);
   if (!target.followable || !target.external_id) { _renderFollowButton(kind, false); return; }
   try {
-    const params = new URLSearchParams({
+    const data = await api.get('/api/watches/status', {
       source: target.source, media_type: target.media_type, external_id: target.external_id,
     });
-    const res = await fetch(`/api/watches/status?${params}`);
-    if (!res.ok) { _renderFollowButton(kind, false); return; }
-    const data = await safeJson(res);
     _renderFollowButton(kind, !!data.followed_by_me);
   } catch (e) { _renderFollowButton(kind, false); }
 }
@@ -225,24 +220,19 @@ async function toggleFollowSeries(kind) {
 
   try {
     if (following) {
-      const params = new URLSearchParams({
+      const status = await api.get('/api/watches/status', {
         source: target.source, media_type: target.media_type, external_id: target.external_id,
       });
-      const status = await safeJson(await fetch(`/api/watches/status?${params}`));
-      const res = await fetch(`/api/watches/${status.watch_id}`, {method: 'DELETE'});
-      if (!res.ok) throw new Error();
+      await api.del(`/api/watches/${status.watch_id}`);
       _renderFollowButton(kind, false);
       showToast('Serie non più seguita', 'success');
     } else {
-      const res = await fetch('/api/watches', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(target),
-      });
-      const data = await safeJson(res);
-      if (!res.ok) {
+      let data;
+      try {
+        data = await api.post('/api/watches', target);
+      } catch (e) {
         _renderFollowButton(kind, false);
-        showToast(data.detail || 'Impossibile seguire la serie', 'danger');
+        showToast(errText(e, 'Impossibile seguire la serie'), 'danger');
         return;
       }
       _renderFollowButton(kind, true);
@@ -267,10 +257,11 @@ async function checkWatchNow(watchId) {
   const btn = document.getElementById(`watch-check-${watchId}`);
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2 ti-spin me-1"></i>Controllo...'; }
   try {
-    const res = await fetch(`/api/watches/${watchId}/check`, {method: 'POST'});
-    const data = await safeJson(res);
-    if (!res.ok) {
-      showToast(data.detail || 'Controllo fallito', 'danger');
+    let data;
+    try {
+      data = await api.post(`/api/watches/${watchId}/check`);
+    } catch (e) {
+      showToast(errText(e, 'Controllo fallito'), 'danger');
       return;
     }
     if (data.new) {
@@ -296,13 +287,9 @@ async function setWatchAutoApprove(watchId, enabled) {
   const name = watch ? watch.title : watchId;
   if (!enabled && !await scConfirm(`I nuovi episodi di «${name}» torneranno in coda. Procedere?`)) return;
   try {
-    const res = await fetch(`/api/watches/${watchId}/auto-approve`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({enabled}),
-    });
-    const data = await safeJson(res);
-    if (!res.ok) { showToast(data.detail || 'Operazione fallita', 'danger'); return; }
+    try {
+      await api.post(`/api/watches/${watchId}/auto-approve`, {enabled});
+    } catch (e) { showToast(errText(e, 'Operazione fallita'), 'danger'); return; }
     showToast(enabled
       ? `«${name}»: i nuovi episodi verranno scaricati automaticamente`
       : `«${name}»: i nuovi episodi torneranno in coda`, 'success');
@@ -316,11 +303,10 @@ async function unfollowWatch(watchId) {
   const watch = _watches.find(w => w.id === watchId);
   if (!await scConfirm(`Smettere di seguire «${watch ? watch.title : watchId}»?`)) return;
   try {
-    const res = await fetch(`/api/watches/${watchId}`, {method: 'DELETE'});
-    if (!res.ok) { showToast('Errore', 'danger'); return; }
+    await api.del(`/api/watches/${watchId}`);
     showToast('Serie non più seguita', 'success');
     await loadWatches();
-  } catch (e) { showToast('Errore di rete', 'danger'); }
+  } catch (e) { showToast(errText(e), 'danger'); }
 }
 
 

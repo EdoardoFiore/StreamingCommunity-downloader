@@ -573,17 +573,15 @@ function handleErrorEvent(jobId, message) {
 
 async function fireNow(jobId) {
   try {
-    const res = await fetch(`/api/download/${jobId}/fire`, {method:'POST'});
-    if (!res.ok) { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
-  } catch(e) { showToast('Errore di rete','danger'); }
+    await api.post(`/api/download/${jobId}/fire`);
+  } catch(e) { showToast(errText(e), 'danger'); }
 }
 
 async function cancelJob(jobId) {
   if (!await scConfirm('Interrompere il download?')) return;
   try {
-    const res = await fetch(`/api/download/${jobId}`, {method:'DELETE'});
-    if (!res.ok) { const d=await safeJson(res); showToast(d.detail||'Errore','danger'); }
-  } catch(e) { showToast('Errore di rete','danger'); }
+    await api.del(`/api/download/${jobId}`);
+  } catch(e) { showToast(errText(e), 'danger'); }
 }
 
 // The list is normally kept current by the event stream. This re-reads it from
@@ -593,15 +591,13 @@ async function refreshJobs() {
   const btn = document.getElementById('dl-refresh-btn');
   if (btn) btn.disabled = true;
   try {
-    const res = await fetch('/api/jobs');
-    if (!res.ok) { showToast('Impossibile aggiornare i download', 'danger'); return; }
-    const jobs = await safeJson(res);
+    const jobs = await api.get('/api/jobs');
     _jobs.clear();
     jobs.forEach(j => _jobs.set(j.job_id, j));
     renderAllJobCards();
     updateActiveBadge();
   } catch (e) {
-    showToast('Errore di rete', 'danger');
+    showToast(errText(e, 'Impossibile aggiornare i download'), 'danger');
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -611,9 +607,9 @@ async function clearFinished() {
   const finished = [..._jobs.entries()]
     .filter(([,j]) => j.status==='done'||j.status==='error'||j.status==='cancelled')
     .map(([id]) => id);
-  await Promise.allSettled(finished.map(id =>
-    fetch(`/api/download/${id}`, {method:'DELETE'})
-  ));
+  // allSettled, so one refusal does not abandon the rest: every job that
+  // can go, goes.
+  await Promise.allSettled(finished.map(id => api.del(`/api/download/${id}`)));
   // UI cleanup handled by job_dismissed SSE; also clean locally in case SSE lags.
   // Re-rendered rather than each node removed: a batch whose jobs have all
   // gone would otherwise keep its heading, sitting above nothing.

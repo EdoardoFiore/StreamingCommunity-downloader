@@ -186,15 +186,9 @@ async function searchFiles(query) {
   _fmSearchActive = true;
   pane.innerHTML = '<div class="text-center py-4 text-muted" style="font-size:13px"><div class="spinner-border spinner-border-sm me-2"></div>Ricerca...</div>';
   try {
-    const res = await fetch(`/api/files/search?q=${encodeURIComponent(query)}`);
-    const results = await safeJson(res);
-    if (!res.ok) {
-      pane.innerHTML = `<div class="text-danger text-center py-4 px-3">${escapeHtml(results.detail || 'Errore ricerca')}</div>`;
-      return;
-    }
-    renderSearchResults(results, query);
+    renderSearchResults(await api.get('/api/files/search', {q: query}), query);
   } catch(e) {
-    pane.innerHTML = `<div class="text-danger text-center py-4">Errore: ${escapeHtml(e.message)}</div>`;
+    pane.innerHTML = `<div class="text-danger text-center py-4 px-3">${escapeHtml(errText(e, 'Errore ricerca'))}</div>`;
   }
 }
 
@@ -287,13 +281,12 @@ async function loadFiles() {
     pane.innerHTML = skeletonHtml;
   }
   try {
-    const res = await fetch('/api/files');
-    const tree = await safeJson(res);
+    const tree = await api.get('/api/files');
     _cachedTree = tree;
     if (!tree||!tree.length) { pane.innerHTML='<div class="text-muted text-center py-4">Nessun file trovato</div>'; return; }
     renderFileTree(tree);
   } catch(e) {
-    pane.innerHTML=`<div class="text-danger text-center py-4">Errore: ${escapeHtml(e.message)}</div>`;
+    pane.innerHTML=`<div class="text-danger text-center py-4">${escapeHtml(errText(e))}</div>`;
   }
 }
 
@@ -383,49 +376,33 @@ function renderTreeItems(items, container, depth) {
 
 async function moveToPath(sourcePath, name, destDirPath) {
   try {
-    const res = await fetch('/api/files/move', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({path:sourcePath, dest_dir_path:destDirPath}),
-    });
-    const data = await safeJson(res);
-    if (res.ok) { showToast(`Spostato: ${name}`,'success'); loadFiles(); }
-    else showToast(data.detail||'Errore spostamento','danger');
-  } catch(e) { showToast('Errore di rete','danger'); }
+    await api.post('/api/files/move', {path:sourcePath, dest_dir_path:destDirPath});
+    showToast(`Spostato: ${name}`,'success');
+    loadFiles();
+  } catch(e) { showToast(errText(e, 'Errore spostamento'),'danger'); }
 }
 
 async function batchMoveToPath(paths, destDirPath) {
   try {
-    const res = await fetch('/api/files/move-batch', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({paths, dest_dir_path:destDirPath}),
-    });
-    const data = await safeJson(res);
-    if (res.ok) {
-      const ok = data.results.filter(r=>r.ok).length;
-      const fail = data.results.filter(r=>!r.ok).length;
-      if (ok) showToast(`${ok} file spostati`,'success');
-      if (fail) showToast(`${fail} file non spostati`,'danger');
-      _selectedPaths.clear();
-      loadFiles();
-    } else showToast(data.detail||'Errore spostamento','danger');
+    const data = await api.post('/api/files/move-batch', {paths, dest_dir_path:destDirPath});
+    const ok = data.results.filter(r=>r.ok).length;
+    const fail = data.results.filter(r=>!r.ok).length;
+    if (ok) showToast(`${ok} file spostati`,'success');
+    if (fail) showToast(`${fail} file non spostati`,'danger');
+    _selectedPaths.clear();
+    loadFiles();
   } catch(e) { showToast('Errore di rete','danger'); }
 }
 
 async function batchDeletePaths(paths) {
   try {
-    const res = await fetch('/api/files/delete-batch', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({paths}),
-    });
-    const data = await safeJson(res);
-    if (res.ok) {
-      const ok = data.results.filter(r=>r.ok).length;
-      const fail = data.results.filter(r=>!r.ok).length;
-      if (ok) showToast(`${ok} file eliminati`,'success');
-      if (fail) showToast(`${fail} file non eliminati`,'danger');
-      _selectedPaths.clear();
-      loadFiles();
-    } else showToast(data.detail||'Errore eliminazione','danger');
+    const data = await api.post('/api/files/delete-batch', {paths});
+    const ok = data.results.filter(r=>r.ok).length;
+    const fail = data.results.filter(r=>!r.ok).length;
+    if (ok) showToast(`${ok} file eliminati`,'success');
+    if (fail) showToast(`${fail} file non eliminati`,'danger');
+    _selectedPaths.clear();
+    loadFiles();
   } catch(e) { showToast('Errore di rete','danger'); }
 }
 
@@ -443,24 +420,20 @@ async function renamePath(path, name) {
   const newName = await scPrompt(`Nuovo nome:`, name);
   if (!newName || newName === name) return;
   try {
-    const res = await fetch('/api/files/rename', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ path, new_name: newName }),
-    });
-    if (res.ok) { showToast(`Rinominato in: ${newName}`, 'success'); loadFiles(); }
-    else { const d = await safeJson(res); showToast(d.detail || 'Errore rinomina', 'danger'); }
-  } catch(e) { showToast('Errore di rete', 'danger'); }
+    await api.post('/api/files/rename', { path, new_name: newName });
+    showToast(`Rinominato in: ${newName}`, 'success');
+    loadFiles();
+  } catch(e) { showToast(errText(e, 'Errore rinomina'), 'danger'); }
 }
 
 async function deletePath(path, name, isDir) {
   const msg = isDir ? `Eliminare la cartella "${name}" e tutto il suo contenuto?` : `Eliminare il file "${name}"?`;
   if (!await scConfirm(msg)) return;
   try {
-    const res = await fetch(`/api/files/delete/${encodeURI(path)}`, {method:'DELETE'});
-    if (res.ok||res.status===204) { showToast(`Eliminato: ${name}`,'success'); loadFiles(); }
-    else { const d=await safeJson(res); showToast(d.detail||'Errore eliminazione','danger'); }
-  } catch(e) { showToast('Errore di rete','danger'); }
+    await api.del(`/api/files/delete/${encodeURI(path)}`);
+    showToast(`Eliminato: ${name}`,'success');
+    loadFiles();
+  } catch(e) { showToast(errText(e, 'Errore eliminazione'),'danger'); }
 }
 
 
@@ -479,9 +452,7 @@ async function loadDiskUsage() {
   const box = document.getElementById('fm-disk-usage');
   if (!box) return;
   try {
-    const res = await fetch('/api/files/disk-usage');
-    if (!res.ok) { box.hidden = true; return; }
-    renderDiskUsage(await safeJson(res));
+    renderDiskUsage(await api.get('/api/files/disk-usage'));
   } catch (e) { box.hidden = true; }
 }
 

@@ -116,7 +116,9 @@ function _roleLabel() {
 }
 
 async function logout() {
-  await fetch('/api/auth/logout', { method: 'POST' });
+  // Best effort: the cookie is the session, and landing on /login without
+  // having managed to tell the server is still better than staying put.
+  try { await api.post('/api/auth/logout'); } catch (e) { /* leaving anyway */ }
   window.location.href = '/login';
 }
 
@@ -180,12 +182,6 @@ function fmtEta(sec) {
   if (m < 60) return `${m}m ${s.toString().padStart(2,'0')}s`;
   const h = Math.floor(m / 60), rm = m % 60;
   return `${h}h ${rm}m`;
-}
-
-async function safeJson(res) {
-  const text = await res.text();
-  try { return JSON.parse(text); }
-  catch { throw new Error(`HTTP ${res.status}: ${text.slice(0,120)}`); }
 }
 
 // ── Modal helpers ──────────────────────────────────────────────────────────────

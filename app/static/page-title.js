@@ -635,14 +635,12 @@ function dedupeLangs(codes) {
 // Same form, different action: without the download permission the choice of
 // audio and subtitles becomes a request instead of a job.
 async function submitRequest(payload, label) {
+  let data;
   try {
-    const res = await fetch('/api/requests', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await safeJson(res);
-    if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return false; }
+    data = await api.post('/api/requests', payload);
+  } catch (e) { showToast(errText(e), 'danger'); return false; }
 
+  try {
     const status = data.request.status;
     if (status === 'available') showToast(`${label} è già in libreria.`, 'info');
     else if (!data.created) showToast(`${label} era già stato richiesto: sarai avvisato.`, 'info');
@@ -652,7 +650,11 @@ async function submitRequest(payload, label) {
     renderRequestRibbons();
     refreshNotifications();
     return true;
-  } catch (e) { showToast('Errore di rete', 'danger'); return false; }
+  } catch (e) {
+    // The request went through; only the bookkeeping after it did not.
+    console.error('submitRequest:', e);
+    return true;
+  }
 }
 
 // ── Film download ──────────────────────────────────────────────────────────────
@@ -676,19 +678,12 @@ async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLa
       subtitle_languages: subLangs || ['ita', 'eng'],
     };
     if (scheduledAt) body.scheduled_at = scheduledAt;
-    const res = await fetch(endpoint, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(body),
-    });
-    const data = await safeJson(res);
-    if (res.ok) {
-      const msg = scheduledAt
-        ? `Programmato: ${title} — ${new Date(scheduledAt).toLocaleString('it-IT')}`
-        : `Download avviato: ${title}`;
-      showToast(msg, 'success');
-      showPage('downloads');
-    } else showToast(data.detail||'Errore','danger');
-  } catch(e) { showToast('Errore di rete','danger'); }
+    await api.post(endpoint, body);
+    showToast(scheduledAt
+      ? `Programmato: ${title} — ${new Date(scheduledAt).toLocaleString('it-IT')}`
+      : `Download avviato: ${title}`, 'success');
+    showPage('downloads');
+  } catch(e) { showToast(errText(e), 'danger'); }
 }
 
 // ── Episode Browser ────────────────────────────────────────────────────────────
@@ -723,14 +718,9 @@ async function startEpisodeDownload(epIndex) {
   };
   if (scheduledAt) body.scheduled_at = scheduledAt;
   try {
-    const res = await fetch(endpoint, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(body),
-    });
-    const data = await safeJson(res);
-    if (res.ok) showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
-    else showToast(data.detail||'Errore','danger');
-  } catch(e) { showToast('Errore di rete','danger'); }
+    await api.post(endpoint, body);
+    showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
+  } catch(e) { showToast(errText(e), 'danger'); }
 }
 
 // Whole seasons and whole series are one call: the server lists the episodes
@@ -739,14 +729,11 @@ async function startEpisodeDownload(epIndex) {
 // modalId is optional: the title page is a page, so there is nothing to
 // close behind it. It remains for the callers that are still modals.
 async function _startBatch(path, body, modalId) {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await safeJson(res);
-  if (!res.ok) {
-    showToast(data.detail || 'Errore avviando i download', 'danger');
+  let data;
+  try {
+    data = await api.post(path, body);
+  } catch (e) {
+    showToast(errText(e, 'Errore avviando i download'), 'danger');
     return false;
   }
   showToast(
@@ -807,14 +794,9 @@ async function startAnimeDownload(epIndex) {
   };
   if (scheduledAt) body.scheduled_at = scheduledAt;
   try {
-    const res = await fetch(endpoint, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    });
-    const data = await safeJson(res);
-    if (res.ok) showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
-    else showToast(data.detail || 'Errore', 'danger');
-  } catch(e) { showToast('Errore di rete', 'danger'); }
+    await api.post(endpoint, body);
+    showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
+  } catch(e) { showToast(errText(e), 'danger'); }
 }
 
 

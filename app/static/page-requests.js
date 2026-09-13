@@ -165,9 +165,7 @@ async function loadRequestQueue() {
   const container = document.getElementById('requests-list');
   container.innerHTML = '<div class="text-center py-4"><span class="spinner-border"></span></div>';
   try {
-    const res = await fetch('/api/requests');
-    if (!res.ok) throw new Error((await safeJson(res)).detail || 'Errore');
-    _queue = await res.json();
+    _queue = await api.get('/api/requests');
     renderRequestQueue();
     refreshQueueBadge();
   } catch (e) {
@@ -343,12 +341,10 @@ async function approveRequests(ids) {
   const auto_approve_watch_ids = ids.filter(
     id => document.getElementById(`watch-auto-${id}`)?.checked
   );
-  const res = await fetch('/api/requests/approve-batch', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids, auto_approve_watch_ids }),
-  });
-  const data = await safeJson(res);
-  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
+  let data;
+  try {
+    data = await api.post('/api/requests/approve-batch', { ids, auto_approve_watch_ids });
+  } catch (e) { showToast(errText(e), 'danger'); return; }
   const failed = (data.results || []).filter(r => !r.ok);
   showToast(
     failed.length
@@ -386,12 +382,10 @@ function denySelected() {
 
 async function confirmDeny() {
   const reason = document.getElementById('deny-reason').value.trim();
-  const res = await fetch('/api/requests/deny-batch', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids: _denyIds, reason: reason || null }),
-  });
-  const data = await safeJson(res);
-  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
+  let data;
+  try {
+    data = await api.post('/api/requests/deny-batch', { ids: _denyIds, reason: reason || null });
+  } catch (e) { showToast(errText(e), 'danger'); return; }
   hideModal('deny-modal');
   const failed = (data.results || []).filter(r => !r.ok);
   showToast(
@@ -405,12 +399,10 @@ async function confirmDeny() {
 async function _cancelIds(ids, page) {
   if (!ids.length) return;
   if (!await scConfirm(`Annullare ${ids.length} richiest${ids.length === 1 ? 'a' : 'e'}?`)) return;
-  const res = await fetch('/api/requests/cancel-batch', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids }),
-  });
-  const data = await safeJson(res);
-  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
+  let data;
+  try {
+    data = await api.post('/api/requests/cancel-batch', { ids });
+  } catch (e) { showToast(errText(e), 'danger'); return; }
   const failed = (data.results || []).filter(r => !r.ok);
   showToast(
     failed.length ? `${failed.length} richieste non annullabili` : 'Richieste annullate',
@@ -468,12 +460,9 @@ async function confirmFix() {
   if (episode) payload.episode_number = episode;
   if (audio.length) payload.audio_languages = audio;
 
-  const res = await fetch(`/api/requests/${_fixId}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await safeJson(res);
-  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
+  try {
+    await api.patch(`/api/requests/${_fixId}`, payload);
+  } catch (e) { showToast(errText(e), 'danger'); return; }
   hideModal('fix-modal');
   showToast('Richiesta corretta — approvala per riprovare', 'success');
   loadRequestQueue();
@@ -485,9 +474,7 @@ async function loadMyRequests() {
   const container = document.getElementById('my-requests-list');
   container.innerHTML = '<div class="text-center py-4"><span class="spinner-border"></span></div>';
   try {
-    const res = await fetch('/api/requests/mine');
-    if (!res.ok) throw new Error((await safeJson(res)).detail || 'Errore');
-    _myRequests = await res.json();
+    _myRequests = await api.get('/api/requests/mine');
     renderMyRequests();
   } catch (e) {
     container.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;

@@ -40,9 +40,7 @@ let _appSettingsPromise = null;
 
 function _loadAppSettings() {
   if (!_appSettingsPromise) {
-    _appSettingsPromise = fetch('/api/domain/settings')
-      .then(res => (res.ok ? safeJson(res) : null))
-      .catch(() => null);
+    _appSettingsPromise = api.get('/api/domain/settings').catch(() => null);
   }
   return _appSettingsPromise;
 }
@@ -265,7 +263,7 @@ async function _saveChannelEvents(id, events) {
     _feedback('notif-channels-feedback', 'Eventi aggiornati.', 'success');
     renderNotificationChannelsList();
   } catch (e) {
-    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Errore aggiornamento eventi.') : 'Errore di rete.', 'danger');
+    _feedback('notif-channels-feedback', errText(e, 'Errore aggiornamento eventi.'), 'danger');
     // The list is refetched only on failure: local state may now disagree
     // with the server.
     if (e instanceof ApiError) await loadNotificationChannels();
@@ -297,7 +295,7 @@ async function saveNotificationChannel() {
     _feedback('notif-channels-feedback', 'Canale aggiunto.', 'success');
     await loadNotificationChannels();
   } catch (e) {
-    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Errore salvataggio.') : 'Errore di rete.', 'danger');
+    _feedback('notif-channels-feedback', errText(e, 'Errore salvataggio.'), 'danger');
   }
   finally { btn.disabled = false; }
 }
@@ -308,7 +306,7 @@ async function toggleNotificationChannel(id, enabled) {
     _feedback('notif-channels-feedback', enabled ? 'Canale attivo.' : 'Canale disattivato.', 'success');
     await loadNotificationChannels();
   } catch (e) {
-    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Errore aggiornamento.') : 'Errore di rete.', 'danger');
+    _feedback('notif-channels-feedback', errText(e, 'Errore aggiornamento.'), 'danger');
     await loadNotificationChannels();
   }
 }
@@ -321,7 +319,7 @@ async function deleteNotificationChannel(id) {
     _feedback('notif-channels-feedback', 'Canale eliminato.', 'success');
     await loadNotificationChannels();
   } catch (e) {
-    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Errore eliminazione.') : 'Errore di rete.', 'danger');
+    _feedback('notif-channels-feedback', errText(e, 'Errore eliminazione.'), 'danger');
   }
 }
 
@@ -336,7 +334,7 @@ async function testNotificationChannel(id) {
       _feedback('notif-channels-feedback', 'Invio fallito: controlla la URL.', 'danger');
     }
   } catch (e) {
-    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Invio fallito: controlla la URL.') : 'Errore di rete.', 'danger');
+    _feedback('notif-channels-feedback', errText(e, 'Invio fallito: controlla la URL.'), 'danger');
   }
 }
 
@@ -344,8 +342,7 @@ async function testNotificationChannel(id) {
 
 async function loadJellyfinSettings() {
   try {
-    const res = await fetch('/api/auth/status');
-    const data = await safeJson(res);
+    const data = await api.get('/api/auth/status');
     const connected = !!data.jellyfin_url;
     document.getElementById('jf-not-connected').style.display = connected ? 'none' : '';
     document.getElementById('jf-connected').style.display = connected ? '' : 'none';
@@ -376,14 +373,10 @@ async function connectJellyfin(reconfigure) {
   btn.disabled = true;
   _feedback(fbId, 'Connessione...');
   try {
-    const res = await fetch('/api/auth/jellyfin-connect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, username, password }),
-    });
-    const data = await safeJson(res);
-    if (!res.ok) {
-      _feedback(fbId, data.detail || 'Collegamento fallito.', 'danger');
+    try {
+      await api.post('/api/auth/jellyfin-connect', { url, username, password });
+    } catch (e) {
+      _feedback(fbId, errText(e, 'Collegamento fallito.'), 'danger');
       btn.disabled = false;
       return;
     }
@@ -436,8 +429,7 @@ async function loadNamingTemplates() {
   // Without this the two copies drift the day a default changes server-side.
   if (!_namingDefaults) {
     try {
-      const res = await fetch('/api/domain/settings/naming-defaults');
-      if (res.ok) _namingDefaults = (await safeJson(res)).templates;
+      _namingDefaults = (await api.get('/api/domain/settings/naming-defaults')).templates;
     } catch (e) { /* the markup's placeholders stand in */ }
   }
 
@@ -477,13 +469,8 @@ function _collectNamingTemplates() {
 
 async function refreshNamingPreview() {
   try {
-    const res = await fetch('/api/domain/settings/naming-preview', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({templates: _collectNamingTemplates()}),
-    });
-    if (!res.ok) return;
-    const data = await safeJson(res);
+    const data = await api.post('/api/domain/settings/naming-preview',
+                                {templates: _collectNamingTemplates()});
     _namingInputs().forEach(input => {
       const slot = data.slots[input.dataset.namingSlot];
       const line = document.getElementById(`naming-preview-${input.dataset.namingSlot}`);
@@ -504,18 +491,9 @@ async function saveNamingTemplates() {
   btn.disabled = true;
   _feedback('naming-feedback', 'Salvataggio...');
   try {
-    const res = await fetch('/api/domain/settings', {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({naming_templates: _collectNamingTemplates()}),
-    });
-    if (res.ok) {
-      _feedback('naming-feedback', 'Salvato.', 'success');
-      showToast('Schema dei nomi salvato', 'success');
-    } else {
-      const d = await safeJson(res);
-      _feedback('naming-feedback', _detailText(d) || 'Errore salvataggio.', 'danger');
-    }
+    await api.put('/api/domain/settings', {naming_templates: _collectNamingTemplates()});
+    _feedback('naming-feedback', 'Salvato.', 'success');
+    showToast('Schema dei nomi salvato', 'success');
   } catch (e) { _feedback('naming-feedback', 'Errore di rete.', 'danger'); }
   finally { btn.disabled = false; }
 }
@@ -568,30 +546,19 @@ async function saveJellyfinRefresh() {
   btn.disabled = true;
   _feedback('jf-refresh-feedback', 'Salvataggio...');
   try {
-    const res = await fetch('/api/domain/settings', {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        jellyfin_refresh_on_download:
-          document.getElementById('jf-refresh-on-download').checked,
-      }),
+    await api.put('/api/domain/settings', {
+      jellyfin_refresh_on_download:
+        document.getElementById('jf-refresh-on-download').checked,
     });
-    if (res.ok) {
-      _feedback('jf-refresh-feedback', 'Salvato.', 'success');
-      showToast('Impostazione salvata', 'success');
-    } else {
-      const d = await safeJson(res);
-      _feedback('jf-refresh-feedback', d.detail || 'Errore salvataggio.', 'danger');
-    }
-  } catch (e) { _feedback('jf-refresh-feedback', 'Errore di rete.', 'danger'); }
+    _feedback('jf-refresh-feedback', 'Salvato.', 'success');
+    showToast('Impostazione salvata', 'success');
+  } catch (e) { _feedback('jf-refresh-feedback', errText(e, 'Errore salvataggio.'), 'danger'); }
   finally { btn.disabled = false; }
 }
 
 async function loadHooks() {
   try {
-    const res = await fetch('/api/download-hooks');
-    if (!res.ok) return;
-    const data = await safeJson(res);
+    const data = await api.get('/api/download-hooks');
     _hooks = data.hooks || [];
     renderJellyfinRefreshAvailability(!!data.jellyfin_connected);
     renderHooksList();
@@ -648,57 +615,43 @@ async function saveHook() {
   btn.disabled = true;
   _feedback('hooks-feedback', 'Salvataggio...');
   try {
-    const res = await fetch('/api/download-hooks', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        name, url,
-        method: document.getElementById('hook-method').value,
-        body_template: document.getElementById('hook-body').value,
-      }),
+    await api.post('/api/download-hooks', {
+      name, url,
+      method: document.getElementById('hook-method').value,
+      body_template: document.getElementById('hook-body').value,
     });
-    if (res.ok) {
-      document.getElementById('hook-name').value = '';
-      document.getElementById('hook-url').value = '';
-      document.getElementById('hook-body').value = '';
-      document.getElementById('hook-form').style.display = 'none';
-      _feedback('hooks-feedback', 'Aggiunto.', 'success');
-      await loadHooks();
-    } else {
-      const d = await safeJson(res);
-      _feedback('hooks-feedback', _detailText(d) || 'Errore salvataggio.', 'danger');
-    }
-  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+    document.getElementById('hook-name').value = '';
+    document.getElementById('hook-url').value = '';
+    document.getElementById('hook-body').value = '';
+    document.getElementById('hook-form').style.display = 'none';
+    _feedback('hooks-feedback', 'Aggiunto.', 'success');
+    await loadHooks();
+  } catch (e) { _feedback('hooks-feedback', errText(e, 'Errore salvataggio.'), 'danger'); }
   finally { btn.disabled = false; }
 }
 
 async function toggleHook(id, enabled) {
   try {
-    await fetch(`/api/download-hooks/${id}`, {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({enabled}),
-    });
-  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+    await api.patch(`/api/download-hooks/${id}`, {enabled});
+  } catch (e) { _feedback('hooks-feedback', errText(e), 'danger'); }
   await loadHooks();
 }
 
 async function deleteHook(id) {
   if (!await scConfirm('Eliminare questo webhook?')) return;
   try {
-    await fetch(`/api/download-hooks/${id}`, {method: 'DELETE'});
+    await api.del(`/api/download-hooks/${id}`);
     await loadHooks();
-  } catch (e) { _feedback('hooks-feedback', 'Errore di rete.', 'danger'); }
+  } catch (e) { _feedback('hooks-feedback', errText(e), 'danger'); }
 }
 
 async function testHook(id) {
   _feedback('hooks-feedback', 'Invio chiamata di prova...');
   try {
-    const res = await fetch(`/api/download-hooks/${id}/test`, {method: 'POST'});
-    const data = await safeJson(res);
+    const data = await api.post(`/api/download-hooks/${id}/test`);
     // Only an outcome and a status code come back: the panel never relays what
     // the other end said.
-    if (res.ok && data.ok) {
+    if (data.ok) {
       _feedback('hooks-feedback', `Riuscito (HTTP ${data.status}).`, 'success');
       showToast('Webhook raggiunto', 'success');
     } else {
@@ -728,23 +681,14 @@ async function saveDomainRecovery() {
   btn.disabled = true;
   _feedback('domain-recovery-feedback', 'Salvataggio...');
   try {
-    const res = await fetch('/api/domain/settings', {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        domain_auto_check_enabled: document.getElementById('domain-auto-check').checked,
-        domain_auto_apply: autoApply,
-        domain_check_interval_minutes: interval,
-      }),
+    await api.put('/api/domain/settings', {
+      domain_auto_check_enabled: document.getElementById('domain-auto-check').checked,
+      domain_auto_apply: autoApply,
+      domain_check_interval_minutes: interval,
     });
-    if (res.ok) {
-      _feedback('domain-recovery-feedback', 'Salvato.', 'success');
-      showToast('Impostazioni salvate', 'success');
-    } else {
-      const d = await safeJson(res);
-      _feedback('domain-recovery-feedback', d.detail || 'Errore salvataggio.', 'danger');
-    }
-  } catch (e) { _feedback('domain-recovery-feedback', 'Errore di rete.', 'danger'); }
+    _feedback('domain-recovery-feedback', 'Salvato.', 'success');
+    showToast('Impostazioni salvate', 'success');
+  } catch (e) { _feedback('domain-recovery-feedback', errText(e, 'Errore salvataggio.'), 'danger'); }
   finally { btn.disabled = false; }
 }
 
@@ -753,13 +697,13 @@ async function checkDomainNow() {
   btn.disabled = true;
   _feedback('domain-recovery-feedback', 'Controllo in corso...');
   try {
-    const res = await fetch('/api/domain/check', {method: 'POST'});
-    if (!res.ok) {
-      const d = await safeJson(res);
-      _feedback('domain-recovery-feedback', d.detail || 'Controllo fallito.', 'danger');
+    let data;
+    try {
+      data = await api.post('/api/domain/check');
+    } catch (e) {
+      _feedback('domain-recovery-feedback', errText(e, 'Controllo fallito.'), 'danger');
       return;
     }
-    const data = await safeJson(res);
     if (data.applied) {
       _feedback('domain-recovery-feedback', `Applicato ${data.candidate}.`, 'success');
       await loadDomainStatus();
@@ -792,23 +736,14 @@ async function savePerfSettings() {
   btn.disabled = true;
   _feedback('perf-settings-feedback', 'Salvataggio...');
   try {
-    const res = await fetch('/api/domain/settings', {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        max_concurrent_downloads: concurrent,
-        max_segment_workers: workers,
-        series_watch_interval_minutes: watchInterval,
-      }),
+    await api.put('/api/domain/settings', {
+      max_concurrent_downloads: concurrent,
+      max_segment_workers: workers,
+      series_watch_interval_minutes: watchInterval,
     });
-    if (res.ok) {
-      _feedback('perf-settings-feedback', 'Salvato.', 'success');
-      showToast('Performance salvate', 'success');
-    } else {
-      const d = await safeJson(res);
-      _feedback('perf-settings-feedback', d.detail || 'Errore salvataggio.', 'danger');
-    }
-  } catch (e) { _feedback('perf-settings-feedback', 'Errore di rete.', 'danger'); }
+    _feedback('perf-settings-feedback', 'Salvato.', 'success');
+    showToast('Performance salvate', 'success');
+  } catch (e) { _feedback('perf-settings-feedback', errText(e, 'Errore salvataggio.'), 'danger'); }
   finally { btn.disabled = false; }
 }
 
@@ -819,21 +754,13 @@ async function saveDomain() {
   btn.disabled = true;
   _feedback('domain-feedback', 'Verifica in corso...');
   try {
-    const res = await fetch('/api/domain', {
-      method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({domain}),
-    });
-    const data = await safeJson(res);
-    if (res.ok) {
-      currentDomain = data.domain; currentVersion = data.version;
-      _feedback('domain-feedback', `OK — versione ${data.version}`, 'success');
-      const badge = document.getElementById('domain-badge');
-      badge.className = 'badge bg-success';
-      badge.textContent = data.domain;
-      showToast('Domain salvato', 'success');
-    } else {
-      _feedback('domain-feedback', data.detail || 'Errore', 'danger');
-    }
+    const data = await api.put('/api/domain', {domain});
+    currentDomain = data.domain; currentVersion = data.version;
+    _feedback('domain-feedback', `OK — versione ${data.version}`, 'success');
+    const badge = document.getElementById('domain-badge');
+    badge.className = 'badge bg-success';
+    badge.textContent = data.domain;
+    showToast('Domain salvato', 'success');
   } catch(e) {
     _feedback('domain-feedback', 'Errore di rete', 'danger');
   } finally { btn.disabled = false; }
@@ -843,8 +770,7 @@ async function saveDomain() {
 
 async function loadLibraries() {
   try {
-    const res = await fetch('/api/domain/libraries');
-    const data = await safeJson(res);
+    const data = await api.get('/api/domain/libraries');
     _libraries = data.libraries || [];
     const excl = (data.excluded_folders || []).join(', ');
     const inp = document.getElementById('excluded-input');
@@ -892,20 +818,12 @@ async function saveLibraries() {
   btn.disabled = true;
   _feedback('libraries-feedback', 'Salvataggio...');
   try {
-    const res = await fetch('/api/domain/libraries', {
-      method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({libraries:updated, excluded_folders:excluded}),
-    });
-    if (res.ok) {
-      _libraries = updated;
-      renderLibrariesList();
-      _feedback('libraries-feedback', 'Salvato.', 'success');
-      showToast('Librerie salvate','success');
-    } else {
-      const d = await safeJson(res);
-      _feedback('libraries-feedback', d.detail || 'Errore', 'danger');
-    }
-  } catch(e) { _feedback('libraries-feedback', 'Errore di rete', 'danger'); }
+    await api.put('/api/domain/libraries', {libraries:updated, excluded_folders:excluded});
+    _libraries = updated;
+    renderLibrariesList();
+    _feedback('libraries-feedback', 'Salvato.', 'success');
+    showToast('Librerie salvate','success');
+  } catch(e) { _feedback('libraries-feedback', errText(e), 'danger'); }
   finally { btn.disabled = false; }
 }
 

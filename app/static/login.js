@@ -4,9 +4,10 @@
 // only endpoints reachable without a session.
 //
 // Runs on base_bare.html: tokens, the shared components and core.js, but no
-// shell. It takes safeJson and escapeHtml from core.js rather than keeping its
-// own copies — this page had redeclared safeJson, which simply shadowed the
-// shared one and would have drifted from it.
+// shell. It takes its helpers from core.js and its calls from api.js rather
+// than keeping its own copies — this page had redeclared safeJson, which
+// simply shadowed the shared one and would have drifted from it, and
+// hand-rolled the same ok/detail dance at all five call sites.
 
 const $ = id => document.getElementById(id);
 
@@ -44,12 +45,8 @@ function listenForJellyfinToken() {
   window.addEventListener('message', async (event) => {
     if (!event.data || event.data.type !== 'sc-panel-jellyfin-token' || !event.data.token) return;
     try {
-      const res = await fetch('/api/auth/jellyfin-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: event.data.token }),
-      });
-      if (res.ok) window.location.href = '/';
+      await api.post('/api/auth/jellyfin-token', { token: event.data.token });
+      window.location.href = '/';
     } catch { /* fall back to the visible login form */ }
   });
   window.parent.postMessage({ type: 'sc-panel-ready' }, '*');
@@ -57,8 +54,7 @@ function listenForJellyfinToken() {
 
 async function init() {
   try {
-    const res = await fetch('/api/auth/status');
-    const status = await safeJson(res);
+    const status = await api.get('/api/auth/status');
     $('auth-loading').style.display = 'none';
     if (status.setup_done) {
       $('login-form').style.display = '';
@@ -80,24 +76,14 @@ $('setup-form').addEventListener('submit', async e => {
   const btn = $('setup-btn');
   busy(btn, true, 'Connessione...');
   try {
-    const res = await fetch('/api/auth/setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: $('setup-url').value.trim(),
-        username: $('setup-username').value.trim(),
-        password: $('setup-password').value,
-      }),
+    await api.post('/api/auth/setup', {
+      url: $('setup-url').value.trim(),
+      username: $('setup-username').value.trim(),
+      password: $('setup-password').value,
     });
-    const data = await safeJson(res);
-    if (!res.ok) {
-      showAlert(data.detail || 'Configurazione fallita.');
-      busy(btn, false);
-      return;
-    }
     window.location.href = '/';
-  } catch {
-    showAlert('Errore di rete.');
+  } catch (e) {
+    showAlert(errText(e, 'Configurazione fallita.'));
     busy(btn, false);
   }
 });
@@ -107,16 +93,10 @@ $('skip-setup-btn').addEventListener('click', async () => {
   const btn = $('skip-setup-btn');
   busy(btn, true, 'Attendere...');
   try {
-    const res = await fetch('/api/auth/skip', { method: 'POST' });
-    const data = await safeJson(res);
-    if (!res.ok) {
-      showAlert(data.detail || 'Operazione fallita.');
-      busy(btn, false);
-      return;
-    }
+    await api.post('/api/auth/skip');
     window.location.href = '/';
-  } catch {
-    showAlert('Errore di rete.');
+  } catch (e) {
+    showAlert(errText(e, 'Operazione fallita.'));
     busy(btn, false);
   }
 });
@@ -127,23 +107,13 @@ $('login-form').addEventListener('submit', async e => {
   const btn = $('login-btn');
   busy(btn, true, 'Accesso...');
   try {
-    const res = await fetch('/api/auth/jellyfin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: $('login-username').value.trim(),
-        password: $('login-password').value,
-      }),
+    await api.post('/api/auth/jellyfin', {
+      username: $('login-username').value.trim(),
+      password: $('login-password').value,
     });
-    const data = await safeJson(res);
-    if (!res.ok) {
-      showAlert(data.detail || 'Accesso fallito.');
-      busy(btn, false);
-      return;
-    }
     window.location.href = '/';
-  } catch {
-    showAlert('Errore di rete.');
+  } catch (e) {
+    showAlert(errText(e, 'Accesso fallito.'));
     busy(btn, false);
   }
 });

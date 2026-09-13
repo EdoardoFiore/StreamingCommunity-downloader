@@ -143,12 +143,16 @@ function _afterFilterChange() {
   else applyClientFilter();
 }
 
+// A plain object for api.url, which drops undefined and keeps ''. That
+// distinction matters here: an empty media_type must be *absent*, not sent
+// blank, so the optional filters resolve to undefined rather than ''.
 function _searchParams(q, page) {
-  const params = new URLSearchParams({ q, source: currentSource, page: String(page) });
-  if (_kindFilter) params.set('media_type', _kindFilter);
-  // Sent only where it means something; the other source answers 422 for it.
-  if (_dubOnly && currentSource === 'animeunity') params.set('dubbed', 'true');
-  return params;
+  return {
+    q, source: currentSource, page: String(page),
+    media_type: _kindFilter || undefined,
+    // Sent only where it means something; the other source answers 422 for it.
+    dubbed: (_dubOnly && currentSource === 'animeunity') ? 'true' : undefined,
+  };
 }
 
 function _setMoreVisible(on) {
@@ -243,11 +247,13 @@ async function doSearch(options) {
   }
 
   try {
-    const res = await fetch(`/api/search?${_searchParams(q, _searchPage)}`,
-                            append ? {} : {signal: _searchAbort.signal});
-    const results = await safeJson(res);
-    if (!res.ok) {
-      const detail = escapeHtml(results.detail || 'Errore');
+    let results;
+    try {
+      results = await api.get('/api/search', _searchParams(q, _searchPage),
+                              append ? undefined : {signal: _searchAbort.signal});
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;   // handled by the catch below
+      const detail = escapeHtml(errText(e));
       if (append) showToast(detail, 'danger');
       else container.innerHTML = `<div class="col-12"><div class="alert alert-danger">${detail}</div></div>`;
       return;
@@ -337,12 +343,9 @@ async function showStartPage() {
   const source = currentSource;
   host.innerHTML = _shelfSkeletons();
   try {
-    const res = await fetch(`/api/home?source=${encodeURIComponent(source)}`,
-                            {signal: _homeAbort.signal});
-    const body = await safeJson(res);
-    // A 409 with no domain configured lands here too, and leaves the same
-    // bare search box.
-    if (!res.ok) { host.innerHTML = ''; return; }
+    // A 409 with no domain configured throws like any other refusal, and
+    // lands in the catch below, which leaves the same bare search box.
+    const body = await api.get('/api/home', {source}, {signal: _homeAbort.signal});
     _homeCache[source] = body.shelves || [];
     if (source !== currentSource) return;  // switched away while it was in flight
     renderShelves();
@@ -493,17 +496,14 @@ const STATUS_RIBBONS = {
 async function loadRequestStatuses(externalIds) {
   if (!externalIds.length || !(can('REQUEST') || can('DOWNLOAD'))) return;
   try {
-    const res = await fetch('/api/requests/status', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: currentSource, external_ids: externalIds }),
-    });
-    if (!res.ok) return;
+    const statuses = await api.post('/api/requests/status',
+      { source: currentSource, external_ids: externalIds });
     // Merged, not replaced. Called with only the new page's ids, an
     // assignment would wipe every ribbon already painted on the pages
     // before it, because renderRequestRibbons re-reads the whole map.
     // Staleness is bounded: _requestStatus is cleared on every fresh
     // search and on a source switch.
-    Object.assign(_requestStatus, await res.json());
+    Object.assign(_requestStatus, statuses);
     renderRequestRibbons();
   } catch (e) { /* the cards simply stay plain */ }
 }

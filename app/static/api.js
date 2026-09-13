@@ -45,8 +45,13 @@ const api = {
     return s ? `${path}?${s}` : path;
   },
 
-  async request(method, path, { body, params, raw = false } = {}) {
+  // `signal` is here because the search and the start page both abandon a
+  // call in flight when the query changes under them. Without it those two
+  // would have had to stay on raw fetch, which is how a second way of calling
+  // the API survives a migration meant to end it.
+  async request(method, path, { body, params, signal, raw = false } = {}) {
     const opts = { method };
+    if (signal) opts.signal = signal;
     if (body !== undefined) {
       opts.headers = { 'Content-Type': 'application/json' };
       opts.body = JSON.stringify(body);
@@ -69,9 +74,22 @@ const api = {
     return data;
   },
 
-  get(path, params)   { return api.request('GET', path, { params }); },
+  get(path, params, opts) { return api.request('GET', path, { params, ...opts }); },
   post(path, body)    { return api.request('POST', path, { body }); },
   put(path, body)     { return api.request('PUT', path, { body }); },
   patch(path, body)   { return api.request('PATCH', path, { body }); },
   del(path, body)     { return api.request('DELETE', path, { body }); },
 };
+
+
+// The message to show when a call fails.
+//
+// The hand-rolled call sites made a distinction worth keeping: a non-ok
+// response showed the server's own detail, while the surrounding catch showed
+// "Errore di rete". Once api.* throws for both, a single catch would collapse
+// them and start blaming the network for a 403. So: an ApiError carries the
+// server's words, anything else really is the connection.
+function errText(error, fallback = 'Errore') {
+  if (error instanceof ApiError) return error.message || fallback;
+  return 'Errore di rete';
+}

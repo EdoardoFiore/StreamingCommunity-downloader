@@ -25,13 +25,13 @@ async function loadUsersPage() {
   const container = document.getElementById('users-list');
   container.innerHTML = '<div class="text-center py-4"><span class="spinner-border"></span></div>';
   try {
+    // The Jellyfin call is the one that can fail for a reason worth reading -
+    // the server unreachable, credentials rejected - and api.get puts that
+    // reason on the error, so the catch below can show it.
     const [permissions, jellyfinUsers, settings] = await Promise.all([
-      fetch('/api/users/permissions').then(r => r.json()),
-      fetch('/api/users/jellyfin').then(async r => {
-        if (!r.ok) throw new Error((await safeJson(r)).detail || 'Errore Jellyfin');
-        return r.json();
-      }),
-      fetch('/api/users/settings').then(r => r.json()),
+      api.get('/api/users/permissions'),
+      api.get('/api/users/jellyfin'),
+      api.get('/api/users/settings'),
     ]);
     _permissionCatalogue = permissions.permissions;
     _jellyfinUsers = jellyfinUsers;
@@ -145,52 +145,43 @@ function _selectedPermissions(rowId) {
 }
 
 async function importUser(jellyfinUserId, rowId) {
-  const res = await fetch('/api/users/import', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  try {
+    await api.post('/api/users/import', {
       jellyfin_user_ids: [jellyfinUserId],
       permissions: _selectedPermissions(rowId),
-    }),
-  });
-  const data = await safeJson(res);
-  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
+    });
+  } catch (e) { showToast(errText(e), 'danger'); return; }
   showToast('Utente importato', 'success');
   loadUsersPage();
 }
 
 async function saveUserPermissions(userId, rowId) {
-  const res = await fetch(`/api/users/${userId}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ permissions: _selectedPermissions(rowId) }),
-  });
-  const data = await safeJson(res);
-  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
+  try {
+    await api.patch(`/api/users/${userId}`, { permissions: _selectedPermissions(rowId) });
+  } catch (e) { showToast(errText(e), 'danger'); return; }
   showToast('Permessi aggiornati', 'success');
   loadUsersPage();
 }
 
 async function toggleUserEnabled(userId, enabled) {
   if (!enabled && !await scConfirm('Disabilitare questo utente? Le sue sessioni verranno chiuse subito.')) return;
-  const res = await fetch(`/api/users/${userId}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
-  });
-  const data = await safeJson(res);
-  if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return; }
+  try {
+    await api.patch(`/api/users/${userId}`, { enabled });
+  } catch (e) { showToast(errText(e), 'danger'); return; }
   showToast(enabled ? 'Utente abilitato' : 'Utente disabilitato', 'info');
   loadUsersPage();
 }
 
 async function saveOpenSignin(allow) {
-  const settings = await fetch('/api/users/settings').then(r => r.json());
-  const res = await fetch('/api/users/settings', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  try {
+    // Read first, because the endpoint takes the whole settings object and
+    // sending it without default_permissions would reset them.
+    const settings = await api.get('/api/users/settings');
+    await api.put('/api/users/settings', {
       allow_new_jellyfin_login: allow,
       default_permissions: settings.default_permissions,
-    }),
-  });
-  if (!res.ok) { showToast('Errore', 'danger'); return; }
+    });
+  } catch (e) { showToast(errText(e), 'danger'); return; }
   showToast(allow
     ? 'Chiunque abbia un account Jellyfin può ora accedere'
     : 'Accesso limitato agli utenti importati', 'info');

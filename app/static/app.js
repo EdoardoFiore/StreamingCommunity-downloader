@@ -52,8 +52,7 @@ function defaultPage() {
 
 async function loadDomainStatus() {
   try {
-    const res = await fetch('/api/domain');
-    const data = await safeJson(res);
+    const data = await api.get('/api/domain');
     currentDomain = data.domain || '';
     currentVersion = data.version || '';
     const badge = document.getElementById('domain-badge');
@@ -78,9 +77,7 @@ let _domainCandidate = null;
 
 async function loadDomainCandidate() {
   try {
-    const res = await fetch('/api/domain/candidate');
-    if (!res.ok) return;
-    const data = await safeJson(res);
+    const data = await api.get('/api/domain/candidate');
     _domainCandidate = data.candidate || null;
     renderDomainBanner();
   } catch (e) { /* a missing banner is not worth a console error */ }
@@ -99,31 +96,22 @@ async function applyDomainCandidate() {
   const btn = document.getElementById('domain-banner-apply');
   btn.disabled = true;
   try {
-    const res = await fetch('/api/domain/candidate/apply', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      // Echoed back as a confirmation token: the server compares it with what
-      // it found and refuses a mismatch rather than trusting this value.
-      body: JSON.stringify({domain: _domainCandidate.host}),
-    });
-    if (res.ok) {
-      const data = await safeJson(res);
-      showToast(`Dominio aggiornato: ${data.domain}`, 'success');
-      _domainCandidate = null;
-      renderDomainBanner();
-      await loadDomainStatus();
-    } else {
-      const d = await safeJson(res);
-      showToast(d.detail || 'Impossibile applicare il dominio', 'danger');
-    }
-  } catch (e) { showToast('Errore di rete', 'danger'); }
-  finally { btn.disabled = false; }
+    // The host is echoed back as a confirmation token: the server compares it
+    // with what it found and refuses a mismatch rather than trusting it.
+    const data = await api.post('/api/domain/candidate/apply', {domain: _domainCandidate.host});
+    showToast(`Dominio aggiornato: ${data.domain}`, 'success');
+    _domainCandidate = null;
+    renderDomainBanner();
+    await loadDomainStatus();
+  } catch (e) {
+    showToast(errText(e, 'Impossibile applicare il dominio'), 'danger');
+  } finally { btn.disabled = false; }
 }
 
 async function dismissDomainCandidate() {
   if (!await scConfirm('Ignorare il dominio trovato? Il pannello resta sul dominio attuale.')) return;
   try {
-    await fetch('/api/domain/candidate/dismiss', {method: 'POST'});
+    await api.post('/api/domain/candidate/dismiss');
   } catch (e) { /* clearing a banner is best effort */ }
   _domainCandidate = null;
   renderDomainBanner();
