@@ -2910,13 +2910,16 @@ const PHASE_BAR = {
 const PHASE_BORDER_MAP = {
   scheduled:'var(--yellow)', queued:'var(--text-dim)', running:'var(--blue)', joining:'var(--yellow)',
   audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
-  error:'var(--accent)', cancelled:'var(--text-dim)',
+  error:'var(--danger)', cancelled:'var(--text-dim)',
 };
 
+// Short by design: these are cells on a rail, not sentences. An audio phase
+// is named by its language alone - "ITA" reads faster than "Audio ITA" when
+// there are three of them in a row.
 function _stepLabel(phase) {
-  const map = { video:'Video', joining:'Join', merging:'Merge', done:'Fine', audio:'Audio' };
+  const map = { video:'Video', joining:'Unione', merging:'Merge', done:'Fine', audio:'Audio' };
   if (map[phase]) return map[phase];
-  if (phase && phase.startsWith('audio_')) return 'Audio ' + phase.slice(6).toUpperCase();
+  if (phase && phase.startsWith('audio_')) return phase.slice(6).toUpperCase();
   return phase;
 }
 
@@ -2932,13 +2935,26 @@ function _buildStepsHtml(jobId, phases, currentPhase, status) {
     activeIdx = phases.indexOf(lookup);
     if (activeIdx < 0) activeIdx = phases.indexOf('video') >= 0 ? 0 : -1;
   }
+  const pct = status === 'running' ? (_jobs.get(jobId)?.progress?.pct || 0) : 0;
   const items = phases.map((p, i) => {
     let cls = 'jp';
-    if (activeIdx === phases.length || i < activeIdx) cls += ' complete';
-    else if (i === activeIdx) cls += ' active';
-    return `<span class="${cls}" data-phase="${p}">${_stepLabel(p)}</span>`;
+    let fill = 0;
+    if (activeIdx === phases.length || i < activeIdx) { cls += ' complete'; fill = 100; }
+    else if (i === activeIdx) { cls += ' active'; fill = pct; }
+    return `<span class="${cls}" data-phase="${p}">
+      <span class="jp-track"><span class="jp-fill" style="width:${fill}%"></span></span>
+      <span class="jp-label">${_stepLabel(p)}</span>
+    </span>`;
   }).join('');
   return `<div class="job-phases" id="job-steps-${jobId}">${items}</div>`;
+}
+
+// The rail is the one place the job's own shape is visible: the phases are
+// exactly job.phases, and the cell being worked on carries the real
+// percentage. Called on every progress frame, so it only touches the width.
+function _updateRailFill(jobId, pct) {
+  const active = document.querySelector(`#job-steps-${jobId} .jp.active .jp-fill`);
+  if (active) active.style.width = `${pct || 0}%`;
 }
 
 function _updateSteps(jobId, phase) {
@@ -2952,8 +2968,13 @@ function _updateSteps(jobId, phase) {
   if (activeIdx < 0) return;
   container.querySelectorAll('.jp').forEach((el, i) => {
     el.className = 'jp';
-    if (activeIdx === phases.length || i < activeIdx) el.className += ' complete';
-    else if (i === activeIdx) el.className += ' active';
+    let fill = 0;
+    if (activeIdx === phases.length || i < activeIdx) { el.className += ' complete'; fill = 100; }
+    else if (i === activeIdx) { el.className += ' active'; }
+    const bar = el.querySelector('.jp-fill');
+    // A phase that has just started is at zero until its first frame; one
+    // already passed is full and stays full.
+    if (bar) bar.style.width = `${fill}%`;
   });
 }
 
@@ -3033,7 +3054,7 @@ function _buildJobCard(j) {
   const dateLabel = j.scheduled_at ? `⏰ ${dateStr}` : dateStr;
 
   const stepsHtml = _buildStepsHtml(j.job_id, j.phases, phase, j.status);
-  return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}" id="job-card-${j.job_id}" style="border-left:3px solid ${borderColor} !important">
+  return `<div class="card mb-2 job-card${j.status==='done'?' is-done':''}${j.status==='error'?' is-error':''}${j.status==='running'?' is-running':''}" id="job-card-${j.job_id}" style="border-left:3px solid ${borderColor} !important">
     <div class="card-body py-2 px-3">
       <div class="d-flex align-items-center gap-2">
         <span class="badge ${isMovie?'bg-blue-lt':isAnimeJob?'bg-purple-lt':'bg-green-lt'} flex-shrink-0">${isMovie?'Film':isAnimeJob?'Anime':'TV'}</span>
@@ -3103,6 +3124,8 @@ function refreshCardAppearance(jobId) {
   // Update card classes and border
   card.classList.toggle('is-done', j.status==='done');
   card.classList.toggle('is-error', j.status==='error');
+  // Drives the rail's shimmer, which must stop the moment the job does.
+  card.classList.toggle('is-running', j.status==='running');
   card.style.borderLeftColor = _phaseBorder(phase);
 
   // Update badge
@@ -3174,6 +3197,9 @@ function handleProgressEvent(msg) {
     const prevPhase = _jobPhases[msg.job_id];
     _jobPhases[msg.job_id] = phase;
     if (phase !== prevPhase) _updateSteps(msg.job_id, phase);
+    // _updateSteps only runs on a phase change; the cell being worked on has
+    // to keep filling on every frame in between.
+    _updateRailFill(msg.job_id, msg.pct);
   }
   // Update bar and info without full card rebuild
   const bar = document.getElementById(`job-bar-${msg.job_id}`);
@@ -3219,7 +3245,9 @@ function handleDoneEvent(jobId, outputPath) {
   _updateSteps(jobId, 'done');
 
   const card = document.getElementById(`job-card-${jobId}`);
-  if (card) card.classList.add('is-done');
+  // Both, and in this order: a finished job that kept is-running would
+  // shimmer forever.
+  if (card) { card.classList.remove('is-running'); card.classList.add('is-done'); }
   const badge = document.getElementById(`job-badge-${jobId}`);
   if (badge) { badge.className='badge bg-success-lt flex-shrink-0'; badge.textContent='Completato'; }
   const bar = document.getElementById(`job-bar-${jobId}`);
@@ -3243,7 +3271,9 @@ function handleErrorEvent(jobId, message) {
   if (job) { job.status='error'; job.error=message; }
 
   const card = document.getElementById(`job-card-${jobId}`);
-  if (card) card.classList.add('is-error');
+  // Both, and in this order: a finished job that kept is-running would
+  // shimmer forever.
+  if (card) { card.classList.remove('is-running'); card.classList.add('is-error'); }
   const badge = document.getElementById(`job-badge-${jobId}`);
   if (badge) { badge.className='badge bg-danger-lt flex-shrink-0'; badge.textContent='Errore'; }
   const bar = document.getElementById(`job-bar-${jobId}`);
