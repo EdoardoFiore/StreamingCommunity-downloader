@@ -26,21 +26,13 @@ function openTitle(idx) {
 }
 let _tpSeed = null;
 
-// Every call below carries the site version, and it is fetched asynchronously
-// at boot - so a pasted link can arrive before it is known. It used to be sent
-// empty and the endpoint answered "field required".
-async function _tpEnsureVersion() {
-  if (currentVersion) return;
-  try {
-    const d = await api.get('/api/domain');
-    currentDomain = currentDomain || d.domain || '';
-    currentVersion = d.version || '';
-  } catch { /* the calls that follow report the real failure */ }
-}
-
 async function loadTitlePage(route) {
   const token = ++_tpToken;
-  await _tpEnsureVersion();
+  // Every call below carries the site version, and a pasted link can arrive
+  // before the boot knows it — it used to be sent empty and the endpoint
+  // answered "field required". ensureDomain() is now shared with the search,
+  // which needs the same guarantee for the same reason.
+  await ensureDomain();
   if (token !== _tpToken) return;
   const seed = _tpSeed; _tpSeed = null;
 

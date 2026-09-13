@@ -20,11 +20,19 @@ function itemYear(item) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   if (!await initAuth()) return;
+
+  // Routing happens here, not at the end. It needs the permissions and
+  // nothing else, and everything below used to run first — for an
+  // administrator that was three more round trips, spent staring at whatever
+  // page the markup happened to have left visible.
+  routeFromHash();
+
+  // Started, not awaited. The page is already on screen; these fill in the
+  // domain badge and the candidate banner around it.
   if (can('REQUEST') || can('DOWNLOAD') || can('MANAGE_SETTINGS')) {
-    await loadDomainStatus();
+    ensureDomain();
     loadDomainCandidate();
   }
-  if (can('MANAGE_SETTINGS')) await Promise.all([loadLibraries(), loadPerfSettings()]);
   if (can('DOWNLOAD') || can('MANAGE_REQUESTS')) {
     connectGlobalStream();
   } else {
@@ -38,10 +46,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderSearchFilters();
   refreshNotifications();
   refreshQueueBadge();
-  // Last, and the only entry point into routing at boot: permissions are
-  // resolved by now, so an address naming a page this user cannot open falls
-  // back correctly instead of racing initAuth.
-  routeFromHash();
 });
 
 function defaultPage() {
@@ -52,6 +56,21 @@ function defaultPage() {
 }
 
 // ── Domain ─────────────────────────────────────────────────────────────────────
+
+// currentDomain and currentVersion, guaranteed, without anyone having to know
+// whether the boot has got there yet.
+//
+// Routing no longer waits for the domain, so a search or a pasted title link
+// can run before it is known — which is how the episode list once ended up
+// sending an empty version and being told "field required". Everything that
+// needs the source awaits this instead of reading a global that may still be
+// empty. One request, shared by every caller.
+let _domainReady = null;
+
+function ensureDomain() {
+  if (!_domainReady) _domainReady = loadDomainStatus();
+  return _domainReady;
+}
 
 async function loadDomainStatus() {
   try {
@@ -65,7 +84,10 @@ async function loadDomainStatus() {
     } else {
       badge.className = 'badge bg-danger';
       badge.textContent = 'Domain non configurato';
-      openSettings();
+      // Only when the visitor did not ask for somewhere in particular. This
+      // resolves after routing now, and a link to #/files must not be
+      // overruled by a domain check that finished late.
+      if (!parseHash()) openSettings();
     }
   } catch(e) { console.error('loadDomainStatus:', e); }
 }

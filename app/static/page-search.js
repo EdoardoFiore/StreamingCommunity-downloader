@@ -215,7 +215,13 @@ async function doSearch(options) {
   const append = !!(options && options.append);
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
-  if (!currentDomain && currentSource !== 'animeunity') { openSettings(); return; }
+  // The boot no longer blocks routing on the domain, so a search restored
+  // from the address can start before it is known. Asking costs nothing once
+  // it is: ensureDomain() shares the one request.
+  if (currentSource !== 'animeunity') {
+    await ensureDomain();
+    if (!currentDomain) { openSettings(); return; }
+  }
   if (append && (_loadingMore || _searchExhausted)) return;
 
   if (!append) {
@@ -345,7 +351,10 @@ function _shelfSkeletons() {
 async function showStartPage() {
   const host = document.getElementById('home-shelves');
   if (!host) return;
-  if (!currentDomain && currentSource !== 'animeunity') { _setStartPageVisible(false); return; }
+  if (currentSource !== 'animeunity') {
+    await ensureDomain();
+    if (!currentDomain) { _setStartPageVisible(false); return; }
+  }
 
   _setStartPageVisible(true);
   if (_homeCache[currentSource]) { renderShelves(); return; }

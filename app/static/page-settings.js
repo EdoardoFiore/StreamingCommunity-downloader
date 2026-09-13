@@ -27,6 +27,10 @@ function _feedback(id, message = '', kind = 'muted') {
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
   sorgente: () => loadDomainRecoverySettings(),
+  // Loaded here rather than at boot. It was the one settings pane fed by a
+  // prefetch the whole application waited on before it could show any page
+  // at all, for data only this tab reads.
+  librerie: () => loadLibraries().then(renderLibrariesList),
   nomi: () => loadNamingTemplates(),
   download: () => loadPerfSettings(),
   accesso: () => loadJellyfinSettings(),

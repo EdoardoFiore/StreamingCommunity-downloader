@@ -31,7 +31,13 @@
         </div>
 
         <!-- ── Search ──────────────────────────────────────────── -->
-        <div id="page-search">
+        <!-- Every page starts hidden, this one included. It used to be the
+             one exception, so the browser painted the search page from the
+             first frame of the HTML and the router switched away from it a
+             few hundred milliseconds later — visible, every single load, as
+             a bounce through a page nobody asked for. Nothing is shown until
+             routeFromHash() says what. -->
+        <div id="page-search" style="display:none">
           <!-- Shown only with the box empty, alongside the source's own
                shelves. Once a query exists the results are the page. -->
           <div id="search-hero" class="sh-hero">
