@@ -52,6 +52,9 @@ async function loadTitlePage(route) {
     season: 1,
     episodes: [],
     audio: [], subs: [], tracksLoaded: false, tracksError: null,
+    // Raw value of the datetime input, kept so a re-render does not clear
+    // what the user typed; scheduledAt is its ISO form, or null for "now".
+    scheduledRaw: '', scheduledAt: null,
     tab: null,
   };
 
@@ -138,7 +141,7 @@ async function _tpLoadAnime(token) {
     _animeCtx = {
       animeId: _tp.id, animeName: _tp.name, animeType: _tp.animeType || 'tv',
       animeYear: _tp.year, episodes: _tp.episodes,
-      audioLangs: _tpPicked('audio'), subLangs: _tpPicked('subs'), scheduledAt: null,
+      audioLangs: _tpPicked('audio'), subLangs: _tpPicked('subs'), scheduledAt: _tp.scheduledAt,
     };
   } catch (e) {
     if (token !== _tpToken) return;
@@ -153,8 +156,11 @@ async function _tpLoadAnime(token) {
 function _tpSyncEpCtx(token) {
   _epCtx = {
     tvId: _tp.id, tvName: _tp.name, slug: _tp.slug, year: _tp.year,
-    scheduledAt: null, token, episodes: _tp.episodes || [],
+    scheduledAt: _tp.scheduledAt, token, episodes: _tp.episodes || [],
     currentSeason: _tp.season, poster: _tp.poster,
+    // downloadWholeSeries reads this off the context, and said "tutte le
+    // undefined stagioni" without it.
+    seasonsCount: _tp.seasonsCount,
     audioLangs: _tpPicked('audio'), subLangs: _tpPicked('subs'),
   };
 }
@@ -165,6 +171,15 @@ function _tpPicked(which) {
 }
 
 // ── Tracks ────────────────────────────────────────────────────────────────────
+
+// Empty means "now", which is what the download endpoints already expect.
+function tpSetSchedule(value) {
+  _tp.scheduledRaw = value || '';
+  _tp.scheduledAt = value ? new Date(value).toISOString() : null;
+  if (_tp.type === 'anime') { if (_animeCtx) _animeCtx.scheduledAt = _tp.scheduledAt; }
+  else if (_epCtx) _epCtx.scheduledAt = _tp.scheduledAt;
+  _tpRenderEpisodes();     // the batch buttons say "Programma" once a time is set
+}
 
 function tpToggleTrack(which, code) {
   const t = (_tp[which] || []).find(x => x.code === code);
@@ -264,7 +279,17 @@ function _tpRenderCta() {
   const icon = wants ? 'ti-send' : 'ti-download';
   const followable = _tp.type !== 'movie';
 
+  // Scheduling is part of the download privilege: a requester picks tracks and
+  // an approver decides when it runs.
+  const sched = can('DOWNLOAD') ? `
+    <label class="th-sched" title="Lascia vuoto per scaricare subito">
+      <i class="ti ti-clock"></i>
+      <input type="datetime-local" id="th-sched-at" value="${escapeHtml(_tp.scheduledRaw)}"
+             onchange="tpSetSchedule(this.value)">
+    </label>` : '';
+
   document.getElementById('th-cta').innerHTML = `
+    ${sched}
     <button class="btn btn-primary" onclick="tpPrimary()">
       <i class="ti ${icon} me-1"></i>${label}
     </button>
@@ -381,9 +406,25 @@ function _tpRenderEpisodes() {
         .map(n => `<button class="th-season-pill${n === _tp.season ? ' active' : ''}"
           onclick="tpLoadSeason(${n})">S${String(n).padStart(2, '0')}</button>`).join('')}</div>` : '';
 
+  // Batching is a download privilege; a requester asks episode by episode.
+  // The verb follows the schedule field, so the button says what will happen.
+  const verb = _tp.scheduledAt ? 'Programma' : 'Scarica';
+  let batch = '';
+  if (can('DOWNLOAD') && _tp.episodes?.length) {
+    batch = _tp.type === 'anime'
+      ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadAllAnime()">
+           <i class="ti ti-download me-1"></i>${verb} tutti gli episodi</button>`
+      : `<button class="btn btn-sm btn-outline-primary" onclick="downloadWholeSeason(${_tp.season})">
+           <i class="ti ti-download me-1"></i>${verb} la stagione</button>`
+        + (_tp.seasonsCount > 1
+            ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadWholeSeries()">
+                 <i class="ti ti-stack-2 me-1"></i>${verb} la serie</button>` : '');
+  }
+
   const head = `<div class="th-season-bar">
       <span class="th-season-label">${_tp.type === 'anime' ? 'Episodi' : `Stagione ${_tp.season}`}</span>
       ${pills}
+      <span class="th-season-batch">${batch}</span>
     </div>`;
 
   if (_tp.episodes === null) {
@@ -429,7 +470,7 @@ function _tpRenderEpisodes() {
 
 function tpPrimary() {
   if (_tp.type === 'movie') {
-    startFilmDownload(_tp.id, _tp.name, _tp.year, null, _tpPicked('audio'), _tpPicked('subs'), _tp.poster);
+    startFilmDownload(_tp.id, _tp.name, _tp.year, _tp.scheduledAt, _tpPicked('audio'), _tpPicked('subs'), _tp.poster);
   } else if (_tp.type === 'anime') {
     downloadAllAnime();
   } else {

@@ -1101,10 +1101,10 @@
        duration sits on the right where it can be compared down
        the column, and the action stays in the same place on
        every row. */
-    .th-eps { display: flex; flex-direction: column; gap: 6px; }
+    .th-eps { display: flex; flex-direction: column; gap: 4px; }
     .th-ep {
-      display: flex; align-items: center; gap: 14px;
-      padding: 10px 14px;
+      display: flex; align-items: center; gap: 12px;
+      padding: 7px 12px;
       background: var(--bg-surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -1117,8 +1117,8 @@
       font-size: 13px; color: var(--text-muted);
     }
     .th-ep-still {
-      flex: 0 0 92px; aspect-ratio: 16/9;
-      border-radius: var(--radius-sm); object-fit: cover;
+      flex: 0 0 56px; aspect-ratio: 16/9;
+      border-radius: var(--radius-xs); object-fit: cover;
       background: var(--bg-raised);
     }
     .th-ep-body { flex: 1 1 auto; min-width: 0; }
@@ -1127,8 +1127,8 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .th-ep-plot {
-      color: var(--text-muted); font-size: 12px; line-height: 1.45; margin-top: 2px;
-      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      color: var(--text-muted); font-size: 11.5px; line-height: 1.4; margin-top: 1px;
+      display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
       overflow: hidden;
     }
     .th-ep-dur {
@@ -1237,3 +1237,28 @@
     .sh-sub { color: var(--text-muted); font-size: 14px; margin: 0; }
 
     @media (max-width: 575px) { .sh-hero { padding: 14px 0 16px; } }
+
+    /* Batch actions sit at the end of the season bar, away from the per-row
+       buttons: "the whole season" and "this episode" should not be adjacent. */
+    .th-season-batch { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+
+    /* Scheduling. Empty means now, which is why it is a field and not a mode. */
+    .th-sched {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 0 10px; height: 38px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted); cursor: pointer;
+    }
+    .th-sched i { font-size: 15px; }
+    .th-sched input {
+      background: none; border: none; outline: none;
+      color: var(--text-sub);
+      font-family: var(--font-mono); font-size: 11.5px;
+      color-scheme: dark;
+    }
+    @media (max-width: 575px) {
+      .th-season-batch { margin-left: 0; width: 100%; }
+      .th-sched { width: 100%; }
+    }
