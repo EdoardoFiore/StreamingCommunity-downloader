@@ -504,7 +504,12 @@ function _tpRenderEpisodes() {
   const wants = !can('DOWNLOAD');
   const fn = _tp.type === 'anime' ? 'startAnimeDownload' : 'startEpisodeDownload';
   const rows = _tp.episodes.map((ep, i) => {
-    const still = thumbHtml(ep.still, 'th-ep-still');
+    // Only when the source has one. The placeholder means "an image was
+    // expected and did not arrive", which is true of a StreamingCommunity
+    // still that failed and false of AnimeUnity, whose episode records carry
+    // no image field at all - there, reserving the slot just draws the same
+    // empty box down the whole list.
+    const still = ep.still ? thumbHtml(ep.still, 'th-ep-still') : '';
     const plot = ep.plot ? `<div class="th-ep-plot">${escapeHtml(ep.plot)}</div>` : '';
     const dur = ep.duration ? `<span class="th-ep-dur">${escapeHtml(String(ep.duration))}m</span>` : '';
     const owned = ep.in_library
