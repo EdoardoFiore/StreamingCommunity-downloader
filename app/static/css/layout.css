@@ -234,15 +234,24 @@
       padding: 14px 0 !important;
     }
 
+    /* Retuned for Archivo. These numbers were set for Bebas Neue, which is
+       heavily condensed: at 24px with 3px of tracking an uppercase title was
+       narrow enough to leave the header actions room. In a normal-width face
+       the same settings ran the title across the row and pushed the user chip
+       - and its logout button - off the edge. */
     .page-title {
       font-family: var(--font-brand) !important;
-      font-size: 24px !important;
-      font-weight: 400 !important;
-      letter-spacing: 3px !important;
+      font-size: 19px !important;
+      font-weight: 600 !important;
+      letter-spacing: .08em !important;
       color: var(--text) !important;
       margin: 0 !important;
       text-transform: uppercase;
+      /* And it yields rather than pushing, whatever the face. */
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    /* The title column is the one that gives way; the actions keep their size. */
+    .page-header .row > .col { min-width: 0; }
 
     .page-body { padding-top: 24px !important; flex: 1; }
 
@@ -316,7 +325,7 @@
     .notif-empty { padding: 22px; text-align: center; color: var(--text-muted); font-size: 12px; }
 
     .user-chip {
-      display: flex; align-items: center; gap: 8px;
+      display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 260px;
       background: var(--bg-surface); border: 1px solid var(--border);
       border-radius: var(--radius-sm); padding: 4px 6px 4px 8px;
     }
@@ -326,8 +335,15 @@
       display: flex; align-items: center; justify-content: center;
       font-size: 11px; font-weight: 700; flex-shrink: 0;
     }
+    /* The name can be any length Jellyfin allows, so the text block is what
+       shrinks - never the logout button beside it. */
+    .user-chip-text { min-width: 0; }
+    .user-chip-name, .user-chip-role {
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .user-chip-name { font-size: 12.5px; font-weight: 600; line-height: 1.1; }
     .user-chip-role { font-size: 10px; color: var(--text-muted); line-height: 1.2; }
+    .user-chip > .header-icon-btn { flex-shrink: 0; }
     @media (max-width: 575px) { .user-chip-text { display: none; } }
 
     /* ═══════════════════════════════════════════════════════
