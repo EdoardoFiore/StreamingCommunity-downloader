@@ -94,6 +94,24 @@ def _read(*parts) -> str:
     return (Path(__file__).parent.parent / "app").joinpath(*parts).read_text(encoding="utf-8")
 
 
+def _all_panel_js() -> str:
+    """Every script the panel serves, concatenated.
+
+    The tables below used to be read out of app.js by name. That made the test
+    a lock on a filename rather than on the rule it exists for: splitting the
+    download page into its own script would have failed a test about phase
+    vocabulary, and the obvious "fix" — repointing it at the new file — leaves
+    the next split to fail the same way. What has to hold is that *the client*
+    can render every phase, wherever the table lives.
+    """
+    from pathlib import Path
+
+    static = Path(__file__).parent.parent / "app" / "static"
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(static.glob("*.js"))
+    )
+
+
 def test_the_stream_indicator_is_shown_exactly_when_the_stream_is_opened():
     """Three files state the same rule, and they drifted apart once already.
 
@@ -156,11 +174,11 @@ def test_every_phase_the_server_emits_has_a_client_entry():
     phases = [p for p in JobManager._compute_phases(["ita"]) if not p.startswith("audio_")]
     assert "video" in phases, "the phase this test exists for has been renamed"
 
-    app_js = _read("static", "app.js")
+    scripts = _all_panel_js()
     missing = []
     for table in ("PHASE_LABELS", "PHASE_BADGE", "PHASE_BAR", "PHASE_BORDER_MAP"):
-        match = re.search(rf"const {table} = \{{(.*?)\n\}};", app_js, re.S)
-        assert match, f"{table} not found in app.js"
+        match = re.search(rf"const {table} = \{{(.*?)\n\}};", scripts, re.S)
+        assert match, f"{table} is not defined in any script under app/static/"
         body = match.group(1)
         for phase in phases:
             if not re.search(rf"\b{re.escape(phase)}\s*:", body):

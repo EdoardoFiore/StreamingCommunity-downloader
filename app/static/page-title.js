@@ -589,3 +589,251 @@ async function tpRequestSeason() {
     showToast(e.message || 'Richiesta non riuscita', 'danger');
   }
 }
+
+
+// ── Avvio di un download ─────────────────────────────────────────────────────
+//
+// Moved here from app.js: after the detail page replaced the three modals,
+// this page is the only caller of any of it.
+
+// ── Detail Modal ───────────────────────────────────────────────────────────────
+
+const LANG_NAMES = {
+  ita:'Italiano', eng:'English', fra:'Français', spa:'Español',
+  deu:'Deutsch', por:'Português', jpn:'日本語', zho:'中文',
+  ara:'العربية', rus:'Русский', kor:'한국어',
+};
+const langName = c => LANG_NAMES[c] || c;
+
+// Which subtitle tracks start selected.
+//
+// A forced Italian track subtitles only what the Italian audio does not cover
+// - signs, and lines spoken in another language - while a full Italian track
+// repeats dialogue you can already hear. Alongside Italian audio the forced
+// one is almost always what is wanted, so it wins whenever the source has it,
+// and the full track is the fallback rather than the default.
+function preferredSubSelection(codes) {
+  const forcedIta = codes.find(c => /^forced[-_ ]?ita/i.test(c));
+  const picked = new Set();
+  if (forcedIta) picked.add(forcedIta);
+  else if (codes.includes('ita')) picked.add('ita');
+  if (codes.includes('eng')) picked.add('eng');
+  return picked;
+}
+
+// The source lists some languages more than once (two "ita", two "ger" on a
+// single title). Two identical chips are two controls for one thing.
+function dedupeLangs(codes) {
+  return [...new Set(codes || [])];
+}
+
+
+// Guards against a stale response painting over a newer one: open a title, close
+// it, open another before the first reply lands, and the first one used to win.
+// The two fetches of one open land in either order, and each needs something
+// the other has: the failure message depends on whether a fallback exists.
+
+
+
+
+
+// ── Requesting ─────────────────────────────────────────────────────────────────
+
+// Same form, different action: without the download permission the choice of
+// audio and subtitles becomes a request instead of a job.
+async function submitRequest(payload, label) {
+  try {
+    const res = await fetch('/api/requests', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) { showToast(data.detail || 'Errore', 'danger'); return false; }
+
+    const status = data.request.status;
+    if (status === 'available') showToast(`${label} è già in libreria.`, 'info');
+    else if (!data.created) showToast(`${label} era già stato richiesto: sarai avvisato.`, 'info');
+    else showToast(`Richiesta inviata: ${label}`, 'success');
+
+    _requestStatus[String(payload.external_id)] = { id: data.request.id, status };
+    renderRequestRibbons();
+    refreshNotifications();
+    return true;
+  } catch (e) { showToast('Errore di rete', 'danger'); return false; }
+}
+
+// ── Film download ──────────────────────────────────────────────────────────────
+
+async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLangs=null, subLangs=null, poster=null) {
+  if (!can('DOWNLOAD')) {
+    const ok = await submitRequest({
+      source: currentSource, media_type: 'film', external_id: String(id),
+      title, year, poster,
+      audio_languages: audioLangs || ['ita'],
+      subtitle_languages: subLangs || [],
+    }, title);
+    if (ok) showPage('my-requests');
+    return;
+  }
+  try {
+    const endpoint = scheduledAt ? '/api/download/schedule/film' : '/api/download/film';
+    const body = {
+      id, title, year,
+      audio_languages: audioLangs || ['ita'],
+      subtitle_languages: subLangs || ['ita', 'eng'],
+    };
+    if (scheduledAt) body.scheduled_at = scheduledAt;
+    const res = await fetch(endpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await safeJson(res);
+    if (res.ok) {
+      const msg = scheduledAt
+        ? `Programmato: ${title} — ${new Date(scheduledAt).toLocaleString('it-IT')}`
+        : `Download avviato: ${title}`;
+      showToast(msg, 'success');
+      showPage('downloads');
+    } else showToast(data.detail||'Errore','danger');
+  } catch(e) { showToast('Errore di rete','danger'); }
+}
+
+// ── Episode Browser ────────────────────────────────────────────────────────────
+
+let _epCtx = {};
+
+
+
+
+async function startEpisodeDownload(epIndex) {
+  const { tvId, tvName, slug, year, scheduledAt, token, episodes, currentSeason, audioLangs, subLangs, poster } = _epCtx;
+  const ep = episodes[epIndex];
+  const label = `${tvName} S${String(currentSeason).padStart(2,'0')}E${String(ep.n).padStart(2,'0')}`;
+
+  if (!can('DOWNLOAD')) {
+    await submitRequest({
+      source: 'streamingcommunity', media_type: 'episode', external_id: String(tvId),
+      slug, title: tvName, year, poster,
+      season: currentSeason, episode_number: String(ep.n),
+      audio_languages: audioLangs || ['ita'],
+      subtitle_languages: subLangs || [],
+    }, label);
+    return;
+  }
+
+  const endpoint = scheduledAt ? '/api/download/schedule/episode' : '/api/download/episode';
+  const body = {
+    tv_id: tvId, eps: episodes, ep_index: epIndex, token,
+    tv_name: tvName, season: currentSeason, year,
+    audio_languages: audioLangs || ['ita'],
+    subtitle_languages: subLangs || ['ita', 'eng'],
+  };
+  if (scheduledAt) body.scheduled_at = scheduledAt;
+  try {
+    const res = await fetch(endpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await safeJson(res);
+    if (res.ok) showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
+    else showToast(data.detail||'Errore','danger');
+  } catch(e) { showToast('Errore di rete','danger'); }
+}
+
+// Whole seasons and whole series are one call: the server lists the episodes
+// itself and queues them as a batch. That is also what lets it report the season
+// once at the end instead of pinging for every episode.
+// modalId is optional: the title page is a page, so there is nothing to
+// close behind it. It remains for the callers that are still modals.
+async function _startBatch(path, body, modalId) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await safeJson(res);
+  if (!res.ok) {
+    showToast(data.detail || 'Errore avviando i download', 'danger');
+    return false;
+  }
+  showToast(
+    body.scheduled_at ? `${data.count} episodi programmati` : `${data.count} episodi in coda`,
+    'success',
+  );
+  if (modalId) hideModal(modalId);
+  showPage('downloads');
+  return true;
+}
+
+async function downloadWholeSeason(season) {
+  const { tvId, slug, tvName, year, episodes, scheduledAt, audioLangs, subLangs } = _epCtx;
+  const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
+  if (!await scConfirm(`${label} tutti i ${episodes.length} episodi della stagione ${season}?`)) return;
+  await _startBatch('/api/download/season', {
+    tv_id: tvId, slug, tv_name: tvName, season, year,
+    audio_languages: audioLangs, subtitle_languages: subLangs,
+    scheduled_at: scheduledAt || null,
+  });
+}
+
+async function downloadWholeSeries() {
+  const { tvId, slug, tvName, year, scheduledAt, seasonsCount, audioLangs, subLangs } = _epCtx;
+  const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
+  if (!await scConfirm(`${label} tutte le ${seasonsCount} stagioni?`)) return;
+  await _startBatch('/api/download/series', {
+    tv_id: tvId, slug, tv_name: tvName, year,
+    audio_languages: audioLangs, subtitle_languages: subLangs,
+    scheduled_at: scheduledAt || null,
+  });
+}
+
+// ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
+
+
+async function startAnimeDownload(epIndex) {
+  const { animeId, animeName, animeType, animeYear, scheduledAt, episodes, audioLangs, subLangs } = _animeCtx;
+  const episode = episodes[epIndex];
+  const label = `${animeName} E${episode.number}`;
+
+  if (!can('DOWNLOAD')) {
+    await submitRequest({
+      source: 'animeunity', media_type: 'anime', external_id: String(animeId),
+      title: animeName, year: animeYear, anime_type: animeType,
+      episode_number: String(episode.number),
+      audio_languages: audioLangs || ['ita'],
+      subtitle_languages: subLangs || [],
+    }, label);
+    return;
+  }
+
+  const endpoint = scheduledAt ? '/api/download/schedule/anime' : '/api/download/anime';
+  const body = {
+    anime_id: animeId, episode, anime_name: animeName, anime_type: animeType, year: animeYear,
+    audio_languages: audioLangs || ['ita'],
+    subtitle_languages: subLangs || ['ita', 'eng'],
+  };
+  if (scheduledAt) body.scheduled_at = scheduledAt;
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await safeJson(res);
+    if (res.ok) showToast(scheduledAt ? `Programmato: ${label}` : `In coda: ${label}`, 'success');
+    else showToast(data.detail || 'Errore', 'danger');
+  } catch(e) { showToast('Errore di rete', 'danger'); }
+}
+
+
+async function downloadAllAnime() {
+  const { animeId, animeName, animeType, animeYear, episodes, scheduledAt,
+          audioLangs, subLangs } = _animeCtx;
+  const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
+  if (!await scConfirm(`${label} tutti i ${episodes.length} episodi?`)) return;
+  await _startBatch('/api/download/anime-all', {
+    anime_id: String(animeId), anime_name: animeName, anime_type: animeType,
+    year: animeYear,
+    audio_languages: audioLangs, subtitle_languages: subLangs,
+    scheduled_at: scheduledAt || null,
+  });
+}

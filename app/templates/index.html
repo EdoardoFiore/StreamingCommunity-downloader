@@ -226,8 +226,19 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ asset('app.js') }}"></script>
+<!-- One script per page, then the shell. Classic scripts, no modules: the
+     markup still carries inline handlers, and a module's exports are not
+     globals. Order matters only for the boot listener, which is why app.js
+     — the entry point — is last. -->
+<script src="{{ asset('page-search.js') }}"></script>
 <script src="{{ asset('page-title.js') }}"></script>
-<script src="{{ asset('router.js') }}"></script>
+<script src="{{ asset('page-downloads.js') }}"></script>
+<script src="{{ asset('page-requests.js') }}"></script>
+<script src="{{ asset('page-watches.js') }}"></script>
+<script src="{{ asset('page-users.js') }}"></script>
+<script src="{{ asset('page-files.js') }}"></script>
+<script src="{{ asset('page-settings.js') }}"></script>
 <script src="{{ asset('panel.js') }}"></script>
+<script src="{{ asset('router.js') }}"></script>
+<script src="{{ asset('app.js') }}"></script>
 {% endblock %}
