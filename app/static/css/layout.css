@@ -38,18 +38,17 @@
       background: var(--accent);
       border-radius: 9px;
       display: flex; align-items: center; justify-content: center;
-      font-family: var(--font-brand);
-      font-size: 17px;
+      font-size: 18px;
       color: #fff;
-      letter-spacing: 0;
       flex-shrink: 0;
-      box-shadow: 0 4px 14px var(--accent-glow);
+      box-shadow: 0 4px 16px var(--accent-glow);
     }
 
     .brand-text {
       font-family: var(--font-brand);
-      font-size: 21px;
-      letter-spacing: 3px;
+      font-size: 17px; font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .14em;
       color: var(--text) !important;
       line-height: 1;
     }
@@ -92,19 +91,11 @@
     }
 
     aside.navbar .nav-link.active {
-      color: var(--text) !important;
-      background: var(--accent-dim) !important;
+      color: #fff !important;
+      background: var(--accent) !important;
+      box-shadow: 0 3px 12px var(--accent-glow);
     }
-
-    aside.navbar .nav-link.active::before {
-      content: '';
-      position: absolute;
-      left: 0; top: 50%;
-      transform: translateY(-50%);
-      width: 3px; height: 20px;
-      background: var(--accent);
-      border-radius: 0 3px 3px 0;
-    }
+    aside.navbar .nav-link.active .nav-link-icon { color: #fff !important; opacity: 1; }
 
     .nav-link-icon {
       font-size: 17px;
@@ -162,11 +153,14 @@
       align-items: center;
       gap: 5px;
       padding: 4px 10px !important;
-      border-radius: 20px !important;
-      font-size: 11px !important;
-      font-weight: 600 !important;
-      font-family: var(--font-ui) !important;
-      letter-spacing: .2px;
+      border-radius: var(--radius-sm) !important;
+      font-size: 10.5px !important;
+      font-weight: 500 !important;
+      /* A hostname, and one that rotates: mono, and read character by
+         character. Declared here because this rule is !important and would
+         otherwise beat the shared data-surface rule in components.css. */
+      font-family: var(--font-mono) !important;
+      letter-spacing: 0;
       width: fit-content;
       max-width: 100%;
       overflow: hidden;

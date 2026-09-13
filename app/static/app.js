@@ -1775,6 +1775,8 @@ const _homeCache = {};   // source -> shelves, for a switch back and forth
 function _setStartPageVisible(on) {
   const shelves = document.getElementById('home-shelves');
   const results = document.getElementById('search-results');
+  const hero = document.getElementById('search-hero');
+  if (hero) hero.style.display = on ? '' : 'none';
   if (shelves) shelves.style.display = on ? '' : 'none';
   if (results) results.style.display = on ? 'none' : '';
   if (on) _setMoreVisible(false);

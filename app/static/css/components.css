@@ -384,10 +384,6 @@
        string is a path or a count rather than prose.
        ═══════════════════════════════════════════════════════ */
 
-    /* The source domain. It is a hostname, and it rotates - reading it
-       character by character is exactly what it is there for. */
-    #domain-badge { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0; }
-
     /* Sizes and timestamps in the file manager. */
     .fm-meta { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 

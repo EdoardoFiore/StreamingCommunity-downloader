@@ -1215,3 +1215,25 @@
       .th-ep-still { display: none; }
       .th-ep-plot { display: none; }
     }
+
+    /* ── Search landing ─────────────────────────────────────
+       The one place the panel gets to say what it is, before
+       anything is typed. It goes away the moment a query does
+       any actual work. */
+    .sh-hero { padding: 26px 0 22px; }
+    .sh-title {
+      font-family: var(--font-brand);
+      font-size: clamp(30px, 4.2vw, 46px);
+      font-weight: 700; line-height: 1.1; letter-spacing: -.025em;
+      color: var(--text); margin: 0 0 10px;
+    }
+    /* The one gradient in the interface. Spending it here keeps it an accent
+       rather than a texture. */
+    .sh-accent {
+      background: linear-gradient(96deg, var(--accent) 0%, var(--purple) 96%);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent; color: transparent;
+    }
+    .sh-sub { color: var(--text-muted); font-size: 14px; margin: 0; }
+
+    @media (max-width: 575px) { .sh-hero { padding: 14px 0 16px; } }
