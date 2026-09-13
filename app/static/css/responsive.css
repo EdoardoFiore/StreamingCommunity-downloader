@@ -41,7 +41,9 @@
         left: 0;
         top: 56px;
         right: 0;
-        width: 100vw;
+        /* No width: left and right already size it. 100vw counts the
+           scrollbar, so it measured slightly wider than the space actually
+           available and clipped its own right edge. */
         background: var(--bg-surface);
         border-bottom: 1px solid var(--border);
         border-radius: 0;
