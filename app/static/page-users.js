@@ -62,13 +62,14 @@ let _usersQuery = '';
 
 function setUsersFilter(filter) {
   _usersFilter = filter;
-  document.querySelectorAll('#users-filters .queue-filter').forEach(el =>
-    el.classList.toggle('active', el.dataset.filter === filter));
+  setActivePill('users-filters', filter);
+  syncHash();
   renderUsers();
 }
 
 function setUsersQuery(value) {
   _usersQuery = value.trim().toLowerCase();
+  syncHash();
   renderUsers();
 }
 
@@ -198,4 +199,19 @@ registerActions({
   'users:toggle':     d => toggleUserEnabled(Number(d.id), d.enable === '1'),
   'users:import':     d => importUser(d.jf, d.row),
   'users:openSignin': (d, el) => saveOpenSignin(el.checked),
+});
+
+
+registerPageHash('users', {
+  read: () => ({ params: {
+    f: _usersFilter === 'all' ? null : _usersFilter,
+    q: _usersQuery || null,
+  } }),
+  apply: params => {
+    _usersFilter = params.f || 'all';
+    _usersQuery = (params.q || '').trim().toLowerCase();
+    setActivePill('users-filters', _usersFilter);
+    const box = document.getElementById('users-search');
+    if (box) box.value = params.q || '';
+  },
 });

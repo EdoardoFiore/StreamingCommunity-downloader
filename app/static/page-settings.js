@@ -76,12 +76,9 @@ async function switchSettingsTab(name) {
     pane.style.display = pane.dataset.settingsPane === name ? '' : 'none';
   });
   _settingsTab = name;
-  // The tab belongs in the address, but replaceState rather than assigning to
-  // location.hash: that would fire hashchange, and the router would route
-  // back into here.
-  if (document.getElementById('page-settings')?.style.display !== 'none') {
-    history.replaceState(null, '', `#/settings/${name}`);
-  }
+  // The tab belongs in the address. syncHash uses replaceState, which fires
+  // nothing — assigning location.hash would route straight back into here.
+  if (document.getElementById('page-settings')?.style.display !== 'none') syncHash('settings');
   window.scrollTo({ top: 0 });
 
   // Marked before awaiting, so a double click cannot fire two fetches.
@@ -94,7 +91,7 @@ async function switchSettingsTab(name) {
 // The sidebar's entry point. Settings is a page with an address now, so this
 // navigates; the router calls openSettingsPage() back.
 function openSettings() {
-  location.hash = '#/settings';
+  navigate('settings');
 }
 
 // Reached through the router, either from openSettings() or from a pasted
@@ -857,4 +854,11 @@ registerActions({
   'cfg:hookEnabled':      (d, el) => toggleHook(Number(d.id), el.checked),
   'cfg:testHook':         d => testHook(Number(d.id)),
   'cfg:deleteHook':       d => deleteHook(Number(d.id)),
+});
+
+
+// The tab is a path segment, not a query parameter: it names which page of
+// settings you are on, the way the title's id does.
+registerPageHash('settings', {
+  read: () => ({ extra: [_settingsTab] }),
 });

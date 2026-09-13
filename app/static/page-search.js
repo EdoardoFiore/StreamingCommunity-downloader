@@ -47,6 +47,7 @@ function setSource(src) {
   // Clearing the grid and leaving the query typed is what made the selector
   // read as broken: nothing happened until you typed again.
   _rerunSearch();
+  syncHash();
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────────
@@ -138,6 +139,7 @@ function _rerunSearch() {
 // a window that has already been narrowed. On the rails there is nothing to
 // page, so it is applied where the cards already are.
 function _afterFilterChange() {
+  syncHash();
   const input = document.getElementById('search-input');
   if (input && input.value.trim()) doSearch();
   else applyClientFilter();
@@ -262,6 +264,7 @@ async function doSearch(options) {
 
     renderResultCards(results, container, _searchResults.length);
     _searchResults = _searchResults.concat(results);
+    syncHash();
 
     // A filtered page coming back empty means "none of that kind here", not
     // "no more results". StreamingCommunity has no filter of its own, so the
@@ -320,10 +323,19 @@ function _setStartPageVisible(on) {
   if (on) _setMoreVisible(false);
 }
 
-function maybeShowStartPage() {
+// What happens on arriving at the search page, from the nav or from a link.
+//
+// With an empty box it is the start page. With a query it is that query's
+// results — but only when there are none on screen, so coming back to the tab
+// after a look at Download does not silently re-run the search you already
+// have.
+function searchPageEnter() {
   const input = document.getElementById('search-input');
-  if (input && !input.value.trim()) showStartPage();
+  if (!input || !input.value.trim()) { showStartPage(); return; }
+  if (!_searchResults.length) doSearch();
+  else _setStartPageVisible(false);
 }
+
 
 function _shelfSkeletons() {
   const card = '<div class="shelf-item"><div class="skeleton skeleton-card"></div></div>';
@@ -528,4 +540,39 @@ registerActions({
   'search:kind':   d => setKindFilter(d.kind),
   'search:dub':    d => setDubOnly(d.on === '1'),
   'search:open':   d => openTitle(Number(d.idx)),
+});
+
+
+// ── The address ──────────────────────────────────────────────────────────────
+//
+// The query is the page here, so it is what the link has to carry. The page
+// number is not: restoring "page 4" would mean four requests to the source
+// before anything appeared, and the results of pages 1-3 are what the user
+// actually wants back first.
+
+registerPageHash('search', {
+  read: () => ({
+    params: {
+      q: document.getElementById('search-input')?.value.trim() || null,
+      src: currentSource === 'animeunity' ? 'animeunity' : null,
+      type: _kindFilter || null,
+      dub: _dubOnly ? '1' : null,
+    },
+  }),
+  apply: params => {
+    const input = document.getElementById('search-input');
+    if (input) input.value = params.q || '';
+    // Not setSource(): that clears the grid and re-runs the search, which is
+    // the opposite of restoring one. Only the parts that are state.
+    currentSource = params.src === 'animeunity' ? 'animeunity' : 'streamingcommunity';
+    document.getElementById('src-sc')?.classList.toggle('active', currentSource === 'streamingcommunity');
+    document.getElementById('src-au')?.classList.toggle('active', currentSource === 'animeunity');
+    if (input) input.placeholder = currentSource === 'animeunity' ? 'Cerca anime...' : 'Film, serie TV...';
+    _kindFilter = params.type || '';
+    _dubOnly = params.dub === '1';
+    _searchResults = [];
+    _searchPage = 1;
+    _searchExhausted = false;
+    renderSearchFilters();
+  },
 });

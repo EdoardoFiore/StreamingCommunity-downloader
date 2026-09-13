@@ -38,7 +38,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderSearchFilters();
   refreshNotifications();
   refreshQueueBadge();
-  showPage(defaultPage());
+  // Last, and the only entry point into routing at boot: permissions are
+  // resolved by now, so an address naming a page this user cannot open falls
+  // back correctly instead of racing initAuth.
+  routeFromHash();
 });
 
 function defaultPage() {
@@ -124,20 +127,23 @@ registerActions({
   'domain:dismiss': () => dismissDomainCandidate(),
   // The sidebar's nav. The page name rides on the same data-page the active
   // highlight already reads, so the two cannot disagree about which link is
-  // which. These are still <a href="#"> and showPage() still switches by
-  // display: giving each page its own hash is a separate change, because the
-  // title page currently owns the hash and clears it on the way out.
-  'nav':            d => showPage(d.page),
+  // which. Through navigate(), not showPage(), so a click leaves an address
+  // behind and Back works between sections.
+  'nav':            d => navigate(d.page),
 });
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
 
-function showPage(page) {
+// `params` arrives from the address. It is applied before the loaders run, so
+// a page restored from a link renders its own state once rather than rendering
+// the default and then correcting itself.
+function showPage(page, params = null) {
   // Close mobile menu if open
   const mobileMenu = document.getElementById('sidebar-menu');
   if (mobileMenu && mobileMenu.classList.contains('show')) {
     mobileMenu.classList.remove('show');
   }
+  if (params) PAGE_HASH[page]?.apply?.(params);
   ['search','downloads','files','requests','my-requests','watches','users','detail','settings'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.style.display = p === page ? '' : 'none';
@@ -149,20 +155,25 @@ function showPage(page) {
   }[page] ?? 'Cerca';
   document.querySelectorAll('.nav-link[data-page]').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
-  // The search page had no loader at all. This covers the boot too, since
-  // DOMContentLoaded ends in showPage(defaultPage()).
-  if (page === 'search') maybeShowStartPage();
+  // Set before the loaders, so anything they call that writes the address —
+  // a filter applying itself, a season loading — knows which page it is on.
+  _routePage = page;
+  if (page === 'search') searchPageEnter();
   if (page === 'downloads') refreshJobs();
   if (page === 'files') loadFiles();
   if (page === 'requests') loadRequestQueue();
   if (page === 'my-requests') loadMyRequests();
   if (page === 'watches') loadWatches();
   if (page === 'users') loadUsersPage();
-  // The title page owns the hash. Navigating away has to release it, or the
-  // next reload lands back on a title the user already left.
-  if (page !== 'detail' && page !== 'settings' && (location.hash || '').startsWith('#/')) {
-    history.replaceState(null, '', location.pathname + location.search);
-  }
+  // Every page has an address now. This used to do the opposite — strip the
+  // hash on the way out of the two pages that had one — because they were the
+  // only two, and leaving a stale title in the bar meant the next reload
+  // reopened a title the user had left. With all of them addressed there is
+  // no stale case to clean up: the address simply follows the page.
+  //
+  // replaceState, never location.hash: assigning fires hashchange and would
+  // route straight back into here.
+  syncHash(page);
 }
 
 // ── Spazio disco, nella sidebar ──────────────────────────────────────────────

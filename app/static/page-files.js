@@ -158,6 +158,7 @@ function syncSelectionUI() {
 function onFmSearchInput(value) {
   const clearBtn = document.getElementById('fm-search-clear');
   if (clearBtn) clearBtn.style.display = value ? '' : 'none';
+  syncHash();
   clearTimeout(_fmSearchTimeout);
   if (!value || value.trim().length < 2) {
     if (_fmSearchActive) {
@@ -173,6 +174,7 @@ function onFmSearchInput(value) {
 function clearFmSearch() {
   const input = document.getElementById('fm-search-input');
   if (input) input.value = '';
+  syncHash();
   const clearBtn = document.getElementById('fm-search-clear');
   if (clearBtn) clearBtn.style.display = 'none';
   _fmSearchActive = false;
@@ -481,4 +483,23 @@ registerActions({
   'files:reload':      () => loadFiles(),
   'files:search':      (d, el) => onFmSearchInput(el.value),
   'files:clearSearch': () => clearFmSearch(),
+});
+
+
+// The search term is in the address; which folders are unfolded is not. The
+// tree is rebuilt from the server on every entry, and a link carrying a dozen
+// directory paths would be longer than the page.
+registerPageHash('files', {
+  read: () => {
+    const value = document.getElementById('fm-search-input')?.value.trim() || '';
+    return { params: { q: value.length >= 2 ? value : null } };
+  },
+  apply: params => {
+    const input = document.getElementById('fm-search-input');
+    if (input) input.value = params.q || '';
+    const clearBtn = document.getElementById('fm-search-clear');
+    if (clearBtn) clearBtn.style.display = params.q ? '' : 'none';
+    // loadFiles() checks this flag and runs the search instead of the tree.
+    _fmSearchActive = !!params.q;
+  },
 });

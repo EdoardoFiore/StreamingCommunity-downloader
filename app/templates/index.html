@@ -314,10 +314,15 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- One script per page, then the shell. Classic scripts, no modules: the
-     markup still carries inline handlers, and a module's exports are not
-     globals. Order matters only for the boot listener, which is why app.js
-     — the entry point — is last. -->
+<!-- Infrastructure, then one script per page, then the shell. Classic
+     scripts, no modules: the markup still carries three onerror attributes,
+     and a module's exports are not globals.
+     router.js belongs up here with core.js and api.js, not with the pages:
+     every page script calls registerPageHash() at top level, and a const
+     declared in a later script is in its temporal dead zone until then — the
+     whole bundle threw on load when this sat further down.
+     app.js — the entry point, which owns the boot listener — is last. -->
+<script src="{{ asset('router.js') }}"></script>
 <script src="{{ asset('page-search.js') }}"></script>
 <script src="{{ asset('page-title.js') }}"></script>
 <script src="{{ asset('page-downloads.js') }}"></script>
@@ -327,6 +332,5 @@
 <script src="{{ asset('page-files.js') }}"></script>
 <script src="{{ asset('page-settings.js') }}"></script>
 <script src="{{ asset('panel.js') }}"></script>
-<script src="{{ asset('router.js') }}"></script>
 <script src="{{ asset('app.js') }}"></script>
 {% endblock %}

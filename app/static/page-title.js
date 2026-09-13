@@ -14,7 +14,7 @@ let _tpToken = 0;    // guards against a slow response painting over a newer tit
 
 function titleHash(item) {
   const kind = item.type === 'anime' ? 'anime' : (item.type === 'movie' ? 'movie' : 'tv');
-  return `#/title/${kind}/${encodeURIComponent(item.id)}/${encodeURIComponent(item.slug || '')}`;
+  return hashFor('detail', [kind, item.id, item.slug || '']);
 }
 
 // From a result card or a shelf.
@@ -71,7 +71,8 @@ async function loadTitlePage(route) {
       season: seed.season || null,
       cast: [], directors: [],
     } : null,
-    season: 1,
+    // From the address when a link named one, so a reload of S03 is S03.
+    season: route.season || 1,
     episodes: [],
     audio: [], subs: [], tracksLoaded: false, tracksError: null,
     // Raw value of the datetime input, kept so a re-render does not clear
@@ -140,6 +141,7 @@ function _tpApplyMeta(meta) {
 
 async function tpLoadSeason(n, token = _tpToken) {
   _tp.season = n;
+  syncHash('detail');
   _tp.episodes = null;                       // renders the loading state
   _tpRenderEpisodes();
   try {
@@ -561,9 +563,10 @@ async function tpRefreshFollow() { await checkWatchStatus('page'); }
 // Back to wherever the visitor came from, and to the search page when they
 // arrived by pasted link and there is no history to go back to.
 function tpBack() {
+  // Back where possible, because it returns to the exact search that was
+  // there — query, filters and all — rather than to an empty one.
   if (history.length > 1 && document.referrer !== '') { history.back(); return; }
-  location.hash = '';
-  showPage('search');
+  navigate('search');
 }
 
 // Every episode of the season, as requests. The server enumerates and creates
@@ -834,4 +837,20 @@ registerActions({
   'tp:batchSeason':   d => downloadWholeSeason(Number(d.season)),
   'tp:batchAnime':    () => downloadAllAnime(),
   'tp:episode':       d => (_tp.type === 'anime' ? startAnimeDownload : startEpisodeDownload)(Number(d.index)),
+});
+
+
+// The title is a path — kind, id, slug — and the season is the one piece of
+// state on the page worth carrying, because changing it is the main thing you
+// do here and losing it on reload is what sent you back to S01.
+//
+// The chosen audio and subtitle tracks are deliberately left out: they are a
+// decision about a download you have not started, not a place you are, and a
+// link that silently pre-selects someone else's tracks is a link that starts
+// the wrong download.
+registerPageHash('detail', {
+  read: () => (_tp ? {
+    extra: [_tp.type, _tp.id, _tp.slug || ''],
+    params: { s: _tp.season > 1 ? _tp.season : null },
+  } : {}),
 });

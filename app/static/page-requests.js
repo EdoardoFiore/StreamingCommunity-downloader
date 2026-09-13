@@ -179,8 +179,8 @@ function queueFilter() {
 }
 
 function setQueueFilter(filter) {
-  document.querySelectorAll('#queue-filters .queue-filter').forEach(el =>
-    el.classList.toggle('active', el.dataset.filter === filter));
+  setActivePill('queue-filters', filter);
+  syncHash();
   renderRequestQueue();
 }
 
@@ -487,8 +487,8 @@ function mineFilter() {
 }
 
 function setMineFilter(filter) {
-  document.querySelectorAll('#mine-filters .queue-filter').forEach(el =>
-    el.classList.toggle('active', el.dataset.filter === filter));
+  setActivePill('mine-filters', filter);
+  syncHash();
   renderMyRequests();
 }
 
@@ -626,4 +626,22 @@ registerActions({
   // asking for one answer is not a place.
   'queue:confirmDeny':   () => confirmDeny(),
   'queue:confirmFix':    () => confirmFix(),
+});
+
+
+// ── The address ──────────────────────────────────────────────────────────────
+//
+// Both filters live in the DOM rather than in a variable — queueFilter() and
+// mineFilter() read the active pill — so applying one is moving the pill, and
+// reading one is asking which pill is lit. The default is left out of the
+// address, so the everyday link stays #/requests.
+
+registerPageHash('requests', {
+  read: () => ({ params: { f: queueFilter() === 'action' ? null : queueFilter() } }),
+  apply: params => setActivePill('queue-filters', params.f || 'action'),
+});
+
+registerPageHash('my-requests', {
+  read: () => ({ params: { f: mineFilter() === 'active' ? null : mineFilter() } }),
+  apply: params => setActivePill('mine-filters', params.f || 'active'),
 });

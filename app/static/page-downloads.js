@@ -290,8 +290,8 @@ function _jobBucket(j) {
 
 function setDlFilter(filter) {
   _dlFilter = filter;
-  document.querySelectorAll('#dl-filters .queue-filter').forEach(el =>
-    el.classList.toggle('active', el.dataset.filter === filter));
+  setActivePill('dl-filters', filter);
+  syncHash();
   renderAllJobCards();
 }
 
@@ -628,4 +628,16 @@ registerActions({
   'jobs:fire':        d => fireNow(d.job),
   'jobs:cancel':      d => cancelJob(d.job),
   'jobs:toggleGroup': d => toggleJobGroup(d.batch),
+});
+
+
+// The filter is in the address; which batches are folded away is not. A set of
+// collapsed ids would make the link longer than the page it points at, and it
+// is the cheapest state on screen to restore by hand.
+registerPageHash('downloads', {
+  read: () => ({ params: { f: _dlFilter === 'all' ? null : _dlFilter } }),
+  apply: params => {
+    _dlFilter = params.f || 'all';
+    setActivePill('dl-filters', _dlFilter);
+  },
 });
