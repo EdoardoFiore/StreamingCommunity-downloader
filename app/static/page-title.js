@@ -329,9 +329,12 @@ function _tpRenderCta() {
   // there is one - and the season bar keeps the season. Two buttons that both
   // said "season" left nowhere to ask for the lot.
   const verb = wants ? 'Richiedi' : (_tp.scheduledAt ? 'Programma' : 'Scarica');
+  // A requester can ask for a season but not for a series or a whole anime:
+  // those two go through the batch download endpoints, which require
+  // DOWNLOAD. Offering them would be a button that 403s.
   const scope = _tp.type === 'movie' ? ''
-    : (_tp.type === 'anime' ? ' tutti gli episodi'
-    : (_tp.seasonsCount > 1 ? ' la serie' : ' la stagione'));
+    : (_tp.type === 'anime' ? (wants ? '' : ' tutti gli episodi')
+    : (!wants && _tp.seasonsCount > 1 ? ' la serie' : ' la stagione'));
   const label = `${verb}${scope}`;
   const icon = wants ? 'ti-send' : (_tp.seasonsCount > 1 && _tp.type === 'tv' ? 'ti-stack-2' : 'ti-download');
   const followable = _tp.type !== 'movie';
@@ -345,11 +348,16 @@ function _tpRenderCta() {
              onchange="tpSetSchedule(this.value)">
     </label>` : '';
 
-  document.getElementById('th-cta').innerHTML = `
-    ${sched}
+  // An anime requester has nothing batchable to press: every episode is its
+  // own request, from the rows below.
+  const primary = (wants && _tp.type === 'anime') ? '' : `
     <button class="btn btn-primary" onclick="tpPrimary()">
       <i class="ti ${icon} me-1"></i>${label}
-    </button>
+    </button>`;
+
+  document.getElementById('th-cta').innerHTML = `
+    ${sched}
+    ${primary}
     <!-- Left bare: _renderFollowButton owns this button's class and label,
          and rewriting them here would fight it. -->
     ${followable ? `<button id="th-follow-btn" onclick="tpToggleFollow()"></button>` : ''}
@@ -474,12 +482,17 @@ function _tpRenderEpisodes() {
   // The verb follows the schedule field, so the button says what will happen.
   const verb = _tp.scheduledAt ? 'Programma' : 'Scarica';
   let batch = '';
-  if (can('DOWNLOAD') && _tp.episodes?.length) {
-    batch = _tp.type === 'anime'
-      ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadAllAnime()">
-           <i class="ti ti-download me-1"></i>${verb} tutti gli episodi</button>`
-      : `<button class="btn btn-sm btn-outline-primary" onclick="downloadWholeSeason(${_tp.season})">
-           <i class="ti ti-download me-1"></i>${verb} la stagione</button>`;
+  if (_tp.episodes?.length) {
+    if (can('DOWNLOAD')) {
+      batch = _tp.type === 'anime'
+        ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadAllAnime()">
+             <i class="ti ti-download me-1"></i>${verb} tutti gli episodi</button>`
+        : `<button class="btn btn-sm btn-outline-primary" onclick="downloadWholeSeason(${_tp.season})">
+             <i class="ti ti-download me-1"></i>${verb} la stagione</button>`;
+    } else if (_tp.type === 'tv' && can('REQUEST')) {
+      batch = `<button class="btn btn-sm btn-outline-primary" onclick="tpRequestSeason()">
+                 <i class="ti ti-send me-1"></i>Richiedi la stagione</button>`;
+    }
   }
 
   const head = `<div class="th-season-bar">
@@ -534,6 +547,9 @@ function _tpRenderEpisodes() {
 // ── Actions ───────────────────────────────────────────────────────────────────
 
 function tpPrimary() {
+  // Without DOWNLOAD a season becomes a season's worth of requests, made
+  // server-side so dedup and the library check apply to each of them.
+  if (!can('DOWNLOAD') && _tp.type === 'tv') { tpRequestSeason(); return; }
   if (_tp.type === 'movie') {
     startFilmDownload(_tp.id, _tp.name, _tp.year, _tp.scheduledAt, _tpPicked('audio'), _tpPicked('subs'), _tp.poster);
   } else if (_tp.type === 'anime') {
@@ -577,4 +593,28 @@ function tpBack() {
   if (history.length > 1 && document.referrer !== '') { history.back(); return; }
   location.hash = '';
   showPage('search');
+}
+
+// Every episode of the season, as requests. The server enumerates and creates
+// them, so each one is an ordinary request: already-asked episodes are joined
+// rather than duplicated, and the reply says how many of each.
+async function tpRequestSeason() {
+  const n = _tp.episodes?.length || 0;
+  if (!await scConfirm(`Richiedere tutti i ${n} episodi della stagione ${_tp.season}?`)) return;
+  try {
+    const r = await api.post('/api/requests/season', {
+      source: 'streamingcommunity',
+      external_id: String(_tp.id), title: _tp.name, slug: _tp.slug,
+      season: _tp.season, year: _tp.year || null, poster: _tp.poster || null,
+      audio_languages: _tpPicked('audio'),
+      subtitle_languages: _tpPicked('subs'),
+    });
+    const parts = [];
+    if (r.created) parts.push(`${r.created} richiest${r.created === 1 ? 'a' : 'e'}`);
+    if (r.joined) parts.push(`${r.joined} già in coda`);
+    showToast(parts.join(', ') || 'Nessun episodio da richiedere', 'success');
+    refreshQueueBadge();
+  } catch (e) {
+    showToast(e.message || 'Richiesta non riuscita', 'danger');
+  }
 }

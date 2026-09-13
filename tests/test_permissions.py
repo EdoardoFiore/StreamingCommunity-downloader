@@ -73,6 +73,8 @@ CASES = [
     ((Permission.MANAGE_REQUESTS, Permission.DOWNLOAD), "POST",
      "/api/download/does-not-exist/fire", None),
     ((Permission.MANAGE_USERS,), "GET", "/api/users", None),
+    ((Permission.REQUEST,), "POST", "/api/requests/season",
+     {"external_id": "1", "title": "x", "slug": "x", "season": 1}),
 ]
 
 

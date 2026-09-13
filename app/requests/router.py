@@ -204,6 +204,147 @@ async def create_request(body: CreateRequest, http_request: HttpRequest):
     return {"request": _public(request), "created": created}
 
 
+# A season is one decision for the person making it, so it is one call. The
+# cap matches the download side's: past a few hundred episodes this stopped
+# being a request and became a mistake.
+MAX_SEASON_REQUESTS = 500
+
+
+class CreateSeasonRequests(BaseModel):
+    """Every episode of one season, asked for in one go.
+
+    StreamingCommunity only: AnimeUnity has no seasons, and a film has no
+    episodes to enumerate.
+    """
+
+    source: str = Field(default="streamingcommunity", pattern="^streamingcommunity$")
+    external_id: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=300)
+    slug: str = Field(min_length=1, max_length=300)
+    season: int = Field(ge=0, le=200)
+    year: str | None = Field(default=None, max_length=10)
+    poster: str | None = Field(default=None, max_length=500)
+    audio_languages: list[str] = Field(default_factory=lambda: ["ita"])
+    subtitle_languages: list[str] = Field(default_factory=list)
+
+    @field_validator("audio_languages", "subtitle_languages")
+    @classmethod
+    def _languages(cls, value):
+        return CreateRequest._languages(value)
+
+
+def _enumerate_season(external_id: str, slug: str, season: int):
+    """The episodes of one season, read from the source."""
+    from app.config import configured_domain
+    from app.core.page import get_domain_version
+    from app.core.tv import get_info_season, get_token
+
+    domain = configured_domain()
+    if not domain:
+        raise HTTPException(status_code=409, detail="Nessun dominio configurato")
+    version = get_domain_version(domain) or ""
+    token = get_token(int(external_id), domain)
+    return get_info_season(int(external_id), slug, domain, version, token, season) or []
+
+
+@router.post("/season", status_code=201, dependencies=CAN_REQUEST)
+async def create_season_requests(body: CreateSeasonRequests, http_request: HttpRequest):
+    """Request every episode of a season.
+
+    The download side has had this since batches existed; the request side had
+    not, so a user without DOWNLOAD had to ask for a twenty-episode season one
+    episode at a time.
+
+    Each episode still becomes an ordinary request through
+    ``service.create_request``, so deduplication, the library check and the
+    notifications behave exactly as they do for a single one - an episode
+    somebody already asked for is joined, not duplicated.
+    """
+    user = current_user(http_request)
+
+    try:
+        episodes = await asyncio.to_thread(
+            _enumerate_season, body.external_id, body.slug, body.season
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Could not enumerate season %s of %s: %s",
+                       body.season, body.external_id, exc)
+        raise HTTPException(status_code=502, detail=f"Fonte non raggiungibile: {exc}")
+
+    if not episodes:
+        raise HTTPException(status_code=404, detail="Nessun episodio in questa stagione")
+    if len(episodes) > MAX_SEASON_REQUESTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Troppi episodi ({len(episodes)}); il massimo è {MAX_SEASON_REQUESTS}",
+        )
+
+    def _draft(episode_number: str) -> models.Request:
+        return models.Request(
+            id=0, content_key="", source=body.source, media_type="episode",
+            external_id=body.external_id, slug=body.slug, title=body.title,
+            year=body.year, poster=body.poster, season=body.season,
+            episode_number=episode_number, anime_type=None,
+            audio_languages=body.audio_languages,
+            subtitle_languages=body.subtitle_languages, available_snapshot=None,
+            status=models.PENDING, problem=None, denial_reason=None,
+            requested_by=user.id, decided_by=None, decided_at=None, job_id=None,
+            output_path=None, created_at="", updated_at="",
+        )
+
+    # Resolved once, on the first episode, rather than once per episode: a
+    # twenty-episode season would otherwise be twenty round trips to the
+    # stream host before a single request existed. The panel already treats
+    # one episode as representative of a season's tracks - that is what
+    # /api/tv/{id}/languages samples.
+    try:
+        available = await asyncio.to_thread(
+            resolver.available_tracks, _draft(str(episodes[0]["n"]))
+        )
+    except resolver.ResolutionError as exc:
+        raise HTTPException(status_code=502, detail=exc.message)
+    except Exception as exc:
+        logger.warning("Could not resolve tracks for a season request: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Fonte non raggiungibile: {exc}")
+
+    offered = {str(c).lower() for c in (available.get("audio") or [])}
+    if offered:
+        unavailable = [l for l in body.audio_languages if l.lower() not in offered]
+        if unavailable:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Audio non disponibile: {', '.join(unavailable)}. "
+                       f"Disponibili: {', '.join(sorted(offered))}",
+            )
+
+    created, joined = 0, 0
+    for episode in episodes:
+        _, was_created = await asyncio.to_thread(
+            service.create_request,
+            requested_by=user.id,
+            source=body.source,
+            media_type="episode",
+            external_id=body.external_id,
+            title=body.title,
+            slug=body.slug,
+            year=body.year,
+            poster=body.poster,
+            season=body.season,
+            episode_number=str(episode["n"]),
+            anime_type=None,
+            audio_languages=body.audio_languages,
+            subtitle_languages=body.subtitle_languages,
+            available_snapshot=available,
+        )
+        created += was_created
+        joined += not was_created
+
+    return {"season": body.season, "total": len(episodes),
+            "created": created, "joined": joined}
+
+
 # ── Reading ────────────────────────────────────────────────────────────────────
 
 @router.get("", dependencies=CAN_MANAGE)
