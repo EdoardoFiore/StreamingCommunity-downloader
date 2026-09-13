@@ -2528,22 +2528,45 @@ async function loadSeason(season) {
   const container = document.getElementById('episode-modal-body');
   container.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';
   try {
-    const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}&token=${encodeURIComponent(token)}`);
+    // title and year let the server say which episodes are already on disk.
+    // They are the same values this page would post to start the download.
+    const params = new URLSearchParams({
+      slug, version: currentVersion, token,
+      title: _epCtx.tvName || '', year: _epCtx.year || '',
+    });
+    const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?${params}`);
     const eps = await safeJson(res);
     if (!res.ok) { container.innerHTML=`<div class="alert alert-danger">${escapeHtml(eps.detail||'Errore caricamento episodi')}</div>`; return; }
     if (!Array.isArray(eps)) { container.innerHTML=`<div class="alert alert-danger">Risposta non valida dal server</div>`; return; }
     _epCtx.episodes=eps; _epCtx.currentSeason=season;
 
-    const rows = eps.map((ep, idx) => `
-      <tr>
-        <td class="text-muted w-1 text-nowrap">${ep.n}</td>
-        <td>${escapeHtml(ep.name)}</td>
-        <td class="w-1">
+    const rows = eps.map((ep, idx) => {
+      // Every field but the number and the id is optional: the source may
+      // simply not carry it, and a row missing its synopsis is still a row.
+      const still = ep.still
+        ? `<img class="ep-still" src="${escapeHtml(ep.still)}" alt="" loading="lazy">`
+        : `<span class="ep-still ep-still-empty"><i class="ti ti-photo-off"></i></span>`;
+      const dur = ep.duration ? `<span class="ep-dur">${escapeHtml(String(ep.duration))} min</span>` : '';
+      const plot = ep.plot ? `<div class="ep-plot">${escapeHtml(ep.plot)}</div>` : '';
+      const owned = ep.in_library
+        ? `<span class="ep-owned" title="Già nella libreria"><i class="ti ti-circle-check-filled"></i></span>`
+        : '';
+      return `
+      <tr class="ep-row${ep.in_library ? ' ep-row-owned' : ''}">
+        <td class="ep-num">${escapeHtml(String(ep.n))}</td>
+        <td class="ep-thumb-cell">${still}</td>
+        <td>
+          <div class="ep-head">${escapeHtml(ep.name || 'Senza titolo')}${dur}</div>
+          ${plot}
+        </td>
+        <td class="w-1 text-nowrap">
+          ${owned}
           <button class="btn btn-sm btn-primary" onclick="startEpisodeDownload(${idx})" title="Scarica">
             <i class="ti ti-download"></i>
           </button>
         </td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     container.innerHTML=`
       <div class="d-flex align-items-center justify-content-between mb-2">
