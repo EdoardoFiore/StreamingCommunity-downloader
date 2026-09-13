@@ -377,7 +377,7 @@
     #dl-active-pill {
       background: var(--blue-dim) !important;
       color: var(--blue) !important;
-      border: 1px solid rgba(79,128,255,.2) !important;
+      border: 1px solid var(--blue-ring) !important;
       border-radius: 20px !important;
       font-size: 11px !important;
       font-weight: 600 !important;
@@ -404,7 +404,7 @@
 
     .fm-row:hover { background: var(--bg-raised); }
     .fm-row[draggable="true"] { cursor: grab; }
-    .fm-row[draggable="true"]:hover { background: rgba(79,128,255,.07); }
+    .fm-row[draggable="true"]:hover { background: var(--accent-wash); }
     .fm-row.dragging { opacity: .3; cursor: grabbing; }
 
     .fm-drop-zone {
@@ -413,7 +413,7 @@
     }
 
     .fm-drop-zone.drag-over {
-      background: rgba(79,128,255,.09) !important;
+      background: var(--accent-wash) !important;
       border-left-color: var(--blue) !important;
     }
 
@@ -801,10 +801,28 @@
       transition: all .15s ease;
     }
     .perm-chip:hover { border-color: var(--border-strong); color: var(--text); }
+    /* The state lives on the chip, not in a box beside it. Same idiom as the
+       track picker on the title page: the whole thing is the control. */
     .perm-chip:has(input:checked) {
-      background: var(--blue-dim); border-color: rgba(79,128,255,.45); color: #a9c2ff;
+      background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
     }
-    .perm-chip input { margin: 0; }
+    .perm-chip:has(input:focus-visible) {
+      outline: 2px solid var(--accent); outline-offset: 2px;
+    }
+    /* Kept in the DOM and reachable by keyboard, just not drawn. */
+    .perm-chip input {
+      position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0;
+      pointer-events: none;
+    }
+    .perm-chip::before {
+      content: '\ea5e';                     /* ti-check */
+      font-family: 'tabler-icons';
+      font-size: 12px; line-height: 1;
+      width: 0; overflow: hidden;
+      opacity: 0;
+      transition: width .15s ease, opacity .15s ease;
+    }
+    .perm-chip:has(input:checked)::before { width: 12px; opacity: 1; }
 
     @media (max-width: 575px) {
       .user-row { flex-wrap: wrap; }

@@ -21,6 +21,11 @@
     .bg-secondary-lt { background: rgba(255,255,255,.06) !important; color: var(--text-muted) !important; }
 
     .bg-red        { background: var(--danger-solid) !important; color: #fff !important;        }
+    /* Undefined here until now, so Tabler's own .bg-yellow applied: white
+       text on yellow, at 2.1:1. That is what the pending-requests count in
+       the sidebar was wearing. Dark text on the same yellow is 9.3:1. */
+    .bg-yellow     { background: var(--yellow) !important;    color: var(--bg-base) !important; }
+    .bg-orange     { background: var(--orange) !important;    color: var(--bg-base) !important; }
     .bg-blue       { background: var(--blue) !important;       color: #fff !important;          }
     .bg-success    { background: var(--green) !important;      color: var(--bg-base) !important; }
     .bg-danger     { background: var(--danger-solid) !important; color: #fff !important;        }
@@ -71,7 +76,7 @@
 
     .btn-outline-primary {
       background: transparent !important;
-      border-color: rgba(79,128,255,.25) !important;
+      border-color: var(--blue-ring) !important;
       color: var(--blue) !important;
     }
     .btn-outline-primary:hover { background: var(--blue-dim) !important; }
@@ -368,7 +373,7 @@
     .alert.bg-info {
       background: var(--blue-dim) !important;
       color: var(--blue) !important;
-      border: 1px solid rgba(79,128,255,.22) !important;
+      border: 1px solid var(--blue-ring) !important;
     }
     .alert.bg-warning {
       background: var(--yellow-dim) !important;
@@ -398,3 +403,28 @@
 
     /* Any table of numbers should hold its columns. */
     .table td, .table th { font-variant-numeric: tabular-nums; }
+
+    /* ── Checkboxes and switches ────────────────────────────
+       Tabler ships these unthemed, so every toggle in Settings
+       was drawing the browser's own blue box on a navy panel. */
+    .form-check-input {
+      background-color: var(--bg-input) !important;
+      border: 1px solid var(--border-strong) !important;
+      cursor: pointer;
+      transition: background-color .15s, border-color .15s, box-shadow .15s;
+    }
+    .form-check-input:checked {
+      background-color: var(--accent) !important;
+      border-color: var(--accent) !important;
+    }
+    .form-check-input:focus-visible {
+      outline: none !important;
+      box-shadow: 0 0 0 3px var(--accent-dim) !important;
+      border-color: var(--accent) !important;
+    }
+    .form-check-input:disabled { opacity: .45; cursor: default; }
+    .form-check-label { cursor: pointer; color: var(--text-sub); }
+
+    /* A switch reads as "on or off", which is what most of these settings
+       are; a tick reads as "selected from a list". */
+    .form-switch .form-check-input { width: 2.25rem; height: 1.25rem; }

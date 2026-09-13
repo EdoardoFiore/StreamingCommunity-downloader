@@ -43,6 +43,7 @@
          than --accent so a "Film" badge cannot be mistaken for a button. */
       --blue:          #5B8DEF;
       --blue-dim:      rgba(91,141,239,.12);
+      --blue-ring:     rgba(91,141,239,.26);
       --green:         #2FBF71;
       --green-dim:     rgba(47,191,113,.12);
       --yellow:        #F0A22E;

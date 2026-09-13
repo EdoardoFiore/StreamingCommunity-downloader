@@ -2890,6 +2890,38 @@ function _phaseBorder(phase) {
   return 'transparent';
 }
 
+// The line under the progress bar, built in one place.
+//
+// It used to be composed twice - once when the card was drawn and again on
+// every progress frame - and the two disagreed: the rebuild showed the size,
+// the live update replaced it with a percentage. So the size appeared for a
+// moment and then vanished for the rest of the download.
+//
+// The total is extrapolated from the segments already fetched, so it wears a
+// tilde for as long as it is a guess; below the server's sample threshold it
+// is null and only what has actually arrived is claimed.
+function _jobInfoText(progress, status) {
+  if (!progress) return '';
+  const active = status === 'running';
+  const done = progress.bytes_done || 0;
+  const expected = progress.bytes_total;
+
+  let size = '';
+  if (done > 0) {
+    size = (status === 'done' || !expected)
+      ? formatSize(done)
+      : `${formatSize(done)} di ~${formatSize(expected)}`;
+  }
+  const speed = active
+    ? (progress.bytes_speed > 0 ? formatSize(progress.bytes_speed) + '/s'
+       : (progress.speed > 0 ? `${progress.speed} seg/s` : ''))
+    : '';
+  const eta = active && progress.eta ? fmtEta(progress.eta) : '';
+  const pct = active && progress.pct ? `${progress.pct}%` : '';
+
+  return [size, speed, eta, pct].filter(Boolean).join(' · ');
+}
+
 function _buildJobCard(j) {
   const phase = _jobPhases[j.job_id] || j.status;
   const isActive = j.status==='running' || j.status==='queued' || j.status==='scheduled';
@@ -2903,28 +2935,9 @@ function _buildJobCard(j) {
   const label = _phaseLabel(phase);
   const borderColor = _phaseBorder(phase);
 
-  const speed = j.progress?.speed;
-  const bytesSpeed = j.progress?.bytes_speed;
-  const eta = j.progress?.eta;
-  const speedStr = (isActive && j.status!=='queued')
-    ? (bytesSpeed > 0 ? formatSize(bytesSpeed) + '/s' : (speed > 0 ? `${speed} seg/s` : ''))
-    : '';
-  const etaStr = eta ? fmtEta(eta) : '';
 
-  // A playlist declares no size, so the total is extrapolated from the
-  // segments already fetched and is shown with a tilde for as long as it is a
-  // guess. With too small a sample the server sends null, and then only what
-  // has actually arrived is claimed.
-  const done = j.progress?.bytes_done || 0;
-  const expected = j.progress?.bytes_total;
-  let sizeStr = '';
-  if (done > 0) {
-    if (j.status === 'done') sizeStr = formatSize(done);
-    else if (expected) sizeStr = `${formatSize(done)} di ~${formatSize(expected)}`;
-    else sizeStr = formatSize(done);
-  }
-  const infoStr = [sizeStr, speedStr, etaStr].filter(Boolean).join(' · ');
-  const infoTitle = (expected && j.status !== 'done')
+  const infoStr = _jobInfoText(j.progress, j.status);
+  const infoTitle = (j.progress?.bytes_total && j.status !== 'done')
     ? ' title="La playlist non dichiara una dimensione: il totale è stimato sui segmenti già scaricati."'
     : '';
 
@@ -3090,11 +3103,9 @@ function handleProgressEvent(msg) {
   const bar = document.getElementById(`job-bar-${msg.job_id}`);
   if (bar) bar.style.width = msg.pct + '%';
   const info = document.getElementById(`job-info-${msg.job_id}`);
-  if (info) {
-    const speedStr = msg.bytes_speed > 0 ? formatSize(msg.bytes_speed) + '/s' : (msg.speed > 0 ? `${msg.speed} seg/s` : '');
-    const etaStr = msg.eta ? fmtEta(msg.eta) : '';
-    info.textContent = [speedStr, etaStr, `${msg.pct}%`].filter(Boolean).join(' · ');
-  }
+  // Same builder as the initial render, so a live frame cannot quietly drop
+  // the size the card was showing a moment ago.
+  if (info) info.textContent = _jobInfoText(job ? job.progress : msg, 'running');
 }
 
 function handlePhaseEvent(jobId, phase) {
