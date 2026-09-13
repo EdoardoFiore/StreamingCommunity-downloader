@@ -84,8 +84,18 @@ async function initAuth() {
   });
   // The inverse: hidden *because* the user holds a permission. Someone who
   // downloads directly never files a request, so the queue of their own
-  // requests is an empty page with a name. Applied second so it can override
-  // a data-perm that just showed the element.
+  // requests is an empty page with a name.
+  //
+  // A followed series does file requests in their name, but that is
+  // machinery, not something they asked for: the request exists so dedup, the
+  // library check and the notifications keep working, it is auto-approved
+  // against their own DOWNLOAD permission, and what they actually want to see
+  // - the episode arriving - shows up under Download like any other job. One
+  // that parks on a missing track still reaches them through the bell, which
+  // carries no permission gate.
+  //
+  // Applied second so it can override a data-perm that just showed the
+  // element.
   document.querySelectorAll('[data-hide-perm]').forEach(el => {
     if (el.dataset.hidePerm.split('|').some(can)) el.style.display = 'none';
   });

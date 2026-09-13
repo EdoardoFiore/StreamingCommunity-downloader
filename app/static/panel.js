@@ -809,25 +809,3 @@ document.addEventListener('click', event => {
     panel.style.display = 'none';
   }
 });
-
-// "Le mie richieste" is hidden from anyone who can download, because they
-// never file one - the title page offers them Scarica, not Richiedi.
-//
-// Except a followed series does file requests on their behalf: the poller
-// turns each new episode into an ordinary request owned by the follower and
-// auto-approves it against their DOWNLOAD permission. Those are real records
-// with a real state, so hiding the page outright would hide the only place
-// they can be seen. The entry comes back as soon as there is anything in it.
-async function revealMyRequestsIfUsed() {
-  // Scoped to this entry: the attribute is generic and another element
-  // adopting it must not be revealed by this.
-  const link = document.querySelector('.nav-link[data-page="my-requests"]');
-  const item = link?.closest('.nav-item[data-hide-perm]');
-  if (!item || item.style.display !== 'none') return;
-  try {
-    const mine = await api.get('/api/requests/mine');
-    if (Array.isArray(mine) && mine.length) item.style.display = '';
-  } catch {
-    // Leave it hidden: an entry that cannot be filled is worse than none.
-  }
-}
