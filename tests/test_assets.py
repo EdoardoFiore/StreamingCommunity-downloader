@@ -31,15 +31,21 @@ def test_missing_asset_falls_back_to_an_unversioned_url():
 
 def test_templates_never_hardcode_a_static_path():
     """A hardcoded /static/... path is exactly the stale-cache bug coming back,
-    and it would be invisible until a deploy failed to take effect."""
+    and it would be invisible until a deploy failed to take effect.
+
+    Recursive on purpose. This swept only the top level once, which meant the
+    check would have quietly stopped covering anything the moment templates were
+    split into partials/ and pages/ — losing its grip exactly as the number of
+    files it had to watch went up.
+    """
     from pathlib import Path
 
     templates = Path(__file__).parent.parent / "app" / "templates"
     offenders = [
-        path.name for path in templates.glob("*.html")
+        str(path.relative_to(templates)) for path in templates.rglob("*.html")
         if '"/static/' in path.read_text(encoding="utf-8")
     ]
-    assert not offenders, f"hardcoded /static/ paths in: {', '.join(offenders)}"
+    assert not offenders, f"hardcoded /static/ paths in: {', '.join(sorted(offenders))}"
 
 
 def test_versioned_request_may_be_cached_forever(client):
@@ -97,11 +103,24 @@ def test_the_stream_indicator_is_shown_exactly_when_the_stream_is_opened():
     a connection deliberately never attempted, reported as one that failed.
     """
     import re
+    from pathlib import Path
 
-    html = _read("templates", "index.html")
-    match = re.search(r'id="stream-status"[^>]*data-perm="([^"]+)"', html)
-    assert match, "the stream indicator must be gated by the stream's own permissions"
-    shown_for = set(match.group(1).split("|"))
+    # Searched across every template rather than in one named file. The
+    # indicator moved into a partial once, and a test that hardcodes where it
+    # lives reports that move as a failure while quietly covering nothing after
+    # someone "fixes" it by pointing at the new path.
+    templates = Path(__file__).parent.parent / "app" / "templates"
+    matches = [
+        m
+        for path in sorted(templates.rglob("*.html"))
+        for m in re.finditer(r'id="stream-status"[^>]*data-perm="([^"]+)"',
+                             path.read_text(encoding="utf-8"))
+    ]
+    assert len(matches) == 1, (
+        "expected exactly one stream indicator, gated by the stream's own "
+        f"permissions; found {len(matches)}"
+    )
+    shown_for = set(matches[0].group(1).split("|"))
 
     # The endpoint's requirement.
     router = _read("routers", "progress.py")
