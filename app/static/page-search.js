@@ -517,3 +517,12 @@ function renderRequestRibbons() {
     el.innerHTML = `<i class="ti ${style.icon}"></i>${style.label}`;
   });
 }
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+
+registerActions({
+  'search:source': d => setSource(d.source),
+  'search:run':    () => doSearch(),
+  'search:more':   () => loadMoreResults(),
+});

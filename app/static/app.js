@@ -129,6 +129,13 @@ async function dismissDomainCandidate() {
   renderDomainBanner();
 }
 
+// The banner is the shell's, not the search page's: it is about the source
+// every page reads from, and it happens to be rendered above the first one.
+registerActions({
+  'domain:apply':   () => applyDomainCandidate(),
+  'domain:dismiss': () => dismissDomainCandidate(),
+});
+
 // ── Navigation ─────────────────────────────────────────────────────────────────
 
 function showPage(page) {

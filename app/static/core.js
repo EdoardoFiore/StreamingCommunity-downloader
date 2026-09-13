@@ -318,6 +318,13 @@ document.addEventListener('click', e => _dispatchAction(e, 'data-action'));
 document.addEventListener('change', e => _dispatchAction(e, 'data-change'));
 document.addEventListener('input', e => _dispatchAction(e, 'data-input'));
 
+// Two keys, because those are the two a text field answers: Enter runs the
+// thing, Escape abandons it. Anything more belongs to the field itself.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') _dispatchAction(e, 'data-enter');
+  else if (e.key === 'Escape') _dispatchAction(e, 'data-escape');
+});
+
 
 // ── Language names ───────────────────────────────────────────────────────────
 //

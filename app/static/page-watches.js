@@ -34,9 +34,34 @@ async function loadWatches() {
   }
 }
 
+// Whether a new episode lands by itself or waits for an approver is the whole
+// question this page answers, so it is what the head counts.
+function renderWatchesStats() {
+  const el = document.getElementById('watches-stats');
+  if (!el) return;
+  const auto = _watches.filter(w => _watchIsAutomatic(w)).length;
+  const chips = [
+    [_watches.length, 'Seguite', 'pg-stat-live'],
+    [auto, 'Automatiche', 'pg-stat-ok'],
+    [_watches.length - auto, 'Dalla coda', 'pg-stat-warn'],
+  ];
+  el.innerHTML = chips.map(([value, label, cls]) =>
+    `<span class="pg-stat ${value ? cls : 'pg-stat-zero'}"><b>${value}</b><span>${label}</span></span>`
+  ).join('');
+}
+
+// The owner's DOWNLOAD permission is what the poller checks, so a follower
+// without it must not be told the episode will just appear. An ownerless watch
+// (no accounts at all) always downloads: there is no queue to wait in.
+function _watchIsAutomatic(w) {
+  return w.created_by === null || w.auto_approve ||
+    (!!_me && w.created_by === _me.user.id && can('DOWNLOAD'));
+}
+
 function renderWatchesList() {
   const c = document.getElementById('watches-list');
   if (!c) return;
+  renderWatchesStats();
   if (!_watches.length) {
     c.innerHTML = `<div class="empty-panel">
       <i class="ti ti-bell-off"></i>
@@ -49,11 +74,7 @@ function renderWatchesList() {
     return;
   }
   c.innerHTML = _watches.map(w => {
-    // The owner's DOWNLOAD permission is what the poller checks, so a follower
-    // without it must not be told the episode will just appear. An ownerless
-    // watch (no accounts) always downloads: there is no queue to wait in.
-    const auto = w.created_by === null || w.auto_approve ||
-      (!!_me && w.created_by === _me.user.id && can('DOWNLOAD'));
+    const auto = _watchIsAutomatic(w);
     const badge = auto
       ? '<span class="badge bg-green-lt">download automatico</span>'
       : '<span class="badge bg-yellow-lt">passa dalla coda</span>';
@@ -64,11 +85,11 @@ function renderWatchesList() {
     // to approve.
     const canArm = can('MANAGE_REQUESTS') && w.created_by !== null;
     const armButton = !canArm ? '' : w.auto_approve
-      ? `<button class="btn btn-sm btn-outline-secondary" onclick="setWatchAutoApprove(${w.id}, false)"
+      ? `<button class="btn btn-sm btn-outline-secondary" data-action="watch:arm" data-id="${w.id}" data-on="0"
                  title="I nuovi episodi torneranno a passare dalla coda di approvazione">
            <i class="ti ti-bell-x me-1"></i>Togli automatico
          </button>`
-      : `<button class="btn btn-sm btn-outline-success" onclick="setWatchAutoApprove(${w.id}, true)"
+      : `<button class="btn btn-sm btn-outline-success" data-action="watch:arm" data-id="${w.id}" data-on="1"
                  title="Approva la serie una volta: i nuovi episodi verranno scaricati senza passare dalla coda">
            <i class="ti ti-bell-check me-1"></i>Approva automatico
          </button>`;
@@ -93,11 +114,11 @@ function renderWatchesList() {
           <div class="req-actions">
             ${armButton}
             <button class="btn btn-sm btn-outline-secondary" id="watch-check-${w.id}"
-                    onclick="checkWatchNow(${w.id})"
+                    data-action="watch:check" data-id="${w.id}"
                     title="Cerca subito nuovi episodi, senza aspettare il controllo automatico">
               <i class="ti ti-refresh me-1"></i>Controlla ora
             </button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="unfollowWatch(${w.id})">
+            <button class="btn btn-sm btn-outline-secondary" data-action="watch:unfollow" data-id="${w.id}">
               <i class="ti ti-bell-off me-1"></i>Non seguire più
             </button>
           </div>
@@ -301,3 +322,13 @@ async function unfollowWatch(watchId) {
     await loadWatches();
   } catch (e) { showToast('Errore di rete', 'danger'); }
 }
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+
+registerActions({
+  'watch:reload':   () => loadWatches(),
+  'watch:arm':      d => setWatchAutoApprove(Number(d.id), d.on === '1'),
+  'watch:check':    d => checkWatchNow(Number(d.id)),
+  'watch:unfollow': d => unfollowWatch(Number(d.id)),
+});

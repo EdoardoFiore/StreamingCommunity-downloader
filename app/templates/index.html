@@ -20,11 +20,11 @@
               Trovato <code id="domain-banner-host"></code>, verificato dal pannello.
             </div>
             <button class="btn btn-sm btn-primary" data-perm="MANAGE_SETTINGS"
-                    onclick="applyDomainCandidate()" id="domain-banner-apply">
+                    data-action="domain:apply" id="domain-banner-apply">
               Applica
             </button>
             <button class="btn btn-sm btn-ghost-secondary" data-perm="MANAGE_SETTINGS"
-                    onclick="dismissDomainCandidate()">
+                    data-action="domain:dismiss">
               Ignora
             </button>
           </div>
@@ -44,18 +44,18 @@
           </div>
           <div class="mb-4">
             <div class="source-selector">
-              <button class="source-btn active" id="src-sc" onclick="setSource('streamingcommunity')">
+              <button class="source-btn active" id="src-sc" data-action="search:source" data-source="streamingcommunity">
                 <i class="ti ti-device-tv"></i>StreamingCommunity
               </button>
-              <button class="source-btn" id="src-au" onclick="setSource('animeunity')">
+              <button class="source-btn" id="src-au" data-action="search:source" data-source="animeunity">
                 <i class="ti ti-sword"></i>AnimeUnity
               </button>
             </div>
             <div class="sc-searchbar">
               <input type="text" id="search-input"
                      placeholder="Film, serie TV..."
-                     onkeydown="if(event.key==='Enter') doSearch()">
-              <button class="sc-search-btn" onclick="doSearch()" id="search-btn">
+                     data-enter="search:run">
+              <button class="sc-search-btn" data-action="search:run" id="search-btn">
                 <i class="ti ti-search"></i>Cerca
               </button>
             </div>
@@ -64,7 +64,7 @@
           <div id="home-shelves" style="display:none"></div>
           <div id="search-results" class="row g-3"></div>
           <div id="search-more" class="text-center mt-4" style="display:none">
-            <button class="source-btn" id="search-more-btn" onclick="loadMoreResults()">
+            <button class="source-btn" id="search-more-btn" data-action="search:more">
               <i class="ti ti-plus"></i>Carica altri
             </button>
           </div>
@@ -139,7 +139,7 @@
               <input type="text" id="fm-search-input" class="form-control form-control-sm"
                      placeholder="Cerca file..." autocomplete="off"
                      data-input="files:search"
-                     onkeydown="if(event.key==='Escape')clearFmSearch()">
+                     data-escape="files:clearSearch">
               <button class="btn btn-sm btn-outline-secondary" id="fm-search-clear"
                       style="display:none" data-action="files:clearSearch" title="Cancella ricerca">
                 <i class="ti ti-x"></i>
@@ -249,14 +249,23 @@
           <div id="my-requests-list"></div>
         </div>
 
+        <!-- ── Followed series ─────────────────────────────────── -->
         <div id="page-watches" style="display:none">
-          <div class="queue-filters">
-            <span class="text-muted" style="font-size:11px">
-              I nuovi episodi delle serie seguite vengono cercati automaticamente.
-            </span>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadWatches()">
-              <i class="ti ti-refresh"></i>
-            </button>
+          <div class="pg-head">
+            <div class="pg-head-main">
+              <h1 class="pg-h1">Serie seguite</h1>
+              <p class="pg-sub">
+                I nuovi episodi vengono cercati da soli. Una serie seguita non
+                scarica mai da sé: apre una richiesta, che passa dalla coda o
+                viene approvata subito, secondo i permessi di chi la segue.
+              </p>
+            </div>
+            <div class="pg-stats" id="watches-stats"></div>
+            <div class="pg-actions">
+              <button class="btn btn-sm btn-outline-secondary" data-action="watch:reload" title="Aggiorna">
+                <i class="ti ti-refresh me-1"></i>Aggiorna
+              </button>
+            </div>
           </div>
           <div id="watches-list"></div>
         </div>
