@@ -12,6 +12,9 @@
       --bg-raised:     #171D2B;
       --bg-hover:      #1D2436;
       --bg-input:      #0C1119;
+      /* The surface with alpha, for gradients laid over artwork. */
+      --scrim-strong:  rgba(16,21,31,.72);
+      --scrim-soft:    rgba(16,21,31,.25);
 
       /* Borders are a cool grey-blue rather than white: on a navy ground a
          white hairline reads as a scratch, a blue-grey one as an edge. */
@@ -29,6 +32,9 @@
       --accent-wash:   rgba(61,107,245,.08);   /* selected rows */
       --accent-glow:   rgba(61,107,245,.30);   /* shadows */
       --accent-hover:  #3360E8;                /* pressed / hovered fills */
+      /* The accent is only 3.8:1 as small text on its own tint, so anything
+         that writes *words* in the accent uses this lighter one: 4.9:1. */
+      --accent-text:   #5A81F7;
 
       /* Failure. Only ever this. */
       --danger:        #E4485D;
@@ -46,8 +52,10 @@
       --blue-ring:     rgba(91,141,239,.26);
       --green:         #2FBF71;
       --green-dim:     rgba(47,191,113,.12);
+      --green-ring:    rgba(47,191,113,.26);
       --yellow:        #F0A22E;
       --yellow-dim:    rgba(240,162,46,.12);
+      --yellow-ring:   rgba(240,162,46,.26);
       --teal:          #22D3EE;
       --teal-dim:      rgba(34,211,238,.12);
       --purple:        #7B5CF0;
@@ -55,6 +63,8 @@
       /* "needs attention": between pending and denied, and it has to be
          distinguishable from both at ribbon size. */
       --orange:        #F5731F;
+      --orange-dim:    rgba(245,115,31,.12);
+      --orange-ring:   rgba(245,115,31,.30);
 
       --text:          #E8ECF5;
       --text-sub:      #A3ADC2;

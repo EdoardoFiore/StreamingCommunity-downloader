@@ -94,7 +94,7 @@
 
     .btn-outline-success {
       background: transparent !important;
-      border-color: rgba(14,196,124,.25) !important;
+      border-color: var(--green-ring) !important;
       color: var(--green) !important;
     }
     .btn-outline-success:hover { background: var(--green-dim) !important; }
@@ -361,9 +361,9 @@
        TOASTS
        ═══════════════════════════════════════════════════════ */
     .alert.bg-success {
-      background: rgba(14,196,124,.12) !important;
+      background: var(--green-dim) !important;
       color: var(--green) !important;
-      border: 1px solid rgba(14,196,124,.22) !important;
+      border: 1px solid var(--green-ring) !important;
     }
     .alert.bg-danger {
       background: var(--danger-dim) !important;
@@ -378,7 +378,7 @@
     .alert.bg-warning {
       background: var(--yellow-dim) !important;
       color: var(--yellow) !important;
-      border: 1px solid rgba(245,169,49,.22) !important;
+      border: 1px solid var(--yellow-ring) !important;
     }
     .alert-dismissible .btn-close-white { filter: none !important; opacity: .5 !important; }
 

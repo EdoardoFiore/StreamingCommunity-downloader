@@ -660,7 +660,7 @@
     .queue-filter:hover { background: var(--bg-hover); color: var(--text); }
     .queue-filter.active {
       background: var(--accent-dim); border-color: var(--accent);
-      color: #ff8fa3; font-weight: 600;
+      color: var(--accent-text); font-weight: 600;
     }
 
     .req-row {
@@ -699,8 +699,8 @@
 
     .req-problem {
       margin-top: 8px; padding: 6px 9px;
-      background: rgba(245,115,31,.10); border: 1px solid rgba(245,115,31,.3);
-      border-radius: var(--radius-xs); color: #ffb079; font-size: 11.5px;
+      background: var(--orange-dim); border: 1px solid var(--orange-ring);
+      border-radius: var(--radius-xs); color: var(--orange); font-size: 11.5px;
     }
     .req-denied {
       margin-top: 8px; padding: 6px 9px;
@@ -939,7 +939,7 @@
       content: '';
       position: absolute; inset: 0;
       background:
-        linear-gradient(90deg, var(--bg-surface) 4%, rgba(16,21,31,.72) 42%, rgba(16,21,31,.25) 100%),
+        linear-gradient(90deg, var(--bg-surface) 4%, var(--scrim-strong) 42%, var(--scrim-soft) 100%),
         linear-gradient(0deg,  var(--bg-surface) 2%, transparent 55%);
     }
 
