@@ -36,6 +36,10 @@
 {% include 'partials/_modals.html' %}
 
 <script src="{{ asset('vendor/tabler-1.4.0/tabler.min.js') }}"></script>
+<!-- Shared primitives, and the fetch wrapper that adds the CSRF token.
+     Must load before any page script: reversing this strips CSRF from
+     every call, silently. -->
+<script src="{{ asset('core.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
