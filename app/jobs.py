@@ -120,6 +120,12 @@ class JobManager:
             # who can download, and the field has no use in the interface.
             "batch_id": job.batch_id,
             "batch_kind": job.batch_kind,
+            # Composed once at submit and carried, rather than left to the
+            # client: ``title`` is already a composed string ("Nome Serie
+            # S02E05"), and reparsing a group heading back out of it misreads
+            # the first title that contains something like S01 itself.
+            "batch_label": job.batch_label,
+            "media_label": job.media_label,
             "season": job.season,
             "episode_number": job.episode_number,
             "year": job.year,
