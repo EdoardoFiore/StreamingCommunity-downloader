@@ -34,6 +34,10 @@
           <!-- Shown only with the box empty, alongside the source's own
                shelves. Once a query exists the results are the page. -->
           <div id="search-hero" class="sh-hero">
+            <!-- Artwork from whatever the source is showing today. Decoration
+                 only: it is filled after the shelves load and stays empty if
+                 they fail. -->
+            <div class="sh-art" id="search-hero-art" aria-hidden="true"></div>
             <h1 class="sh-title">La tua prossima<br><span class="sh-accent">serie, film, anime.</span></h1>
             <p class="sh-sub">Cerca nel catalogo, scegli audio e sottotitoli, e mandalo in libreria.</p>
           </div>

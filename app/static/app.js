@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // polls instead. Cheap: one indexed count per minute.
     setInterval(refreshNotifications, 60000);
   }
-  if (can('VIEW_LIBRARY')) setupFileManager();
+  if (can('VIEW_LIBRARY')) { setupFileManager(); loadSidebarDisk(); }
   setupSettingsTabs();
   setupSearchDebounce();
   renderSearchFilters();
@@ -700,6 +700,34 @@ function fmtBytes(bytes) {
   let value = bytes, i = 0;
   while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
   return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${units[i]}`;
+}
+
+// The library volume, in the sidebar, under the source it fills.
+//
+// One volume only: the libraries are nearly always folders on one mount, and
+// three identical bars said nothing. Where they genuinely differ, the fullest
+// is the one worth warning about.
+async function loadSidebarDisk() {
+  const box = document.getElementById('sidebar-disk');
+  if (!box || !can('VIEW_LIBRARY')) return;
+  try {
+    const data = await api.get('/api/files/disk-usage');
+    const volumes = (data.volumes || []).filter(v => v.total > 0);
+    if (!volumes.length) { box.hidden = true; return; }
+    const v = volumes.reduce((a, b) => (a.used / a.total >= b.used / b.total ? a : b));
+    const pct = Math.min(100, Math.round(v.used / v.total * 100));
+    box.hidden = false;
+    const fill = document.getElementById('sb-disk-fill');
+    fill.style.width = `${pct}%`;
+    // Colour only where it means something: a nearly full volume is the one
+    // fact here worth interrupting for.
+    fill.className = pct >= 90 ? 'is-critical' : (pct >= 75 ? 'is-warning' : '');
+    document.getElementById('sb-disk-text').textContent =
+      `${fmtBytes(v.free)} liberi di ${fmtBytes(v.total)}`;
+    box.title = `${pct}% occupato — ${(v.paths || []).join(', ')}`;
+  } catch {
+    box.hidden = true;    // a figure nobody can read is worse than none
+  }
 }
 
 // Reported per volume, not per library: the three libraries are almost always
@@ -1820,6 +1848,25 @@ async function showStartPage() {
   }
 }
 
+// The start page's own backdrop: a handful of titles the source is showing
+// today, behind the headline. Decoration, so it is drawn from what has
+// already been fetched and simply stays empty when there is nothing.
+function _renderHeroArt(items) {
+  const art = document.getElementById('search-hero-art');
+  if (!art) return;
+  const withArt = items.filter(i => i.poster);
+  if (!withArt.length) { art.innerHTML = ''; return; }
+  // Sampled without replacement, so the strip never repeats a title.
+  const pool = [...withArt];
+  const picked = [];
+  while (picked.length < 7 && pool.length) {
+    picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  }
+  art.innerHTML = picked
+    .map(i => `<span style="background-image:url('${encodeURI(posterUrl(i))}')"></span>`)
+    .join('');
+}
+
 function renderShelves() {
   const host = document.getElementById('home-shelves');
   const shelves = _homeCache[currentSource] || [];
@@ -1850,6 +1897,7 @@ function renderShelves() {
     host.appendChild(section);
     _shelfSyncs.push(_wireShelfArrows(section));
   });
+  _renderHeroArt(_searchResults);
 
   applyClientFilter();
   loadRequestStatuses(ribbonIds);

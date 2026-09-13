@@ -74,6 +74,12 @@
             <span id="stream-label">Connessione...</span>
           </div>
           <span id="domain-badge" class="badge bg-secondary">caricamento...</span>
+          <!-- How full the library volume is. Hidden until it is known, and
+               for anyone who cannot see the library anyway. -->
+          <div id="sidebar-disk" class="sb-disk" data-perm="VIEW_LIBRARY" hidden>
+            <div class="sb-disk-bar"><span id="sb-disk-fill"></span></div>
+            <div class="sb-disk-text" id="sb-disk-text"></div>
+          </div>
           <button class="btn-sidebar-settings" data-perm="MANAGE_SETTINGS" onclick="openSettings()">
             <i class="ti ti-settings" style="font-size:15px;flex-shrink:0"></i>
             Impostazioni

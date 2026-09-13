@@ -219,3 +219,44 @@ function showToast(message, type = 'info') {
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
 }
+
+// ── Artwork ───────────────────────────────────────────────────────────────────
+//
+// Stills and posters travel through /api/image/, which reaches the source's
+// CDN on the server's behalf. A single failure there is usually transient, so
+// a missing image should not collapse the row it belongs to: the slot stays,
+// a placeholder holds it, and the fetch is retried a couple of times before
+// giving up quietly.
+
+const _THUMB_RETRIES = 2;
+
+function thumbHtml(src, cls, alt = '') {
+  if (!src) return `<span class="${cls} thumb is-failed" aria-hidden="true"></span>`;
+  return `<span class="${cls} thumb">
+    <img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy"
+         data-src="${escapeHtml(src)}"
+         onload="thumbLoaded(this)" onerror="thumbError(this)">
+  </span>`;
+}
+
+function thumbLoaded(img) { img.parentElement?.classList.add('is-loaded'); }
+
+function thumbError(img) {
+  const tries = Number(img.dataset.tries || 0);
+  if (tries >= _THUMB_RETRIES) { img.parentElement?.classList.add('is-failed'); return; }
+  img.dataset.tries = String(tries + 1);
+  // A cache-busting query, not a fragment: a fragment change does not make
+  // the browser ask again.
+  const base = img.dataset.src;
+  const sep = base.includes('?') ? '&' : '?';
+  setTimeout(() => { img.src = `${base}${sep}_retry=${tries + 1}`; }, 500 * (tries + 1));
+}
+
+// A title's poster. AnimeUnity sends an absolute URL; StreamingCommunity sends
+// a bare filename that /api/image/ resolves against the current source host -
+// which is why it must not be hardcoded anywhere.
+function posterUrl(item) {
+  const p = item && item.poster;
+  if (!p) return '';
+  return p.startsWith('http') ? p : `/api/image/${p}`;
+}

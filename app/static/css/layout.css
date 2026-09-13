@@ -351,3 +351,28 @@
       color: var(--text-sub);
       border-color: var(--border-strong);
     }
+
+    /* ── Library volume, in the sidebar footer ──────────────
+       Under the source it fills. One volume, because the
+       libraries are nearly always folders on one mount. */
+    .sb-disk { display: flex; flex-direction: column; gap: 5px; }
+    .sb-disk-bar {
+      height: 4px; border-radius: 2px;
+      background: rgba(255,255,255,.08);
+      overflow: hidden;
+    }
+    .sb-disk-bar > span {
+      display: block; height: 100%; width: 0;
+      background: var(--text-muted);
+      border-radius: 2px;
+      transition: width .4s ease;
+    }
+    /* Colour where it means something: an almost-full volume is the one fact
+       here worth interrupting for. */
+    .sb-disk-bar > span.is-warning  { background: var(--yellow); }
+    .sb-disk-bar > span.is-critical { background: var(--danger); }
+    .sb-disk-text {
+      font-family: var(--font-mono);
+      font-size: 9.5px; color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }

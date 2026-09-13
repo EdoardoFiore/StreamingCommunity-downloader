@@ -142,6 +142,8 @@ async function tpLoadSeason(n, token = _tpToken) {
     _tp.episodesError = e.message || 'Errore';
   }
   _tpRenderEpisodes();
+  _tpRenderFacts();      // the episode count is per season
+  _tpRenderHero();       // and so is the chip
 }
 
 async function _tpLoadAnime(token) {
@@ -258,10 +260,14 @@ function _tpRenderHero() {
   }
 
   const kindLabel = _tp.type === 'movie' ? 'Film' : (_tp.type === 'anime' ? 'Anime' : 'Serie TV');
+  // A back control, not just a trail. The trail alone was a row of grey text
+  // against artwork and read as a caption rather than as the way out.
   document.getElementById('th-crumbs').innerHTML =
-    `<a href="#/search">Cerca</a><span class="sep">›</span>` +
-    `<span>${escapeHtml(kindLabel)}</span><span class="sep">›</span>` +
-    `<span>${escapeHtml(_tp.name || '—')}</span>`;
+    `<button class="th-back" onclick="tpBack()" title="Torna alla ricerca">
+       <i class="ti ti-arrow-left"></i>Cerca
+     </button>` +
+    `<span class="sep">›</span><span>${escapeHtml(kindLabel)}</span>` +
+    `<span class="sep">›</span><span class="th-crumb-here">${escapeHtml(_tp.name || '—')}</span>`;
 
   document.getElementById('th-name').textContent = _tp.name || '—';
 
@@ -269,7 +275,11 @@ function _tpRenderHero() {
   if (_tp.year) chips.push(['ti-calendar', _tp.year]);
   if (_tp.type === 'tv' && _tp.seasonsCount)
     chips.push(['ti-layout-grid', `${_tp.seasonsCount} stagion${_tp.seasonsCount === 1 ? 'e' : 'i'}`]);
-  if (_tp.episodes?.length) chips.push(['ti-list', `${_tp.episodes.length} episodi`]);
+  if (_tp.episodes?.length) {
+    chips.push(['ti-list', _tp.type === 'tv'
+      ? `${_tp.episodes.length} episodi in S${String(_tp.season).padStart(2, '0')}`
+      : `${_tp.episodes.length} episodi`]);
+  }
   if (_tp.meta?.runtime) chips.push(['ti-clock', `${_tp.meta.runtime} min`]);
   if (_tp.age) chips.push(['ti-shield', `${_tp.age}+`]);
   if (_tp.meta?.quality) chips.push(['ti-badge-hd', _tp.meta.quality]);
@@ -290,10 +300,15 @@ function _tpRenderHero() {
 
 function _tpRenderCta() {
   const wants = !can('DOWNLOAD');
-  const label = _tp.type === 'movie'
-    ? (wants ? 'Richiedi' : 'Scarica')
-    : (wants ? 'Richiedi stagione' : 'Scarica stagione');
-  const icon = wants ? 'ti-send' : 'ti-download';
+  // The hero takes the broadest action available - the whole series where
+  // there is one - and the season bar keeps the season. Two buttons that both
+  // said "season" left nowhere to ask for the lot.
+  const verb = wants ? 'Richiedi' : (_tp.scheduledAt ? 'Programma' : 'Scarica');
+  const scope = _tp.type === 'movie' ? ''
+    : (_tp.type === 'anime' ? ' tutti gli episodi'
+    : (_tp.seasonsCount > 1 ? ' la serie' : ' la stagione'));
+  const label = `${verb}${scope}`;
+  const icon = wants ? 'ti-send' : (_tp.seasonsCount > 1 && _tp.type === 'tv' ? 'ti-stack-2' : 'ti-download');
   const followable = _tp.type !== 'movie';
 
   // Scheduling is part of the download privilege: a requester picks tracks and
@@ -383,7 +398,12 @@ function _tpRenderFacts() {
   if (m.original_name && m.original_name !== _tp.name) rows.push(['Titolo originale', m.original_name]);
   if (_tp.year) rows.push(['Anno', _tp.year]);
   if (_tp.type === 'tv' && _tp.seasonsCount) rows.push(['Stagioni', _tp.seasonsCount]);
-  if (_tp.episodes?.length) rows.push(['Episodi', _tp.episodes.length]);
+  // Per season, not for the series: the source gives no series-wide total, and
+  // labelling one season's count "Episodi" read as if it were that total.
+  if (_tp.episodes?.length) {
+    rows.push([_tp.type === 'tv' ? `Episodi (S${String(_tp.season).padStart(2, '0')})` : 'Episodi',
+               _tp.episodes.length]);
+  }
   if (m.runtime) rows.push(['Durata', `${m.runtime} min`]);
   if (m.status) rows.push(['Stato', m.status]);
   if (m.quality) rows.push(['Qualità', m.quality]);
@@ -432,10 +452,7 @@ function _tpRenderEpisodes() {
       ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadAllAnime()">
            <i class="ti ti-download me-1"></i>${verb} tutti gli episodi</button>`
       : `<button class="btn btn-sm btn-outline-primary" onclick="downloadWholeSeason(${_tp.season})">
-           <i class="ti ti-download me-1"></i>${verb} la stagione</button>`
-        + (_tp.seasonsCount > 1
-            ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadWholeSeries()">
-                 <i class="ti ti-stack-2 me-1"></i>${verb} la serie</button>` : '');
+           <i class="ti ti-download me-1"></i>${verb} la stagione</button>`;
   }
 
   const head = `<div class="th-season-bar">
@@ -460,8 +477,7 @@ function _tpRenderEpisodes() {
   const wants = !can('DOWNLOAD');
   const fn = _tp.type === 'anime' ? 'startAnimeDownload' : 'startEpisodeDownload';
   const rows = _tp.episodes.map((ep, i) => {
-    const still = ep.still
-      ? `<img class="th-ep-still" src="${escapeHtml(ep.still)}" alt="" loading="lazy">` : '';
+    const still = thumbHtml(ep.still, 'th-ep-still');
     const plot = ep.plot ? `<div class="th-ep-plot">${escapeHtml(ep.plot)}</div>` : '';
     const dur = ep.duration ? `<span class="th-ep-dur">${escapeHtml(String(ep.duration))}m</span>` : '';
     const owned = ep.in_library
@@ -490,6 +506,8 @@ function tpPrimary() {
     startFilmDownload(_tp.id, _tp.name, _tp.year, _tp.scheduledAt, _tpPicked('audio'), _tpPicked('subs'), _tp.poster);
   } else if (_tp.type === 'anime') {
     downloadAllAnime();
+  } else if (_tp.seasonsCount > 1) {
+    downloadWholeSeries();
   } else {
     downloadWholeSeason(_tp.season);
   }
@@ -520,3 +538,11 @@ window.addEventListener('hashchange', _tpRoute);
 // On a cold load the hash may already name a title. showPage(defaultPage())
 // has run by then, so this just takes over when there is something to take.
 window.addEventListener('DOMContentLoaded', () => { if (_tpParseHash()) _tpRoute(); });
+
+// Back to wherever the visitor came from, and to the search page when they
+// arrived by pasted link and there is no history to go back to.
+function tpBack() {
+  if (history.length > 1 && document.referrer !== '') { history.back(); return; }
+  location.hash = '';
+  showPage('search');
+}

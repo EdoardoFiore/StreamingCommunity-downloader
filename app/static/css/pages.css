@@ -155,7 +155,7 @@
       cursor: pointer;
       color: var(--text);
       font-size: 26px;
-      opacity: 0;
+      opacity: .85;
       transition: opacity .15s;
     }
     .shelf-arrow i {
@@ -165,7 +165,7 @@
       width: 44px;
       height: 44px;
       border-radius: 50%;
-      background: rgba(36,36,51,.94);
+      background: var(--bg-raised);
       border: 1px solid var(--border-mid);
       box-shadow: 0 6px 20px rgba(0,0,0,.4);
       transition: background .15s, transform .15s;
@@ -177,13 +177,16 @@
     .shelf-arrow[hidden] { display: none; }
     .shelf-rail-wrap:hover .shelf-arrow,
     .shelf-arrow:focus-visible { opacity: 1; }
+    /* Pushed out into the page gutter so they sit where the content actually
+       ends. Inset by a few pixels they read as part of the rail and get lost
+       against the posters. */
     .shelf-arrow-prev {
-      left: -4px;
-      background: linear-gradient(to right, var(--bg-base) 30%, rgba(26,26,36,0));
+      left: calc(-.5 * var(--bs-gutter-x, 1.5rem));
+      background: linear-gradient(to right, var(--bg-base) 45%, rgba(7,10,18,0));
     }
     .shelf-arrow-next {
-      right: -4px;
-      background: linear-gradient(to left, var(--bg-base) 30%, rgba(26,26,36,0));
+      right: calc(-.5 * var(--bs-gutter-x, 1.5rem));
+      background: linear-gradient(to left, var(--bg-base) 45%, rgba(7,10,18,0));
     }
     .shelf-arrow:hover { color: var(--accent); }
     /* Nothing hovers on a touch screen, and a finger already scrolls the rail. */
@@ -242,8 +245,8 @@
       inset: 0;
       background: linear-gradient(
         to top,
-        rgba(26,26,36,.96) 0%,
-        rgba(26,26,36,.35) 45%,
+        rgba(7,10,18,.96) 0%,
+        rgba(7,10,18,.35) 45%,
         transparent 100%
       );
       opacity: 0;
@@ -878,8 +881,8 @@
 
     .ep-still {
       display: block;
-      width: 96px; aspect-ratio: 16 / 9;
-      max-width: 100%;
+      width: 72px; min-width: 72px; max-width: 72px;
+      aspect-ratio: 16 / 9;
       object-fit: cover;
       border-radius: var(--radius-sm);
       background: var(--bg-raised);
@@ -983,11 +986,24 @@
       margin-bottom: 14px; display: flex; align-items: center; gap: 7px;
       flex-wrap: wrap;
     }
-    .th-crumbs a { color: var(--text-muted); text-decoration: none; }
-    .th-crumbs a:hover { color: var(--text); }
+    .th-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 11px 4px 8px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius-pill);
+      color: var(--text-sub); font-size: 12px; cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .th-back:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
+    .th-back i { font-size: 14px; }
+    .th-crumb-here { color: var(--text-sub); }
     .th-crumbs .sep { color: var(--text-dim); }
 
-    .th-headline { display: flex; align-items: flex-start; gap: 20px; }
+    /* Stacked, not split. The actions used to float right into the artwork,
+       where an outline button is unreadable against whatever frame happens to
+       be behind it. */
+    .th-headline { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
     .th-headline-main { min-width: 0; flex: 1 1 auto; max-width: 56ch; }
 
     .th-name {
@@ -1035,7 +1051,10 @@
       font-size: 11.5px;
     }
 
-    .th-cta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .th-cta {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap; margin-top: 18px;
+    }
     .th-icon-btn {
       width: 38px; height: 38px;
       display: inline-flex; align-items: center; justify-content: center;
@@ -1117,9 +1136,12 @@
       font-size: 13px; color: var(--text-muted);
     }
     .th-ep-still {
-      flex: 0 0 56px; aspect-ratio: 16/9;
+      flex: 0 0 auto;
+      width: 56px; min-width: 56px; max-width: 56px;
+      aspect-ratio: 16/9;
       border-radius: var(--radius-xs); object-fit: cover;
       background: var(--bg-raised);
+      display: block;
     }
     .th-ep-body { flex: 1 1 auto; min-width: 0; }
     .th-ep-name {
@@ -1220,7 +1242,39 @@
        The one place the panel gets to say what it is, before
        anything is typed. It goes away the moment a query does
        any actual work. */
-    .sh-hero { padding: 26px 0 22px; }
+    .sh-hero { padding: 26px 0 22px; position: relative; isolation: isolate; }
+
+    /* Posters from whatever the source is showing today, laid behind the
+       headline. It is atmosphere, so it sits far back: low opacity, blurred,
+       and faded out before it reaches the text. */
+    .sh-art {
+      position: absolute;
+      inset: -24px calc(-.5 * var(--bs-gutter-x, 1.5rem)) 0;
+      z-index: -1;
+      display: flex; gap: 8px;
+      overflow: hidden;
+      border-radius: var(--radius-lg);
+      -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 88%);
+      mask-image: linear-gradient(to bottom, #000 0%, transparent 88%);
+    }
+    .sh-art > span {
+      flex: 1 1 0;
+      background-size: cover; background-position: center 18%;
+      opacity: .22;
+      filter: blur(1.5px) saturate(.85);
+    }
+    /* The headline must win over whatever poster lands behind it. */
+    .sh-hero::before {
+      content: '';
+      position: absolute; inset: -24px calc(-.5 * var(--bs-gutter-x, 1.5rem)) 0;
+      z-index: -1;
+      background: linear-gradient(100deg, var(--bg-base) 22%, rgba(7,10,18,.55) 68%, rgba(7,10,18,.25) 100%);
+    }
+    @media (max-width: 767px) {
+      /* Three posters at phone width is a texture, seven is noise. */
+      .sh-art > span:nth-child(n+4) { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { .sh-art > span { filter: none; } }
     .sh-title {
       font-family: var(--font-brand);
       font-size: clamp(30px, 4.2vw, 46px);
@@ -1262,3 +1316,27 @@
       .th-season-batch { margin-left: 0; width: 100%; }
       .th-sched { width: 100%; }
     }
+
+    /* ── Thumbnails ─────────────────────────────────────────
+       The slot exists whether or not the picture arrives, so a
+       failed fetch costs an image, not the layout. */
+    .thumb {
+      position: relative;
+      display: block;
+      overflow: hidden;
+      background: var(--bg-raised);
+    }
+    .thumb::before {
+      content: '\eb0f';                      /* ti-photo */
+      font-family: 'tabler-icons';
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-dim); font-size: 15px;
+    }
+    .thumb img {
+      position: relative; z-index: 1;
+      width: 100%; height: 100%; object-fit: cover; display: block;
+      opacity: 0; transition: opacity .2s ease;
+    }
+    .thumb.is-loaded img { opacity: 1; }
+    .thumb.is-failed img { display: none; }
