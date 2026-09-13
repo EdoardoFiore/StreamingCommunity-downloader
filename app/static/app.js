@@ -1975,6 +1975,28 @@ const LANG_NAMES = {
 };
 const langName = c => LANG_NAMES[c] || c;
 
+// Which subtitle tracks start selected.
+//
+// A forced Italian track subtitles only what the Italian audio does not cover
+// - signs, and lines spoken in another language - while a full Italian track
+// repeats dialogue you can already hear. Alongside Italian audio the forced
+// one is almost always what is wanted, so it wins whenever the source has it,
+// and the full track is the fallback rather than the default.
+function preferredSubSelection(codes) {
+  const forcedIta = codes.find(c => /^forced[-_ ]?ita/i.test(c));
+  const picked = new Set();
+  if (forcedIta) picked.add(forcedIta);
+  else if (codes.includes('ita')) picked.add('ita');
+  if (codes.includes('eng')) picked.add('eng');
+  return picked;
+}
+
+// The source lists some languages more than once (two "ita", two "ger" on a
+// single title). Two identical chips are two controls for one thing.
+function dedupeLangs(codes) {
+  return [...new Set(codes || [])];
+}
+
 function _getLangSelections() {
   const audio = [...document.querySelectorAll('.lang-audio-check:checked')].map(cb => cb.value);
   const subs  = [...document.querySelectorAll('.lang-sub-check:checked')].map(cb => cb.value);
@@ -2219,7 +2241,7 @@ function openDetailModal(idx) {
       if (!info) { langsEl.innerHTML=''; return; }
       let html='';
       if (info.audio?.length) {
-        const audioHtml = info.audio.map(c => {
+        const audioHtml = dedupeLangs(info.audio).map(c => {
           const checked = (c === 'ita' || (info.audio.length === 1)) ? 'checked' : '';
           return `<label class="me-2 mb-1" style="cursor:pointer"><input type="checkbox" class="lang-audio-check me-1" value="${escapeHtml(c)}" ${checked}><span class="badge bg-blue-lt">${langName(c)}</span></label>`;
         }).join('');
@@ -2228,8 +2250,9 @@ function openDetailModal(idx) {
         html+=`<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span><span class="text-muted fst-italic">originale</span></div>`;
       }
       if (info.subtitles?.length) {
-        const subHtml = info.subtitles.map(c => {
-          const checked = (c === 'ita' || c === 'eng') ? 'checked' : '';
+        const preferred = preferredSubSelection(info.subtitles);
+        const subHtml = dedupeLangs(info.subtitles).map(c => {
+          const checked = preferred.has(c) ? 'checked' : '';
           return `<label class="me-2 mb-1" style="cursor:pointer"><input type="checkbox" class="lang-sub-check me-1" value="${escapeHtml(c)}" ${checked}><span class="badge bg-teal-lt">${langName(c)}</span></label>`;
         }).join('');
         html+=`<div><span class="text-muted me-1"><i class="ti ti-subtitles ti-sm"></i> Sub:</span>${subHtml}</div>`;

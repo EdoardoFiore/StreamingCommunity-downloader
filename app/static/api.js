@@ -31,14 +31,15 @@ function _detailText(data) {
 }
 
 const api = {
-  // Query values that are null, undefined or '' are dropped rather than sent
-  // as empty strings: several endpoints treat a present-but-empty parameter
-  // differently from an absent one.
+  // Only null and undefined are dropped. An empty string is a value the
+  // caller chose, and removing it turns a supplied-but-empty *required*
+  // parameter into a missing one - which is how the episode list started
+  // answering "field required" whenever the site version was not yet known.
   url(path, params) {
     if (!params) return path;
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== null && v !== '') q.append(k, v);
+      if (v !== undefined && v !== null) q.append(k, v);
     }
     const s = q.toString();
     return s ? `${path}?${s}` : path;

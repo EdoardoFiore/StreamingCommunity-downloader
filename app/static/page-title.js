@@ -32,8 +32,22 @@ function _tpParseHash() {
   return { type: m[1], id: decodeURIComponent(m[2]), slug: decodeURIComponent(m[3] || '') };
 }
 
+// Every call below carries the site version, and it is fetched asynchronously
+// at boot - so a pasted link can arrive before it is known. It used to be sent
+// empty and the endpoint answered "field required".
+async function _tpEnsureVersion() {
+  if (currentVersion) return;
+  try {
+    const d = await api.get('/api/domain');
+    currentDomain = currentDomain || d.domain || '';
+    currentVersion = d.version || '';
+  } catch { /* the calls that follow report the real failure */ }
+}
+
 async function loadTitlePage(route) {
   const token = ++_tpToken;
+  await _tpEnsureVersion();
+  if (token !== _tpToken) return;
   const seed = _tpSeed; _tpSeed = null;
 
   _tp = {
@@ -73,8 +87,11 @@ async function loadTitlePage(route) {
             { type: route.type, slug: route.slug, version: currentVersion || '' })
       .then(info => {
         if (token !== _tpToken) return;
-        _tp.audio = (info.audio || []).map(c => ({ code: c, on: c === 'ita' || info.audio.length === 1 }));
-        _tp.subs  = (info.subtitles || []).map(c => ({ code: c, on: c === 'ita' || c === 'eng' }));
+        const audio = dedupeLangs(info.audio);
+        const subs = dedupeLangs(info.subtitles);
+        const preferred = preferredSubSelection(subs);
+        _tp.audio = audio.map(c => ({ code: c, on: c === 'ita' || audio.length === 1 }));
+        _tp.subs  = subs.map(c => ({ code: c, on: preferred.has(c) }));
         _tp.tracksLoaded = true;
         _tpRender();
       })
