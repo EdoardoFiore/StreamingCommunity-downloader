@@ -2976,7 +2976,23 @@ function _buildJobCard(j) {
     ? (bytesSpeed > 0 ? formatSize(bytesSpeed) + '/s' : (speed > 0 ? `${speed} seg/s` : ''))
     : '';
   const etaStr = eta ? fmtEta(eta) : '';
-  const infoStr = [speedStr, etaStr].filter(Boolean).join(' · ');
+
+  // A playlist declares no size, so the total is extrapolated from the
+  // segments already fetched and is shown with a tilde for as long as it is a
+  // guess. With too small a sample the server sends null, and then only what
+  // has actually arrived is claimed.
+  const done = j.progress?.bytes_done || 0;
+  const expected = j.progress?.bytes_total;
+  let sizeStr = '';
+  if (done > 0) {
+    if (j.status === 'done') sizeStr = formatSize(done);
+    else if (expected) sizeStr = `${formatSize(done)} di ~${formatSize(expected)}`;
+    else sizeStr = formatSize(done);
+  }
+  const infoStr = [sizeStr, speedStr, etaStr].filter(Boolean).join(' · ');
+  const infoTitle = (expected && j.status !== 'done')
+    ? ' title="La playlist non dichiara una dimensione: il totale è stimato sui segmenti già scaricati."'
+    : '';
 
   const fireBtn = j.status === 'scheduled'
     ? `<button class="btn btn-sm btn-outline-success ms-1" onclick="fireNow('${j.job_id}')" title="Lancia subito">
@@ -3008,7 +3024,7 @@ function _buildJobCard(j) {
         <div class="progress-bar ${barClass}${animated} job-progress-bar" id="job-bar-${j.job_id}" style="width:${barWidth}%"></div>
       </div>
       <div class="d-flex justify-content-between align-items-center">
-        <small class="text-muted" id="job-info-${j.job_id}">${infoStr || (j.status==='error' ? escapeHtml(j.error||'Errore') : (j.status==='done'?'Completato':''))}</small>
+        <small class="text-muted" id="job-info-${j.job_id}"${infoTitle}>${infoStr || (j.status==='error' ? escapeHtml(j.error||'Errore') : (j.status==='done'?'Completato':''))}</small>
         <small class="text-muted">${dateLabel}</small>
       </div>
     </div>
@@ -3127,7 +3143,10 @@ function updateActiveBadge() {
 function handleProgressEvent(msg) {
   const job = _jobs.get(msg.job_id);
   if (job) {
-    job.progress = { current:msg.current, total:msg.total, pct:msg.pct, speed:msg.speed||0, bytes_speed:msg.bytes_speed||0, eta:msg.eta||null };
+    job.progress = { current:msg.current, total:msg.total, pct:msg.pct, speed:msg.speed||0,
+                     bytes_speed:msg.bytes_speed||0, eta:msg.eta||null,
+                     bytes_done:msg.bytes_done||0, bytes_total:msg.bytes_total ?? null,
+                     bytes_total_estimated:msg.bytes_total_estimated !== false };
     const phase = msg.phase || _jobPhases[msg.job_id] || 'running';
     const prevPhase = _jobPhases[msg.job_id];
     _jobPhases[msg.job_id] = phase;

@@ -73,14 +73,13 @@ async def stream_progress(job_id: str):
         while True:
             try:
                 msg = await asyncio.wait_for(job.progress_queue.get(), timeout=30)
-                if msg.get("type") == "progress":
-                    job.progress = {
-                        "current": msg["current"],
-                        "total": msg["total"],
-                        "pct": msg["pct"],
-                        "speed": msg.get("speed", 0),
-                        "eta": msg.get("eta"),
-                    }
+                # Reader only. This used to rebuild job.progress from the
+                # frame, and did it with fewer fields than the bar's own
+                # on_event writes - no bytes_speed, and none of the byte
+                # totals. Last writer wins, so merely opening this endpoint
+                # made /api/jobs and the global snapshot flicker between the
+                # full payload and a truncated one. job.progress is maintained
+                # by on_event whether or not anyone is subscribed here.
                 yield f"data: {json.dumps(msg)}\n\n"
                 if msg.get("type") in ("done", "error"):
                     break

@@ -37,7 +37,10 @@ class DownloadJob:
     schedule_id: Optional[str] = None
     error: Optional[str] = None
     output_path: Optional[str] = None
-    progress: dict = field(default_factory=lambda: {"current": 0, "total": 0, "pct": 0, "speed": 0, "eta": None})
+    progress: dict = field(default_factory=lambda: {
+        "current": 0, "total": 0, "pct": 0, "speed": 0, "eta": None,
+        "bytes_done": 0, "bytes_total": None, "bytes_total_estimated": True,
+    })
     phases: list = field(default_factory=list)
     progress_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     cancel_event: threading.Event = field(default_factory=threading.Event)
@@ -210,6 +213,9 @@ class JobManager:
     def _make_progress_factory(self, job: DownloadJob):
         loop = self._loop
         manager = self
+        # A bar covers one phase; a job spans several. Kept here because this
+        # closure is the only thing that is per-job and sees every bar.
+        bars: list = []
 
         def on_event(ev: dict):
             if ev.get("type") == "progress":
@@ -220,13 +226,21 @@ class JobManager:
                     "speed": ev.get("speed", 0),
                     "bytes_speed": ev.get("bytes_speed", 0),
                     "eta": ev.get("eta"),
+                    "bytes_done": ev.get("bytes_done", 0),
+                    "bytes_total": ev.get("bytes_total"),
+                    "bytes_total_estimated": ev.get("bytes_total_estimated", True),
                 }
             manager._broadcast({**ev, "job_id": job.job_id})
 
         def factory(**kwargs):
             total = kwargs.get("total", 0)
             phase = kwargs.get("phase")
-            return WebProgressBar(total, job.progress_queue, loop, phase=phase, on_event=on_event)
+            bar = WebProgressBar(total, job.progress_queue, loop, phase=phase, on_event=on_event)
+            # Carry what the earlier phases already downloaded, so the readout
+            # climbs across the whole job instead of restarting at each one.
+            bar.prior_bytes = bars[-1].bytes_done if bars else 0
+            bars.append(bar)
+            return bar
 
         return factory
 
