@@ -1,0 +1,404 @@
+    /* ═══════════════════════════════════════════════════════
+       BADGES — full override
+       ═══════════════════════════════════════════════════════ */
+    .badge {
+      font-family: var(--font-ui) !important;
+      font-weight: 700 !important;
+      border-radius: 20px !important;
+      padding: 2px 7px !important;
+      font-size: 10px !important;
+      letter-spacing: .25px;
+      line-height: 1.5;
+    }
+
+    .bg-blue-lt    { background: var(--blue-dim) !important;   color: var(--blue) !important;   }
+    .bg-green-lt   { background: var(--green-dim) !important;  color: var(--green) !important;  }
+    .bg-yellow-lt  { background: var(--yellow-dim) !important; color: var(--yellow) !important; }
+    .bg-teal-lt    { background: var(--teal-dim) !important;   color: var(--teal) !important;   }
+    .bg-purple-lt  { background: var(--purple-dim) !important; color: var(--purple) !important; }
+    .bg-success-lt { background: var(--green-dim) !important;  color: var(--green) !important;  }
+    .bg-danger-lt  { background: var(--danger-dim) !important; color: var(--danger) !important; }
+    .bg-secondary-lt { background: rgba(255,255,255,.06) !important; color: var(--text-muted) !important; }
+
+    .bg-red        { background: var(--danger-solid) !important; color: #fff !important;        }
+    .bg-blue       { background: var(--blue) !important;       color: #fff !important;          }
+    .bg-success    { background: var(--green) !important;      color: var(--bg-base) !important; }
+    .bg-danger     { background: var(--danger-solid) !important; color: #fff !important;        }
+    .bg-secondary  { background: rgba(255,255,255,.08) !important; color: var(--text-muted) !important; }
+    .bg-info       { background: var(--blue-dim) !important;   color: var(--blue) !important;   }
+    .bg-warning    { background: var(--yellow-dim) !important; color: var(--yellow) !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       BUTTONS
+       ═══════════════════════════════════════════════════════ */
+    .btn {
+      font-family: var(--font-ui) !important;
+      font-weight: 600 !important;
+      border-radius: var(--radius-sm) !important;
+      font-size: 13px !important;
+      transition: all .15s !important;
+    }
+
+    .btn-primary {
+      background: var(--accent) !important;
+      border-color: var(--accent) !important;
+      color: #fff !important;
+      box-shadow: 0 2px 10px var(--accent-glow) !important;
+    }
+    .btn-primary:hover { opacity: .86 !important; box-shadow: 0 4px 16px var(--accent-glow) !important; }
+    .btn-primary:disabled { opacity: .45 !important; box-shadow: none !important; }
+
+    .btn-success {
+      background: var(--green) !important;
+      border-color: var(--green) !important;
+      color: var(--bg-base) !important;
+    }
+    .btn-success:hover { opacity: .86 !important; }
+
+    .btn-secondary {
+      background: var(--bg-raised) !important;
+      border-color: var(--border-mid) !important;
+      color: var(--text-muted) !important;
+    }
+    .btn-secondary:hover { color: var(--text-sub) !important; border-color: var(--border-strong) !important; background: var(--bg-hover) !important; }
+
+    .btn-outline-danger {
+      background: transparent !important;
+      border-color: var(--danger-ring) !important;
+      color: var(--danger) !important;
+    }
+    .btn-outline-danger:hover { background: var(--danger-dim) !important; }
+
+    .btn-outline-primary {
+      background: transparent !important;
+      border-color: rgba(79,128,255,.25) !important;
+      color: var(--blue) !important;
+    }
+    .btn-outline-primary:hover { background: var(--blue-dim) !important; }
+
+    .btn-outline-secondary {
+      background: transparent !important;
+      border-color: var(--border-mid) !important;
+      color: var(--text-muted) !important;
+    }
+    .btn-outline-secondary:hover {
+      color: var(--text-sub) !important;
+      border-color: var(--border-strong) !important;
+      background: var(--bg-raised) !important;
+    }
+
+    .btn-outline-success {
+      background: transparent !important;
+      border-color: rgba(14,196,124,.25) !important;
+      color: var(--green) !important;
+    }
+    .btn-outline-success:hover { background: var(--green-dim) !important; }
+
+    .btn-sm { padding: 4px 10px !important; font-size: 11.5px !important; }
+    .btn-close { opacity: .5 !important; }
+    .btn-close:hover { opacity: 1 !important; }
+    .btn-close-white { filter: invert(1) !important; }
+
+    /* Tabler paints this glyph with background-color clipped by a CSS mask —
+       not with a background image — and its colour is currentColor, which on a
+       dark header is already light. The .btn-close-white filter above then
+       inverts it back to near-black, which is why it read as invisible.
+       Colour and size come from Tabler's own variables; the only structural
+       override is position, because it is otherwise floated into the corner
+       (absolute, 3.5rem, z-index 10) on top of the follow button. Never set
+       width/height here: the button has no content, so an auto size collapses
+       it to nothing. */
+    .modal-header > .btn-close {
+      position: static !important;
+      margin: 0 0 0 auto !important;
+      filter: none !important;
+      /* Tabler sizes it 3.5rem for the floating corner hit area; in the flow
+         that would set the header's height. A fixed 2rem keeps a comfortable
+         target without stretching the row. */
+      width: 2rem !important;
+      height: 2rem !important;
+      --tblr-btn-close-color: #fff;
+      --tblr-btn-close-size: 1.25rem;
+      --tblr-btn-close-opacity: .85;
+      --tblr-btn-close-hover-opacity: 1;
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       CARDS
+       ═══════════════════════════════════════════════════════ */
+    .card {
+      background: var(--bg-surface) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: var(--radius-lg) !important;
+      box-shadow: none !important;
+    }
+
+    .card-header {
+      background: transparent !important;
+      border-bottom: 1px solid var(--border) !important;
+      padding: 13px 18px !important;
+    }
+
+    .card-title {
+      color: var(--text) !important;
+      font-family: var(--font-ui) !important;
+      font-weight: 600 !important;
+      font-size: 13.5px !important;
+      margin: 0 !important;
+    }
+
+    .card-options { display: flex; align-items: center; gap: 8px; }
+    .card-body { color: var(--text) !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       FORMS
+       ═══════════════════════════════════════════════════════ */
+    .form-control, .form-select {
+      background: var(--bg-input) !important;
+      border: 1px solid var(--border-mid) !important;
+      color: var(--text) !important;
+      border-radius: var(--radius-sm) !important;
+      font-family: var(--font-ui) !important;
+      font-size: 13.5px !important;
+    }
+
+    .form-control:focus, .form-select:focus {
+      border-color: var(--border-strong) !important;
+      box-shadow: 0 0 0 3px rgba(255,255,255,.04) !important;
+      background: var(--bg-input) !important;
+      color: var(--text) !important;
+    }
+
+    .form-control::placeholder { color: var(--text-dim) !important; }
+
+    .form-label {
+      color: var(--text-muted) !important;
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      margin-bottom: 6px !important;
+    }
+
+    .form-text {
+      color: var(--text-muted) !important;
+      font-size: 11.5px !important;
+      margin-top: 5px !important;
+    }
+
+    .form-text.text-success { color: var(--green) !important; }
+    .form-text.text-danger  { color: var(--danger) !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       MODALS
+       ═══════════════════════════════════════════════════════ */
+    .modal-backdrop {
+      background: rgba(0,0,0,.50) !important;
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+    }
+
+    .modal-content {
+      background: var(--bg-surface) !important;
+      border: 1px solid var(--border-mid) !important;
+      border-radius: var(--radius-lg) !important;
+      color: var(--text) !important;
+      box-shadow: 0 28px 70px rgba(0,0,0,.45) !important;
+    }
+
+    .modal-header {
+      border-bottom: 1px solid var(--border) !important;
+      padding: 16px 20px !important;
+      /* Three children in some headers (title, follow button, close), and
+         space-between would spread them evenly instead of keeping the actions
+         together on the right. */
+      gap: 10px;
+    }
+    .modal-header .modal-title { flex: 1 1 auto; min-width: 0; }
+
+    .modal-title {
+      font-family: var(--font-ui) !important;
+      font-weight: 700 !important;
+      font-size: 15px !important;
+      color: var(--text) !important;
+    }
+
+    .modal-body { padding: 20px !important; }
+
+    .modal-footer {
+      border-top: 1px solid var(--border) !important;
+      padding: 14px 20px !important;
+      background: transparent !important;
+    }
+
+    /* Detail modal poster title */
+    #detail-title {
+      font-family: var(--font-brand) !important;
+      font-size: 26px !important;
+      font-weight: 400 !important;
+      letter-spacing: 1.5px !important;
+      color: var(--text) !important;
+      margin: 4px 0 3px !important;
+      line-height: 1.15 !important;
+    }
+
+    #detail-meta { color: var(--text-muted) !important; font-size: 12.5px !important; }
+
+    #detail-poster {
+      border-radius: var(--radius) !important;
+      box-shadow: 0 8px 28px rgba(0,0,0,.40) !important;
+    }
+
+    /* Backdrop behind the detail modal header.
+       Masked down to the panel background so the text below keeps its contrast
+       whatever the artwork happens to be. */
+    #detail-backdrop {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 190px;
+      background-size: cover;
+      background-position: center 25%;
+      opacity: .38;
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .detail-plot {
+      color: var(--text-muted) !important;
+      font-size: 13px !important;
+      line-height: 1.5 !important;
+      margin: 0 0 10px !important;
+      /* Long synopses would push the action button off a short viewport. */
+      max-height: 6.6em;
+      overflow-y: auto;
+    }
+
+    #detail-genres .badge { margin-right: 4px; }
+
+    /* Nav tabs */
+    .nav-tabs {
+      border-bottom: 1px solid var(--border) !important;
+      gap: 2px;
+      flex-wrap: wrap;
+    }
+
+    .nav-tabs .nav-link {
+      color: var(--text-muted) !important;
+      background: transparent !important;
+      border: none !important;
+      border-bottom: 2px solid transparent !important;
+      padding: 6px 12px !important;
+      font-size: 12.5px !important;
+      font-weight: 700 !important;
+      border-radius: var(--radius-xs) var(--radius-xs) 0 0 !important;
+      transition: color .15s, border-color .15s !important;
+      text-decoration: none;
+    }
+
+    .nav-tabs .nav-link:hover { color: var(--text-sub) !important; background: var(--bg-raised) !important; }
+
+    .nav-tabs .nav-link.active {
+      color: var(--text) !important;
+      border-bottom-color: var(--accent) !important;
+      background: transparent !important;
+    }
+
+    /* Tables */
+    .table {
+      color: var(--text) !important;
+      border-color: var(--border) !important;
+    }
+
+    .table th {
+      color: var(--text-muted) !important;
+      font-size: 10.5px !important;
+      font-weight: 700 !important;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border-color: var(--border) !important;
+      padding: 8px 12px !important;
+      background: transparent !important;
+    }
+
+    .table td {
+      border-color: var(--border) !important;
+      padding: 9px 12px !important;
+      font-size: 13.5px !important;
+      vertical-align: middle;
+    }
+
+    .table-hover > tbody > tr:hover > td { background: var(--bg-raised) !important; }
+
+    /* Alerts */
+    .alert {
+      border-radius: var(--radius) !important;
+      font-size: 13.5px !important;
+      border: none !important;
+    }
+
+    .alert-danger {
+      background: var(--danger-dim) !important;
+      color: var(--danger) !important;
+    }
+
+    /* Spinners */
+    .spinner-border        { color: var(--accent) !important; }
+    .text-primary          { color: var(--blue) !important; }
+    .text-muted            { color: var(--text-muted) !important; }
+    .text-yellow           { color: var(--yellow) !important; }
+    .text-red              { color: var(--danger) !important; }
+
+    hr { border-color: var(--border) !important; opacity: 1 !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       TOASTS
+       ═══════════════════════════════════════════════════════ */
+    .alert.bg-success {
+      background: rgba(14,196,124,.12) !important;
+      color: var(--green) !important;
+      border: 1px solid rgba(14,196,124,.22) !important;
+    }
+    .alert.bg-danger {
+      background: var(--danger-dim) !important;
+      color: var(--danger) !important;
+      border: 1px solid var(--danger-ring) !important;
+    }
+    .alert.bg-info {
+      background: var(--blue-dim) !important;
+      color: var(--blue) !important;
+      border: 1px solid rgba(79,128,255,.22) !important;
+    }
+    .alert.bg-warning {
+      background: var(--yellow-dim) !important;
+      color: var(--yellow) !important;
+      border: 1px solid rgba(245,169,49,.22) !important;
+    }
+    .alert-dismissible .btn-close-white { filter: none !important; opacity: .5 !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       DATA — where the interface stops talking and starts
+       reporting. Machine output gets the mono face: it aligns
+       in a column, and it tells the reader at a glance that a
+       string is a path or a count rather than prose.
+       ═══════════════════════════════════════════════════════ */
+
+    /* The source domain. It is a hostname, and it rotates - reading it
+       character by character is exactly what it is there for. */
+    #domain-badge { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0; }
+
+    /* Sizes and timestamps in the file manager. */
+    .fm-meta { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    /* Download telemetry: speed and ETA, rewritten twice a second. Tabular
+       figures stop the line from twitching as the digits change width. */
+    [id^="job-info-"] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    /* Naming templates and their rendered preview. These are literally
+       {token} strings and filesystem paths on both sides. */
+    [data-naming-slot],
+    [id^="naming-preview-"] { font-family: var(--font-mono); font-size: 12px; }
+
+    /* Any table of numbers should hold its columns. */
+    .table td, .table th { font-variant-numeric: tabular-nums; }

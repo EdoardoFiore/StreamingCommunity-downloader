@@ -1,0 +1,21 @@
+    /* ── Base ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body, body.antialiased {
+      background: var(--bg-base) !important;
+      color: var(--text) !important;
+      font-family: var(--font-ui) !important;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .wrapper { display: flex; min-height: 100vh; }
+
+    /* ── Scrollbars ───────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.18); }

@@ -1,0 +1,359 @@
+    /* ═══════════════════════════════════════════════════════
+       SIDEBAR
+       ═══════════════════════════════════════════════════════ */
+    aside.navbar {
+      width: var(--sidebar-w) !important;
+      background: var(--bg-surface) !important;
+      border-right: 1px solid var(--border) !important;
+      position: fixed !important;
+      top: 0; left: 0; bottom: 0;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      padding: 0 !important;
+      overflow: hidden;
+    }
+
+    aside.navbar .container-fluid {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 0;
+      height: 100%;
+      display: flex;
+    }
+
+    /* Brand */
+    .sc-brand {
+      padding: 22px 18px 20px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      border-bottom: 1px solid var(--border);
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+
+    .brand-icon {
+      width: 36px; height: 36px;
+      background: var(--accent);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-brand);
+      font-size: 17px;
+      color: #fff;
+      letter-spacing: 0;
+      flex-shrink: 0;
+      box-shadow: 0 4px 14px var(--accent-glow);
+    }
+
+    .brand-text {
+      font-family: var(--font-brand);
+      font-size: 21px;
+      letter-spacing: 3px;
+      color: var(--text) !important;
+      line-height: 1;
+    }
+
+    /* Nav items — desktop only: Bootstrap navbar-expand-lg handles mobile show/hide */
+    @media (min-width: 992px) {
+      aside.navbar .collapse {
+        display: flex !important;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden;
+      }
+      .navbar-collapse { flex: 1; flex-direction: column; }
+    }
+
+    aside.navbar .navbar-nav {
+      padding: 14px 10px 0;
+      gap: 1px;
+      flex-direction: column;
+    }
+
+    aside.navbar .nav-link {
+      display: flex !important;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px !important;
+      border-radius: var(--radius-sm) !important;
+      color: var(--text-muted) !important;
+      font-family: var(--font-ui) !important;
+      font-weight: 500;
+      font-size: 13.5px;
+      transition: color .15s, background .15s;
+      position: relative;
+      text-decoration: none !important;
+    }
+
+    aside.navbar .nav-link:hover {
+      color: var(--text-sub) !important;
+      background: var(--bg-hover) !important;
+    }
+
+    aside.navbar .nav-link.active {
+      color: var(--text) !important;
+      background: var(--accent-dim) !important;
+    }
+
+    aside.navbar .nav-link.active::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 50%;
+      transform: translateY(-50%);
+      width: 3px; height: 20px;
+      background: var(--accent);
+      border-radius: 0 3px 3px 0;
+    }
+
+    .nav-link-icon {
+      font-size: 17px;
+      line-height: 1;
+      display: flex;
+      flex-shrink: 0;
+    }
+
+    .nav-link-title { flex: 1; }
+
+    /* Sidebar bottom */
+    .sidebar-footer {
+      margin-top: auto;
+      padding: 14px 12px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-version {
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: .3px;
+      text-align: center;
+    }
+
+    /* SSE status */
+    #stream-status {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 4px;
+    }
+
+    .stream-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--accent);
+    }
+
+    @keyframes dot-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .35; transform: scale(.75); }
+    }
+    .stream-dot { animation: dot-pulse 2.6s ease-in-out infinite; }
+
+    /* Domain badge */
+    #domain-badge {
+      display: inline-flex !important;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px !important;
+      border-radius: 20px !important;
+      font-size: 11px !important;
+      font-weight: 600 !important;
+      font-family: var(--font-ui) !important;
+      letter-spacing: .2px;
+      width: fit-content;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #domain-badge.bg-success {
+      background: var(--green-dim) !important;
+      color: var(--green) !important;
+      border: 1px solid rgba(14,196,124,.2) !important;
+    }
+    #domain-badge.bg-danger {
+      background: var(--danger-dim) !important;
+      color: var(--danger) !important;
+      border: 1px solid var(--danger-ring) !important;
+    }
+    #domain-badge.bg-secondary {
+      background: var(--bg-raised) !important;
+      color: var(--text-muted) !important;
+      border: 1px solid var(--border-mid) !important;
+    }
+
+    /* Settings button */
+    .btn-sidebar-settings {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 12px;
+      border-radius: var(--radius-xs);
+      background: transparent;
+      border: 1px solid var(--border-mid);
+      color: var(--text-muted);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+      width: 100%;
+      text-align: left;
+    }
+
+    .btn-sidebar-settings:hover {
+      background: var(--bg-hover);
+      color: var(--text-sub);
+      border-color: var(--border-strong);
+    }
+
+    /* Mobile toggler */
+    .navbar-toggler {
+      border-color: var(--border-mid) !important;
+      background: transparent !important;
+    }
+    .navbar-toggler-icon { filter: invert(1) opacity(.6); }
+
+    /* ═══════════════════════════════════════════════════════
+       PAGE LAYOUT
+       ═══════════════════════════════════════════════════════ */
+    .page-wrapper {
+      margin-left: var(--sidebar-w) !important;
+      flex: 1;
+      min-height: 100vh;
+      background: var(--bg-base);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .page-header, .page-header.d-print-none {
+      background: transparent !important;
+      border-bottom: 1px solid var(--border) !important;
+      padding: 14px 0 !important;
+    }
+
+    .page-title {
+      font-family: var(--font-brand) !important;
+      font-size: 24px !important;
+      font-weight: 400 !important;
+      letter-spacing: 3px !important;
+      color: var(--text) !important;
+      margin: 0 !important;
+      text-transform: uppercase;
+    }
+
+    .page-body { padding-top: 24px !important; flex: 1; }
+
+    /* ═══════════════════════════════════════════════════════
+       HEADER — current user and notifications
+       ═══════════════════════════════════════════════════════ */
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+
+    .header-icon-btn {
+      background: transparent; border: none; color: var(--text-sub);
+      width: 32px; height: 32px; border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; cursor: pointer; transition: background .15s ease, color .15s ease;
+    }
+    .header-icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+    .notif-wrap { position: relative; }
+
+    .notif-badge {
+      position: absolute; top: 1px; right: 1px;
+      min-width: 15px; height: 15px; padding: 0 4px;
+      background: var(--accent); color: #fff;
+      border-radius: 8px; font-size: 9px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .notif-panel {
+      position: absolute; right: 0; top: 38px; z-index: 1050;
+      width: 330px; max-height: 400px; overflow-y: auto;
+      background: var(--bg-raised);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 34px rgba(0,0,0,.45);
+    }
+    .notif-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 13px; border-bottom: 1px solid var(--border);
+      font-size: 12px; font-weight: 600; color: var(--text-sub);
+      position: sticky; top: 0; background: var(--bg-raised);
+    }
+    .btn-link-sm {
+      background: none; border: none; color: var(--blue);
+      font-size: 11px; cursor: pointer; padding: 0;
+    }
+    .btn-link-danger { color: var(--danger); }
+    .notif-actions { display: flex; gap: 11px; align-items: center; }
+    .notif-item {
+      display: flex; gap: 9px; padding: 10px 13px;
+      border-bottom: 1px solid var(--border); font-size: 12.5px;
+    }
+    .notif-item > i { color: var(--text-muted); font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+    /* min-width:0 so a long message wraps instead of pushing the delete button
+       out of the panel. */
+    .notif-body { flex: 1; min-width: 0; }
+    /* Always visible rather than revealed on hover: on a touch screen there is
+       no hover, and a control that never appears is a control that is not there. */
+    .notif-del {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-dim); flex-shrink: 0; align-self: flex-start;
+      padding: 2px 3px; margin: -2px -4px 0 0; line-height: 1;
+      border-radius: var(--radius-sm);
+    }
+    .notif-del:hover { color: var(--accent); background: var(--bg-hover); }
+    .notif-del i { font-size: 13px; margin-top: 0; color: inherit; }
+    .notif-unread { background: var(--accent-wash); }
+    /* Direct child only: this used to reach the delete button's icon too, which
+       made it accent-coloured on unread rows and read as the primary action. */
+    .notif-unread > i { color: var(--accent); }
+    .notif-text { line-height: 1.4; }
+    .notif-time { color: var(--text-dim); font-size: 10.5px; margin-top: 2px; }
+    .notif-empty { padding: 22px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+    .user-chip {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 4px 6px 4px 8px;
+    }
+    .user-chip-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+    }
+    .user-chip-name { font-size: 12.5px; font-weight: 600; line-height: 1.1; }
+    .user-chip-role { font-size: 10px; color: var(--text-muted); line-height: 1.2; }
+    @media (max-width: 575px) { .user-chip-text { display: none; } }
+
+    /* ═══════════════════════════════════════════════════════
+       MOBILE NAV ICON BUTTON
+       ═══════════════════════════════════════════════════════ */
+    .btn-icon-mobile {
+      display: none;
+      background: transparent;
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius-xs);
+      color: var(--text-muted);
+      width: 36px; height: 36px;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all .15s;
+      flex-shrink: 0;
+    }
+    .btn-icon-mobile:hover {
+      background: var(--bg-hover);
+      color: var(--text-sub);
+      border-color: var(--border-strong);
+    }

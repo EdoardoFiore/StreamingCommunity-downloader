@@ -1,0 +1,76 @@
+    /* ═══════════════════════════════════════════════════════
+       THEME — the whole palette, and the only file that holds
+       a raw colour. Every rule elsewhere goes through a var(),
+       which is what lets the panel be recoloured from here.
+       ═══════════════════════════════════════════════════════ */
+    :root {
+      /* Surfaces. The ground is darker than the cards on purpose, so the
+         sidebar and every card read as floating above it rather than as
+         panels cut into it. */
+      --bg-base:       #070A12;
+      --bg-surface:    #10151F;
+      --bg-raised:     #171D2B;
+      --bg-hover:      #1D2436;
+      --bg-input:      #0C1119;
+
+      /* Borders are a cool grey-blue rather than white: on a navy ground a
+         white hairline reads as a scratch, a blue-grey one as an edge. */
+      --border:        rgba(148,163,208,.10);
+      --border-mid:    rgba(148,163,208,.18);
+      --border-strong: rgba(148,163,208,.28);
+
+      /* The accent is the product's own colour — primary actions, the active
+         nav item, focus. It is deliberately NOT the failure colour: those two
+         roles shared one red until this split, so every destructive button
+         and every error message was wearing the brand. */
+      --accent:        #3D6BF5;
+      --accent-dim:    rgba(61,107,245,.14);   /* fills   */
+      --accent-ring:   rgba(61,107,245,.28);   /* borders */
+      --accent-wash:   rgba(61,107,245,.08);   /* selected rows */
+      --accent-glow:   rgba(61,107,245,.30);   /* shadows */
+
+      /* Failure. Only ever this. */
+      --danger:        #E4485D;
+      --danger-dim:    rgba(228,72,93,.14);
+      --danger-ring:   rgba(228,72,93,.26);
+      /* Two reds, because one cannot do both jobs. --danger is tuned to be
+         readable AS text on a dark surface (4.7:1); this one is tuned to
+         carry white text ON it (4.6:1), which the lighter red fails at 3.9. */
+      --danger-solid:  #E02A42;
+
+      /* Status and category colours. --blue is lighter and less saturated
+         than --accent so a "Film" badge cannot be mistaken for a button. */
+      --blue:          #5B8DEF;
+      --blue-dim:      rgba(91,141,239,.12);
+      --green:         #2FBF71;
+      --green-dim:     rgba(47,191,113,.12);
+      --yellow:        #F0A22E;
+      --yellow-dim:    rgba(240,162,46,.12);
+      --teal:          #22D3EE;
+      --teal-dim:      rgba(34,211,238,.12);
+      --purple:        #7B5CF0;
+      --purple-dim:    rgba(123,92,240,.12);
+      /* "needs attention": between pending and denied, and it has to be
+         distinguishable from both at ribbon size. */
+      --orange:        #F5731F;
+
+      --text:          #E8ECF5;
+      --text-sub:      #A3ADC2;
+      --text-muted:    #6B7690;
+      --text-dim:      #47506A;
+
+      --sidebar-w:     240px;
+      --radius-lg:     16px;
+      --radius:        12px;
+      --radius-sm:     8px;
+      --radius-xs:     6px;
+
+      /* Three roles. Archivo carries the brand and page titles; Inter does
+         the interface, and is the one that has to cover the Cyrillic and
+         Greek language names in the subtitle picker; JetBrains Mono is for
+         data — segment counts, byte totals, S01E05, durations, file paths,
+         the source domain, and the {token} naming templates. */
+      --font-brand:    'Archivo', system-ui, sans-serif;
+      --font-ui:       'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono:     'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
