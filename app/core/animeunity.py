@@ -154,6 +154,20 @@ def normalize_title(t: dict) -> dict | None:
         "dubbed": bool(t.get("dub")),
         "score": t.get("score") or t.get("vote"),
         "release_date": t.get("date") or t.get("release_date") or "",
+        # The archive record carries thirty-four fields and the panel was
+        # keeping eleven. These cost nothing - the search already paid for
+        # them - and they are what let an anime's page look like a film's
+        # instead of a bare list of episodes.
+        #
+        # imageurl is the poster; imageurl_cover is the wide banner, which is
+        # what the detail hero wants behind the title. Both are absolute
+        # AniList URLs, so neither goes through /api/image.
+        "backdrop": t.get("imageurl_cover") or "",
+        "studio": t.get("studio") or "",
+        "status": t.get("status") or "",
+        "season": t.get("season") or "",
+        # The romaji or Japanese title, when it differs from the one shown.
+        "original_name": (t.get("title") or "") if (t.get("title") or "") != title_str else "",
     }
 
 

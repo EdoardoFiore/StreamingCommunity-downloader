@@ -62,7 +62,21 @@ async function loadTitlePage(route) {
     animeType: seed?.media_type || null,
     plot: seed?.plot || null,
     genres: seed?.genres || [],
-    meta: null,
+    // AnimeUnity has no metadata endpoint - it never needed one, because its
+    // search record already carries the plot, the genres, the banner and the
+    // studio. So the page builds its own "meta" from what the card was
+    // holding rather than asking for anything.
+    meta: seed && seed.type === 'anime' ? {
+      backdrop: seed.backdrop || null,
+      plot: seed.plot || null,
+      genres: seed.genres || [],
+      rating: seed.score ? parseFloat(seed.score).toFixed(1) : null,
+      status: seed.status || null,
+      original_name: seed.original_name || null,
+      studio: seed.studio || null,
+      season: seed.season || null,
+      cast: [], directors: [],
+    } : null,
     season: 1,
     episodes: [],
     audio: [], subs: [], tracksLoaded: false, tracksError: null,
@@ -71,6 +85,13 @@ async function loadTitlePage(route) {
     scheduledRaw: '', scheduledAt: null,
     tab: null,
   };
+
+  // Reached by pasted link: there is no card to borrow from, and AnimeUnity
+  // has nothing to ask. The slug carried in the id is the only name available.
+  if (!_tp.name && route.type === 'anime') {
+    const slug = String(route.id).split('-').slice(1).join('-') || route.slug;
+    _tp.name = slug ? slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Anime';
+  }
 
   showPage('detail');
   _tpRender();
@@ -406,6 +427,8 @@ function _tpRenderFacts() {
   }
   if (m.runtime) rows.push(['Durata', `${m.runtime} min`]);
   if (m.status) rows.push(['Stato', m.status]);
+  if (m.studio) rows.push(['Studio', m.studio]);
+  if (m.season) rows.push(['Stagione di uscita', m.season]);
   if (m.quality) rows.push(['Qualità', m.quality]);
   if (_tp.genres?.length) rows.push(['Genere', _tp.genres.join(', ')]);
   document.getElementById('th-facts').innerHTML = rows
