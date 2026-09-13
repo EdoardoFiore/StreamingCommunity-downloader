@@ -573,18 +573,6 @@ const _SETTINGS_FEEDBACK_IDS = [
   'jf-refresh-feedback', 'hooks-feedback', 'naming-feedback',
 ];
 
-// FastAPI answers a validation failure with an *array* of error objects, so the
-// `data.detail || 'Errore'` idiom used throughout renders "[object Object]".
-function _detailText(data) {
-  const detail = data && data.detail;
-  if (!detail) return '';
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail)) {
-    return detail.map(e => (e && (e.msg || e.message)) || '').filter(Boolean).join('; ');
-  }
-  return String(detail);
-}
-
 function _feedback(id, message = '', kind = 'muted') {
   const el = document.getElementById(id);
   if (!el) return;
@@ -729,9 +717,7 @@ let _notifChannels = [];
 
 async function loadNotificationChannels() {
   try {
-    const res = await fetch('/api/notification-channels');
-    if (!res.ok) return;
-    const data = await safeJson(res);
+    const data = await api.get('/api/notification-channels');
     _notifChannels = data.channels || [];
     renderNotificationChannelsList();
   } catch (e) { console.error('loadNotificationChannels:', e); }
@@ -855,17 +841,7 @@ async function updateChannelEvents(id) {
 
 async function _saveChannelEvents(id, events) {
   try {
-    const res = await fetch(`/api/notification-channels/${id}`, {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({events}),
-    });
-    const data = await safeJson(res);
-    if (!res.ok) {
-      _feedback('notif-channels-feedback', data.detail || 'Errore aggiornamento eventi.', 'danger');
-      await loadNotificationChannels();
-      return;
-    }
+    const data = await api.patch(`/api/notification-channels/${id}`, {events});
     // Patched locally instead of refetching: a full reload would rebuild the
     // open picker under the cursor while the user is still clicking.
     const channel = _notifChannels.find(c => c.id === id);
@@ -873,7 +849,10 @@ async function _saveChannelEvents(id, events) {
     _feedback('notif-channels-feedback', 'Eventi aggiornati.', 'success');
     renderNotificationChannelsList();
   } catch (e) {
-    _feedback('notif-channels-feedback', 'Errore di rete.', 'danger');
+    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Errore aggiornamento eventi.') : 'Errore di rete.', 'danger');
+    // The list is refetched only on failure: local state may now disagree
+    // with the server.
+    if (e instanceof ApiError) await loadNotificationChannels();
   }
 }
 
@@ -895,37 +874,25 @@ async function saveNotificationChannel() {
   btn.disabled = true;
   _feedback('notif-channels-feedback', 'Salvataggio...');
   try {
-    const res = await fetch('/api/notification-channels', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, apprise_url}),
-    });
-    if (res.ok) {
-      nameEl.value = '';
-      urlEl.value = '';
-      document.getElementById('notif-channel-form').style.display = 'none';
-      _feedback('notif-channels-feedback', 'Canale aggiunto.', 'success');
-      await loadNotificationChannels();
-    } else {
-      const d = await safeJson(res);
-      _feedback('notif-channels-feedback', d.detail || 'Errore salvataggio.', 'danger');
-    }
-  } catch (e) { _feedback('notif-channels-feedback', 'Errore di rete.', 'danger'); }
+    await api.post('/api/notification-channels', {name, apprise_url});
+    nameEl.value = '';
+    urlEl.value = '';
+    document.getElementById('notif-channel-form').style.display = 'none';
+    _feedback('notif-channels-feedback', 'Canale aggiunto.', 'success');
+    await loadNotificationChannels();
+  } catch (e) {
+    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Errore salvataggio.') : 'Errore di rete.', 'danger');
+  }
   finally { btn.disabled = false; }
 }
 
 async function toggleNotificationChannel(id, enabled) {
   try {
-    const res = await fetch(`/api/notification-channels/${id}`, {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({enabled}),
-    });
-    if (!res.ok) throw new Error();
+    await api.patch(`/api/notification-channels/${id}`, {enabled});
     _feedback('notif-channels-feedback', enabled ? 'Canale attivo.' : 'Canale disattivato.', 'success');
     await loadNotificationChannels();
   } catch (e) {
-    _feedback('notif-channels-feedback', 'Errore aggiornamento.', 'danger');
+    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Errore aggiornamento.') : 'Errore di rete.', 'danger');
     await loadNotificationChannels();
   }
 }
@@ -934,25 +901,27 @@ async function deleteNotificationChannel(id) {
   const channel = _notifChannels.find(c => c.id === id);
   if (!await scConfirm(`Eliminare il canale «${channel ? channel.name : id}»?`)) return;
   try {
-    const res = await fetch(`/api/notification-channels/${id}`, {method: 'DELETE'});
-    if (!res.ok) throw new Error();
+    await api.del(`/api/notification-channels/${id}`);
     _feedback('notif-channels-feedback', 'Canale eliminato.', 'success');
     await loadNotificationChannels();
-  } catch (e) { _feedback('notif-channels-feedback', 'Errore eliminazione.', 'danger'); }
+  } catch (e) {
+    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Errore eliminazione.') : 'Errore di rete.', 'danger');
+  }
 }
 
 async function testNotificationChannel(id) {
   _feedback('notif-channels-feedback', 'Invio notifica di test...');
   try {
-    const res = await fetch(`/api/notification-channels/${id}/test`, {method: 'POST'});
-    const data = await safeJson(res);
-    if (res.ok && data.ok) {
+    const data = await api.post(`/api/notification-channels/${id}/test`);
+    if (data.ok) {
       _feedback('notif-channels-feedback', 'Notifica di test inviata.', 'success');
       showToast('Notifica di test inviata', 'success');
     } else {
-      _feedback('notif-channels-feedback', data.detail || 'Invio fallito: controlla la URL.', 'danger');
+      _feedback('notif-channels-feedback', 'Invio fallito: controlla la URL.', 'danger');
     }
-  } catch (e) { _feedback('notif-channels-feedback', 'Errore di rete.', 'danger'); }
+  } catch (e) {
+    _feedback('notif-channels-feedback', e instanceof ApiError ? (e.message || 'Invio fallito: controlla la URL.') : 'Errore di rete.', 'danger');
+  }
 }
 
 // ── Jellyfin connection ──────────────────────────────────────────────────────
