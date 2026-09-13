@@ -382,3 +382,71 @@
     /* A switch reads as "on or off", which is what most of these settings
        are; a tick reads as "selected from a list". */
     .form-switch .form-check-input { width: 2.25rem; height: 1.25rem; }
+
+    /* ═══════════════════════════════════════════════════════
+       PAGE HEAD — the block every list page opens with
+
+       The top bar carries only the page's name, which left each
+       list starting cold: straight into rows, with the counts
+       that say whether anything needs attention buried inside
+       them. This is the same three-part block everywhere —
+       name and one line of what the page is for, the figures
+       that matter, and the actions — so moving between pages
+       does not mean relearning where anything is.
+       ═══════════════════════════════════════════════════════ */
+    .pg-head {
+      display: flex; align-items: flex-start; gap: 18px;
+      flex-wrap: wrap; margin-bottom: 16px;
+    }
+    .pg-head-main { min-width: 0; flex: 1 1 260px; }
+    .pg-h1 {
+      font-family: var(--font-brand); font-weight: 600;
+      font-size: 22px; letter-spacing: -.01em;
+      color: var(--text); margin: 0 0 3px;
+    }
+    .pg-sub {
+      font-size: 12.5px; color: var(--text-muted);
+      margin: 0; line-height: 1.45; max-width: 62ch;
+    }
+    .pg-actions {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap; margin-left: auto;
+    }
+
+    /* The figures. Numbers in mono and tabular so a column of them
+       stays aligned while they tick, and so a count cannot be
+       mistaken for a label. */
+    .pg-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pg-stat {
+      display: flex; flex-direction: column; gap: 1px;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 7px 13px; min-width: 74px;
+    }
+    .pg-stat b {
+      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+      font-size: 17px; font-weight: 500; line-height: 1.1; color: var(--text);
+    }
+    .pg-stat span {
+      font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    /* A count worth looking at colours its own figure, never the whole
+       chip: a page of coloured blocks says everything is urgent. */
+    .pg-stat-live b   { color: var(--blue); }
+    .pg-stat-warn b   { color: var(--yellow); }
+    .pg-stat-error b  { color: var(--danger); }
+    .pg-stat-ok b     { color: var(--green); }
+    .pg-stat-zero b   { color: var(--text-dim); }
+
+    /* The row under the head: filters on the left, controls on the right. */
+    .pg-bar {
+      display: flex; align-items: center; gap: 7px;
+      flex-wrap: wrap; margin-bottom: 14px;
+    }
+    .pg-bar-end { margin-left: auto; display: flex; gap: 7px; align-items: center; }
+
+    @media (max-width: 575.98px) {
+      .pg-h1 { font-size: 19px; }
+      .pg-stat { padding: 6px 10px; min-width: 62px; }
+      .pg-stat b { font-size: 15px; }
+    }

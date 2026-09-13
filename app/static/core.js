@@ -278,3 +278,36 @@ function posterUrl(item) {
   if (!p) return '';
   return p.startsWith('http') ? p : `/api/image/${p}`;
 }
+
+
+// ── Delegated actions ────────────────────────────────────────────────────────
+//
+// One listener on the document, instead of an onclick= per button. Two reasons
+// beyond tidiness: an inline handler interpolates its arguments into an HTML
+// attribute with no escaping, so a title containing an apostrophe used to break
+// the button it was rendered into; and a row that is re-rendered mid-interaction
+// keeps working, because nothing is bound to the node that went away.
+//
+// Additive on purpose: it coexists with the inline handlers that have not been
+// converted yet. A page converts its own markup when it is reworked, never in a
+// sweep across all of them at once.
+//
+// Arguments travel as data-* attributes and arrive as the element's dataset, so
+// they are strings: a handler that wants a number converts it.
+const _ACTIONS = Object.create(null);
+
+function registerActions(map) { Object.assign(_ACTIONS, map); }
+
+function _dispatchAction(event, attribute) {
+  const el = event.target.closest(`[${attribute}]`);
+  if (!el || el.disabled) return;
+  const handler = _ACTIONS[el.getAttribute(attribute)];
+  if (!handler) return;
+  // Only swallow the event once something is actually going to handle it: an
+  // unregistered name must look broken, not silently eat the click.
+  if (event.type === 'click') event.preventDefault();
+  handler(el.dataset, el, event);
+}
+
+document.addEventListener('click', e => _dispatchAction(e, 'data-action'));
+document.addEventListener('change', e => _dispatchAction(e, 'data-change'));

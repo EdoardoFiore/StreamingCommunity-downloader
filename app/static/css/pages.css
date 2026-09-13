@@ -320,6 +320,47 @@
     /* ═══════════════════════════════════════════════════════
        JOB CARDS
        ═══════════════════════════════════════════════════════ */
+    /* A batch — a season, a whole series, every episode of an anime — is one
+       thing the user asked for, rendered as one heading over its own cards.
+       The heading keeps reporting while collapsed, which is the only reason
+       collapsing it is safe. */
+    .job-group {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg-surface); margin-bottom: 10px; overflow: hidden;
+    }
+    .job-group-head {
+      display: flex; align-items: center; gap: 9px; width: 100%;
+      background: none; border: 0; text-align: left;
+      padding: 10px 13px; cursor: pointer; color: var(--text);
+      border-bottom: 1px solid var(--border);
+    }
+    .job-group-head:hover { background: var(--bg-hover); }
+    .job-group.is-collapsed .job-group-head { border-bottom-color: transparent; }
+    .jg-chev { font-size: 14px; color: var(--text-muted); transition: transform .15s ease; }
+    .job-group.is-collapsed .jg-chev { transform: rotate(-90deg); }
+    .jg-title {
+      font-weight: 600; font-size: 13px; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .jg-count {
+      font-family: var(--font-mono); font-size: 10.5px;
+      background: var(--bg-raised); color: var(--text-muted);
+      border-radius: var(--radius-pill); padding: 1px 7px; flex-shrink: 0;
+    }
+    .jg-summary { margin-left: auto; display: flex; gap: 9px; flex-shrink: 0; }
+    .jg-n { font-size: 11px; font-variant-numeric: tabular-nums; }
+    .jg-live { color: var(--blue); }
+    .jg-ok   { color: var(--green); }
+    .jg-err  { color: var(--danger); }
+    /* The cards inside lose their own frame: the group is the frame now. */
+    .job-group-body { padding: 8px 10px 2px; }
+    .job-group-body .job-card { background: var(--bg-raised) !important; }
+
+    @media (max-width: 575.98px) {
+      .jg-summary { width: 100%; margin: 3px 0 0 23px; }
+      .job-group-head { flex-wrap: wrap; }
+    }
+
     .job-card {
       background: var(--bg-surface) !important;
       border: 1px solid var(--border) !important;

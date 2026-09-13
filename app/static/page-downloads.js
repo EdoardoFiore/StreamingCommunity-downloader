@@ -50,7 +50,7 @@ function connectGlobalStream() {
         break;
       case 'job_dismissed':
         _jobs.delete(msg.job_id);
-        document.getElementById(`job-card-${msg.job_id}`)?.remove();
+        renderAllJobCards();
         updateActiveBadge();
         break;
       case 'domain_candidate':
@@ -207,6 +207,17 @@ function _jobInfoText(progress, status) {
   return [size, speed, eta, pct].filter(Boolean).join(' · ');
 }
 
+// Built in one place because the card renders them twice: once when it is
+// drawn and again whenever its status changes under it.
+function _fireBtnHtml(jobId) {
+  return `<button class="btn btn-sm btn-outline-success ms-1" data-action="jobs:fire"
+                  data-job="${jobId}" title="Lancia subito"><i class="ti ti-player-play"></i></button>`;
+}
+function _stopBtnHtml(jobId) {
+  return `<button class="btn btn-sm btn-outline-danger ms-1" data-action="jobs:cancel"
+                  data-job="${jobId}" title="Interrompi"><i class="ti ti-player-stop"></i></button>`;
+}
+
 function _buildJobCard(j) {
   const phase = _jobPhases[j.job_id] || j.status;
   const isActive = j.status==='running' || j.status==='queued' || j.status==='scheduled';
@@ -226,14 +237,8 @@ function _buildJobCard(j) {
     ? ' title="La playlist non dichiara una dimensione: il totale è stimato sui segmenti già scaricati."'
     : '';
 
-  const fireBtn = j.status === 'scheduled'
-    ? `<button class="btn btn-sm btn-outline-success ms-1" onclick="fireNow('${j.job_id}')" title="Lancia subito">
-         <i class="ti ti-player-play"></i>
-       </button>` : '';
-  const stopBtn = isActive
-    ? `<button class="btn btn-sm btn-outline-danger ms-1" onclick="cancelJob('${j.job_id}')" title="Interrompi">
-         <i class="ti ti-player-stop"></i>
-       </button>` : '';
+  const fireBtn = j.status === 'scheduled' ? _fireBtnHtml(j.job_id) : '';
+  const stopBtn = isActive ? _stopBtnHtml(j.job_id) : '';
 
   const rawTs = j.scheduled_at || j.created_at;
   const dateStr = rawTs
@@ -263,41 +268,148 @@ function _buildJobCard(j) {
   </div>`;
 }
 
+// ── The list: filter, then group ─────────────────────────────────────────────
+//
+// A season download submits one job per episode. Twenty-four identical-looking
+// cards, one per episode, is the state the page spent most of its time in, and
+// nothing in it said they were one thing the user had asked for. batch_label is
+// composed by the server at submit time and carried on every job in the batch,
+// which is what makes a heading possible at all: ``title`` is already a
+// composed string ("Nome Serie S02E05") and reparsing a heading back out of it
+// misreads the first title that contains something like S01 itself.
+
+let _dlFilter = 'all';
+const _dlCollapsed = new Set();   // batch_id of the groups the user folded away
+
+function _jobBucket(j) {
+  if (j.status === 'running' || j.status === 'queued' || j.status === 'scheduled') return 'active';
+  if (j.status === 'done') return 'done';
+  if (j.status === 'error') return 'error';
+  return 'other';   // cancelled
+}
+
+function setDlFilter(filter) {
+  _dlFilter = filter;
+  document.querySelectorAll('#dl-filters .queue-filter').forEach(el =>
+    el.classList.toggle('active', el.dataset.filter === filter));
+  renderAllJobCards();
+}
+
+function _dlSorted(jobs) {
+  return jobs.sort((a, b) => {
+    const rank = j => _jobBucket(j) === 'active' ? 1 : 0;
+    if (rank(a) !== rank(b)) return rank(b) - rank(a);
+    return new Date(b.created_at) - new Date(a.created_at);
+  });
+}
+
+function renderDlStats() {
+  const el = document.getElementById('dl-stats');
+  if (!el) return;
+  const counts = {active: 0, done: 0, error: 0, other: 0};
+  _jobs.forEach(j => { counts[_jobBucket(j)] += 1; });
+  const chips = [
+    ['active', 'In corso', 'pg-stat-live'],
+    ['done', 'Completati', 'pg-stat-ok'],
+    ['error', 'Errori', 'pg-stat-error'],
+  ];
+  el.innerHTML = chips.map(([key, label, cls]) =>
+    `<span class="pg-stat ${counts[key] ? cls : 'pg-stat-zero'}">
+       <b>${counts[key]}</b><span>${label}</span>
+     </span>`).join('');
+}
+
+// One group heading for a batch, with what the batch is doing as a whole —
+// counted over every job in it, not over the ones the current filter lets
+// through. Collapsed groups still report it, which is the point of collapsing
+// them. When a filter hides some of the batch the count says so ("1 di 24"),
+// because a heading reading 24 above a single card is a heading that lies.
+function _buildJobGroup(batchId, label, jobs) {
+  const all = [..._jobs.values()].filter(j => j.batch_id === batchId);
+  const counts = {active: 0, done: 0, error: 0, other: 0};
+  all.forEach(j => { counts[_jobBucket(j)] += 1; });
+  const count = jobs.length === all.length
+    ? String(all.length) : `${jobs.length} di ${all.length}`;
+  const collapsed = _dlCollapsed.has(batchId);
+  const summary = [
+    counts.active ? `<span class="jg-n jg-live">${counts.active} in corso</span>` : '',
+    counts.done ? `<span class="jg-n jg-ok">${counts.done} completati</span>` : '',
+    counts.error ? `<span class="jg-n jg-err">${counts.error} falliti</span>` : '',
+  ].filter(Boolean).join('');
+  const body = collapsed ? '' : jobs.map(_buildJobCard).join('');
+  return `<div class="job-group${collapsed ? ' is-collapsed' : ''}">
+    <button class="job-group-head" data-action="jobs:toggleGroup" data-batch="${escapeHtml(batchId)}"
+            aria-expanded="${collapsed ? 'false' : 'true'}">
+      <i class="ti ti-chevron-down jg-chev"></i>
+      <span class="jg-title">${escapeHtml(label)}</span>
+      <span class="jg-count">${count}</span>
+      <span class="jg-summary">${summary}</span>
+    </button>
+    <div class="job-group-body">${body}</div>
+  </div>`;
+}
+
+function toggleJobGroup(batchId) {
+  if (_dlCollapsed.has(batchId)) _dlCollapsed.delete(batchId);
+  else _dlCollapsed.add(batchId);
+  renderAllJobCards();
+}
+
 function renderAllJobCards() {
   const container = document.getElementById('jobs-container');
   const empty = document.getElementById('jobs-empty');
-  if (!_jobs.size) {
-    empty.style.display=''; container.innerHTML='';
+  if (!container) return;
+  renderDlStats();
+
+  const visible = [..._jobs.values()].filter(
+    j => _dlFilter === 'all' || _jobBucket(j) === _dlFilter);
+
+  if (!visible.length) {
+    // Two different emptinesses, and telling them apart is the difference
+    // between "nothing is happening" and "your filter hides everything".
+    empty.style.display = '';
+    empty.querySelector('span:last-child').textContent = _jobs.size
+      ? 'Nessun download in questo filtro'
+      : 'Nessun download in corso';
+    container.innerHTML = '';
+    updateActiveSection();
     return;
   }
-  // Sort: active first, then by created_at desc
-  const sorted = [..._jobs.values()].sort((a,b) => {
-    const aActive = (a.status==='running'||a.status==='queued')?1:0;
-    const bActive = (b.status==='running'||b.status==='queued')?1:0;
-    if (aActive!==bActive) return bActive-aActive;
-    return new Date(b.created_at)-new Date(a.created_at);
+  empty.style.display = 'none';
+
+  // Batches keep their jobs together; everything else stays a loose card, in
+  // the same list, ordered by the newest thing each entry holds.
+  const groups = new Map();
+  const loose = [];
+  visible.forEach(j => {
+    if (!j.batch_id) { loose.push(j); return; }
+    if (!groups.has(j.batch_id)) groups.set(j.batch_id, []);
+    groups.get(j.batch_id).push(j);
   });
-  empty.style.display='none';
-  const frag = document.createDocumentFragment();
-  sorted.forEach(j => {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = _buildJobCard(j);
-    frag.appendChild(tmp.firstElementChild);
-  });
-  container.innerHTML = '';
-  container.appendChild(frag);
+
+  const entries = [
+    ...loose.map(j => ({at: j.created_at, active: _jobBucket(j) === 'active',
+                        html: () => _buildJobCard(j)})),
+    ...[...groups].map(([batchId, jobs]) => {
+      _dlSorted(jobs);
+      const label = jobs.find(j => j.batch_label)?.batch_label || 'Gruppo';
+      return {
+        at: jobs.reduce((newest, j) => j.created_at > newest ? j.created_at : newest, ''),
+        active: jobs.some(j => _jobBucket(j) === 'active'),
+        html: () => _buildJobGroup(batchId, label, jobs),
+      };
+    }),
+  ].sort((a, b) => (b.active - a.active) || (a.at < b.at ? 1 : -1));
+
+  container.innerHTML = entries.map(e => e.html()).join('');
   updateActiveSection();
 }
 
+// A new job can belong to a group, can be filtered out, and can change where
+// every other entry sorts. Inserting a node at the top guessed at all three;
+// re-rendering answers them.
 function addJobCard(job) {
-  const container = document.getElementById('jobs-container');
-  const empty = document.getElementById('jobs-empty');
-  empty.style.display='none';
-  // Insert at top of container
-  const tmp = document.createElement('div');
-  tmp.innerHTML = _buildJobCard(job);
-  container.insertBefore(tmp.firstElementChild, container.firstChild);
-  updateActiveSection();
+  renderAllJobCards();
 }
 
 function refreshCardAppearance(jobId) {
@@ -332,14 +444,10 @@ function refreshCardAppearance(jobId) {
 
   // Update fire/stop buttons
   const fire = document.getElementById(`job-fire-${jobId}`);
-  if (fire) fire.innerHTML = j.status === 'scheduled'
-    ? `<button class="btn btn-sm btn-outline-success ms-1" onclick="fireNow('${j.job_id}')" title="Lancia subito"><i class="ti ti-player-play"></i></button>`
-    : '';
+  if (fire) fire.innerHTML = j.status === 'scheduled' ? _fireBtnHtml(jobId) : '';
   const stop = document.getElementById(`job-stop-${jobId}`);
   if (stop) {
-    stop.innerHTML = isActive && j.status !== 'scheduled'
-      ? `<button class="btn btn-sm btn-outline-danger ms-1" onclick="cancelJob('${j.job_id}')" title="Interrompi"><i class="ti ti-player-stop"></i></button>`
-      : '';
+    stop.innerHTML = isActive && j.status !== 'scheduled' ? _stopBtnHtml(jobId) : '';
   }
 
   // Update info text
@@ -354,14 +462,7 @@ function refreshCardAppearance(jobId) {
 }
 
 function updateActiveSection() {
-  const active = [..._jobs.values()].filter(j=>j.status==='running'||j.status==='queued'||j.status==='scheduled');
-  const pill = document.getElementById('dl-active-pill');
-  const countEl = document.getElementById('dl-active-count');
-  if (active.length) {
-    pill.style.display=''; countEl.textContent=active.length;
-  } else {
-    pill.style.display='none';
-  }
+  renderDlStats();
 }
 
 function updateActiveBadge() {
@@ -439,6 +540,11 @@ function handleDoneEvent(jobId, outputPath) {
   const stop = document.getElementById(`job-stop-${jobId}`);
   if (stop) stop.innerHTML='';
 
+  // The edits above keep this one card right immediately. A finished job has
+  // also left the "in corso" bucket, though, which moves it in the order,
+  // changes its batch's summary, and under a filter may mean it no longer
+  // belongs on screen at all - none of which a card can do to itself.
+  renderAllJobCards();
   updateActiveBadge();
   // Refresh file manager if open
   if (document.getElementById('page-files')?.style.display!=='none') loadFiles();
@@ -460,6 +566,8 @@ function handleErrorEvent(jobId, message) {
   const stop = document.getElementById(`job-stop-${jobId}`);
   if (stop) stop.innerHTML='';
 
+  // Same reason as handleDoneEvent: a failed job has changed bucket.
+  renderAllJobCards();
   updateActiveBadge();
 }
 
@@ -506,16 +614,22 @@ async function clearFinished() {
   await Promise.allSettled(finished.map(id =>
     fetch(`/api/download/${id}`, {method:'DELETE'})
   ));
-  // UI cleanup handled by job_dismissed SSE; also clean locally in case SSE lags
-  for (const id of finished) {
-    _jobs.delete(id);
-    document.getElementById(`job-card-${id}`)?.remove();
-  }
-  if (!_jobs.size) {
-    const container = document.getElementById('jobs-container');
-    const empty = document.getElementById('jobs-empty');
-    empty.style.display='';
-    container.innerHTML='';
-  }
+  // UI cleanup handled by job_dismissed SSE; also clean locally in case SSE lags.
+  // Re-rendered rather than each node removed: a batch whose jobs have all
+  // gone would otherwise keep its heading, sitting above nothing.
+  for (const id of finished) _jobs.delete(id);
+  renderAllJobCards();
   updateActiveBadge();
 }
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+
+registerActions({
+  'jobs:refresh':     () => refreshJobs(),
+  'jobs:clear':       () => clearFinished(),
+  'jobs:filter':      d => setDlFilter(d.filter),
+  'jobs:fire':        d => fireNow(d.job),
+  'jobs:cancel':      d => cancelJob(d.job),
+  'jobs:toggleGroup': d => toggleJobGroup(d.batch),
+});

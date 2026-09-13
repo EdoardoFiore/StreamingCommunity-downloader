@@ -72,18 +72,30 @@
 
         <!-- ── Downloads ───────────────────────────────────────── -->
         <div id="page-downloads" style="display:none">
-          <div class="d-flex align-items-center justify-content-between mb-3">
-            <span id="dl-active-pill" style="display:none">
-              <i class="ti ti-loader-2 ti-spin me-1" style="font-size:11px"></i>
-              <span id="dl-active-count">0</span>&nbsp;attivi
-            </span>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="refreshJobs()"
-                    id="dl-refresh-btn" title="Rileggi i download dal server">
-              <i class="ti ti-refresh me-1"></i>Aggiorna
-            </button>
-            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="clearFinished()">
-              <i class="ti ti-trash me-1"></i>Rimuovi completati
-            </button>
+          <div class="pg-head">
+            <div class="pg-head-main">
+              <h1 class="pg-h1">Download</h1>
+              <p class="pg-sub">
+                Ogni download attraversa le sue fasi in ordine — video, una traccia
+                per lingua audio, poi l'unione. La barra segue i segmenti ottenuti.
+              </p>
+            </div>
+            <div class="pg-stats" id="dl-stats"></div>
+            <div class="pg-actions">
+              <button class="btn btn-sm btn-outline-secondary" data-action="jobs:refresh"
+                      id="dl-refresh-btn" title="Rileggi i download dal server">
+                <i class="ti ti-refresh me-1"></i>Aggiorna
+              </button>
+              <button class="btn btn-sm btn-outline-secondary" data-action="jobs:clear">
+                <i class="ti ti-trash me-1"></i>Rimuovi completati
+              </button>
+            </div>
+          </div>
+          <div class="pg-bar" id="dl-filters">
+            <button class="queue-filter active" data-action="jobs:filter" data-filter="all">Tutti</button>
+            <button class="queue-filter" data-action="jobs:filter" data-filter="active">In corso</button>
+            <button class="queue-filter" data-action="jobs:filter" data-filter="done">Completati</button>
+            <button class="queue-filter" data-action="jobs:filter" data-filter="error">Errori</button>
           </div>
           <!-- Sibling of the container, never inside it: rendering the job list
                clears the container, and a node living in there would be gone. -->
