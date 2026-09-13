@@ -71,6 +71,11 @@
       --text-muted:    #6B7690;
       --text-dim:      #47506A;
 
+      /* True black, and only ever behind video. The surfaces above are
+         navy; a frame letterboxed against navy reads as a rendering
+         fault, so the player is the one place that wants #000. */
+      --video-bg:      #000;
+
       --sidebar-w:     240px;
       --radius-lg:     16px;
       --radius:        12px;

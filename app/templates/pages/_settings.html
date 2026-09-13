@@ -8,6 +8,18 @@
      switchSettingsTab(). Only the container changed. -->
 <div id="page-settings" style="display:none">
   <div class="settings-page">
+      <!-- The same head every other page opens with. This one went straight
+           into its tabs, which read as a different application the moment the
+           list pages grew one. -->
+      <div class="pg-head">
+        <div class="pg-head-main">
+          <h1 class="pg-h1">Impostazioni</h1>
+          <p class="pg-sub">
+            Sorgente, librerie e schema dei nomi decidono dove finiscono i file
+            e come si chiamano. Ogni sezione si salva da sé.
+          </p>
+        </div>
+      </div>
       <ul class="nav nav-tabs mb-3" id="settings-tabs">
         <li class="nav-item">
           <a class="nav-link active" href="#" data-settings-tab="sorgente">Sorgente</a>
@@ -56,7 +68,7 @@
           Il dominio della sorgente cambia ogni poche settimane. Il pannello pu&ograve;
           accorgersene e proporre quello nuovo, dopo averlo verificato.
         </p>
-        <p class="settings-section-hint" style="color:#e6a23c">
+        <p class="settings-section-hint settings-warn">
           <i class="ti ti-alert-triangle me-1"></i>
           Il dominio viene letto da una pagina esterna che non controlliamo. Vengono presi in
           considerazione solo domini di secondo livello con un nome riconosciuto, e solo se
@@ -145,7 +157,7 @@
           <code>Serie (2019)/Season 01/Serie S01E01.mkv</code>. Cambiali solo se la tua libreria
           segue una convenzione diversa: Jellyfin riconosce quella sopra senza configurazione.
         </p>
-        <p class="settings-section-hint" style="color:#e6a23c">
+        <p class="settings-section-hint settings-warn">
           <i class="ti ti-alert-triangle me-1"></i>
           I file gi&agrave; scaricati non vengono rinominati. Continuano a essere riconosciuti
           come presenti, quindi non verranno riscaricati, ma restano con il nome vecchio finch&eacute;
@@ -302,7 +314,7 @@
               </button>
             </div>
             <div id="jf-reconfigure-form" style="display:none;margin-top:14px">
-              <p class="settings-section-hint" style="color:#e6a23c">
+              <p class="settings-section-hint settings-warn">
                 Chi sta usando il pannello senza login dovrà accedere di nuovo dopo l'aggiornamento.
                 Puntare a un server Jellyfin diverso renderà orfani gli utenti già importati.
               </p>
@@ -344,7 +356,7 @@
           <a href="https://github.com/caronc/apprise/wiki#notification-services" target="_blank"
              rel="noopener noreferrer">Elenco completo dei servizi e formato delle URL</a>.
         </p>
-        <p class="settings-section-hint" style="color:#e6a23c">
+        <p class="settings-section-hint settings-warn">
           <i class="ti ti-alert-triangle me-1"></i>
           Questi canali sono <strong>del pannello, non del singolo utente</strong>: ricevono gli
           eventi di <em>tutti</em>, comprese le richieste e i download avviati da altri. Pensali
@@ -408,7 +420,7 @@
           <code>{season}</code>, <code>{episode}</code>, <code>{year}</code> e
           <code>{error}</code>. Con il corpo vuoto viene inviato un JSON con tutti i campi.
         </p>
-        <p class="settings-section-hint" style="color:#e6a23c">
+        <p class="settings-section-hint settings-warn">
           <i class="ti ti-alert-triangle me-1"></i>
           Un webhook pu&ograve; puntare anche a servizi della rete locale. Il pannello non
           restituisce mai la risposta ricevuta, solo l&rsquo;esito: chi configura un hook sa se ha

@@ -1,20 +1,19 @@
 {% extends 'base.html' %}
 
 {% block content %}
-{% include 'pages/_title.html' %}
-{% include 'pages/_settings.html' %}
-
-
+<!-- Before the page includes, not after them. It sat below them, which meant
+     that on the two pages that are includes — the title detail and settings —
+     the banner announcing that the source has moved rendered underneath the
+     whole page instead of at the top of it. -->
         <!-- ── Dominio sorgente cambiato ───────────────────────── -->
         <!--
           Static markup, toggled by JS. The buttons carry data-perm so the
           sweep in initAuth() hides them from anyone who cannot apply the
           change, without this file knowing who that is.
         -->
-        <div id="domain-banner" class="alert mb-4" role="status"
-             style="display:none;border-color:#e6a23c;background:rgba(230,162,60,.12)">
+        <div id="domain-banner" class="alert domain-banner mb-4" role="status" style="display:none">
           <div class="d-flex align-items-center gap-2 flex-wrap">
-            <i class="ti ti-world-search" style="font-size:18px;color:#e6a23c"></i>
+            <i class="ti ti-world-search"></i>
             <div class="flex-fill">
               <strong>La sorgente ha cambiato dominio.</strong>
               Trovato <code id="domain-banner-host"></code>, verificato dal pannello.
@@ -29,6 +28,10 @@
             </button>
           </div>
         </div>
+
+{% include 'pages/_title.html' %}
+{% include 'pages/_settings.html' %}
+
 
         <!-- ── Search ──────────────────────────────────────────── -->
         <!-- Every page starts hidden, this one included. It used to be the

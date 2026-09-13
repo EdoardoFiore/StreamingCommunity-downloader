@@ -70,14 +70,14 @@
 <!-- ── Player Modal ──────────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="player-modal" tabindex="-1" style="display:none" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-centered">
-    <div class="modal-content" style="background:#000 !important;border-color:rgba(255,255,255,.07) !important">
+    <div class="modal-content player-shell">
       <div class="modal-header border-0">
         <h5 class="modal-title" id="player-modal-title" style="color:rgba(255,255,255,.6)"></h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body p-0">
         <video id="video-player" controls preload="metadata"
-               style="width:100%;max-height:70vh;background:#000;display:block"></video>
+               class="player-video"></video>
       </div>
     </div>
   </div>

@@ -580,3 +580,29 @@
     pre code {
       background: none; border: 0; padding: 0; font-size: inherit; color: inherit !important;
     }
+
+    /* The source moved, and a person has to decide. Amber rather than red:
+       nothing is broken yet — the panel found a replacement and verified it,
+       and is asking. It carried two raw hex values inline, the last ones
+       outside tokens.css. */
+    .domain-banner {
+      border-color: var(--yellow-ring) !important;
+      background: var(--yellow-dim) !important;
+      color: var(--text) !important;
+    }
+    .domain-banner > div > .ti-world-search { font-size: 18px; color: var(--yellow); }
+
+    /* A caveat inside a settings pane: something will not behave the way the
+       reader is about to assume. Amber, like the source-moved banner — it is
+       a thing to know, not a thing that has gone wrong. */
+    .settings-warn { color: var(--yellow) !important; }
+
+    /* The player. Chrome as dark as it goes, so nothing competes with the
+       frame, and the frame itself on true black. */
+    .player-shell {
+      background: var(--video-bg) !important;
+      border-color: rgba(255,255,255,.07) !important;
+    }
+    .player-video {
+      width: 100%; max-height: 70vh; background: var(--video-bg); display: block;
+    }
