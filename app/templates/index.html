@@ -108,45 +108,65 @@
 
         <!-- ── Files ───────────────────────────────────────────── -->
         <div id="page-files" style="display:none">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title">
-                <i class="ti ti-folder-filled text-yellow me-2"></i>File scaricati
-              </h3>
-              <div class="card-options">
-                <span class="text-muted d-none d-lg-inline" id="fm-disk-usage"
-                      style="font-size:11px;margin-right:12px"></span>
-                <span class="text-muted d-none d-md-inline" style="font-size:11px;margin-right:8px">
-                  Trascina per spostare
-                </span>
-                <div class="input-group input-group-sm me-2" style="width:200px">
-                  <input type="text" id="fm-search-input" class="form-control form-control-sm"
-                         placeholder="Cerca file..." autocomplete="off"
-                         oninput="onFmSearchInput(this.value)"
-                         onkeydown="if(event.key==='Escape')clearFmSearch()">
-                  <button class="btn btn-sm btn-outline-secondary" id="fm-search-clear"
-                          style="display:none" onclick="clearFmSearch()" title="Cancella ricerca">
-                    <i class="ti ti-x"></i>
-                  </button>
-                </div>
-                <button class="btn btn-sm btn-outline-secondary" onclick="loadFiles()" title="Aggiorna">
-                  <i class="ti ti-refresh"></i>
-                </button>
+          <div class="pg-head">
+            <div class="pg-head-main">
+              <h1 class="pg-h1">File</h1>
+              <p class="pg-sub">
+                La libreria come la vede Jellyfin. Trascina una riga su una cartella
+                per spostarla; i nomi seguono i template in Impostazioni → Nomi.
+              </p>
+            </div>
+            <!-- Reported per volume, not per library: the three libraries are
+                 almost always folders on one mount. Hidden until it has a
+                 figure, because an empty bar reads as an empty disk. -->
+            <div class="pg-disk" id="fm-disk-usage" hidden>
+              <div class="pg-disk-top">
+                <span class="pg-disk-label">Spazio libero</span>
+                <span class="pg-disk-free" id="fm-disk-free"></span>
               </div>
+              <div class="pg-disk-bar"><span id="fm-disk-fill"></span></div>
+              <div class="pg-disk-total" id="fm-disk-total"></div>
             </div>
-            <!-- Batch selection toolbar -->
-            <div id="fm-selection-bar" class="fm-selection-bar" style="visibility:hidden">
-              <span id="fm-selection-count" class="fm-selection-count">0 selezionati</span>
-              <button class="btn btn-sm btn-outline-primary" id="fm-batch-move-btn">
-                <i class="ti ti-folder-symlink me-1"></i>Sposta
-              </button>
-              <button class="btn btn-sm btn-outline-danger" id="fm-batch-delete-btn">
-                <i class="ti ti-trash me-1"></i>Elimina
-              </button>
-              <button class="btn btn-sm btn-ghost-secondary" id="fm-deselect-btn">
-                <i class="ti ti-x me-1"></i>Deseleziona
+            <div class="pg-actions">
+              <button class="btn btn-sm btn-outline-secondary" data-action="files:reload" title="Aggiorna">
+                <i class="ti ti-refresh me-1"></i>Aggiorna
               </button>
             </div>
+          </div>
+
+          <div class="pg-bar">
+            <div class="input-group input-group-sm" style="width:230px">
+              <input type="text" id="fm-search-input" class="form-control form-control-sm"
+                     placeholder="Cerca file..." autocomplete="off"
+                     data-input="files:search"
+                     onkeydown="if(event.key==='Escape')clearFmSearch()">
+              <button class="btn btn-sm btn-outline-secondary" id="fm-search-clear"
+                      style="display:none" data-action="files:clearSearch" title="Cancella ricerca">
+                <i class="ti ti-x"></i>
+              </button>
+            </div>
+            <div class="pg-bar-end">
+              <span class="text-muted d-none d-md-inline" style="font-size:11px">
+                <i class="ti ti-drag-drop me-1"></i>Trascina per spostare
+              </span>
+            </div>
+          </div>
+
+          <!-- Batch selection toolbar -->
+          <div id="fm-selection-bar" class="fm-selection-bar" style="visibility:hidden">
+            <span id="fm-selection-count" class="fm-selection-count">0 selezionati</span>
+            <button class="btn btn-sm btn-outline-primary" id="fm-batch-move-btn">
+              <i class="ti ti-folder-symlink me-1"></i>Sposta
+            </button>
+            <button class="btn btn-sm btn-outline-danger" id="fm-batch-delete-btn">
+              <i class="ti ti-trash me-1"></i>Elimina
+            </button>
+            <button class="btn btn-sm btn-ghost-secondary" id="fm-deselect-btn">
+              <i class="ti ti-x me-1"></i>Deseleziona
+            </button>
+          </div>
+
+          <div class="card">
             <div class="card-body p-0 fm-pane" id="files-left-pane">
               <div class="text-center py-5" style="color:var(--text-dim);font-size:13px">
                 Caricamento...

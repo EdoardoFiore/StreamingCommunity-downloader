@@ -462,3 +462,52 @@ async function deletePath(path, name, isDir) {
     else { const d=await safeJson(res); showToast(d.detail||'Errore eliminazione','danger'); }
   } catch(e) { showToast('Errore di rete','danger'); }
 }
+
+
+// ── Spazio sul volume ────────────────────────────────────────────────────────
+//
+// Reported per volume, not per library: the three libraries are almost always
+// folders on one mount, and three identical bars said nothing. Where they
+// genuinely differ, the fullest is the one shown — it is the one that will
+// stop a download.
+//
+// This was a line of text in a card header. It is the single fact on this page
+// that can stop the panel working, so it gets a bar, and the bar only takes a
+// colour once the number means something.
+
+async function loadDiskUsage() {
+  const box = document.getElementById('fm-disk-usage');
+  if (!box) return;
+  try {
+    const res = await fetch('/api/files/disk-usage');
+    if (!res.ok) { box.hidden = true; return; }
+    renderDiskUsage(await safeJson(res));
+  } catch (e) { box.hidden = true; }
+}
+
+function renderDiskUsage(data) {
+  const box = document.getElementById('fm-disk-usage');
+  if (!box) return;
+  const volumes = ((data && data.volumes) || []).filter(v => v.total > 0);
+  if (!volumes.length) { box.hidden = true; return; }
+
+  const worst = volumes.reduce((a, b) => (a.used / a.total >= b.used / b.total ? a : b));
+  const pct = Math.min(100, Math.round(worst.used / worst.total * 100));
+  box.hidden = false;
+  const fill = document.getElementById('fm-disk-fill');
+  fill.className = diskLevel(pct);
+  fill.style.width = `${pct}%`;
+  document.getElementById('fm-disk-free').textContent = fmtBytes(worst.free);
+  document.getElementById('fm-disk-total').textContent =
+    `di ${fmtBytes(worst.total)}${volumes.length > 1 ? ` · volume più pieno di ${volumes.length}` : ''}`;
+  box.title = `${pct}% occupato — ${(worst.paths || []).join(', ')}`;
+}
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+
+registerActions({
+  'files:reload':      () => loadFiles(),
+  'files:search':      (d, el) => onFmSearchInput(el.value),
+  'files:clearSearch': () => clearFmSearch(),
+});

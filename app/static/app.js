@@ -164,6 +164,36 @@ function showPage(page) {
   }
 }
 
+// ── Spazio disco, nella sidebar ──────────────────────────────────────────────
+
+// The library volume, in the sidebar, under the source it fills.
+//
+// One volume only: the libraries are nearly always folders on one mount, and
+// three identical bars said nothing. Where they genuinely differ, the fullest
+// is the one worth warning about.
+async function loadSidebarDisk() {
+  const box = document.getElementById('sidebar-disk');
+  if (!box || !can('VIEW_LIBRARY')) return;
+  try {
+    const data = await api.get('/api/files/disk-usage');
+    const volumes = (data.volumes || []).filter(v => v.total > 0);
+    if (!volumes.length) { box.hidden = true; return; }
+    const v = volumes.reduce((a, b) => (a.used / a.total >= b.used / b.total ? a : b));
+    const pct = Math.min(100, Math.round(v.used / v.total * 100));
+    box.hidden = false;
+    const fill = document.getElementById('sb-disk-fill');
+    fill.style.width = `${pct}%`;
+    // Colour only where it means something: a nearly full volume is the one
+    // fact here worth interrupting for.
+    fill.className = diskLevel(pct);
+    document.getElementById('sb-disk-text').textContent =
+      `${fmtBytes(v.free)} liberi di ${fmtBytes(v.total)}`;
+    box.title = `${pct}% occupato — ${(v.paths || []).join(', ')}`;
+  } catch {
+    box.hidden = true;    // a figure nobody can read is worse than none
+  }
+}
+
 // ── Vocabolario notifiche ────────────────────────────────────────────────────
 //
 // Mirrors notify.ALL_EVENTS on the server. The bell reads the icons; the

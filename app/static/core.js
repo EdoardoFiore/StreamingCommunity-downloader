@@ -334,3 +334,26 @@ const LANG_NAMES = {
   ara:'العربية', rus:'Русский', kor:'한국어',
 };
 const langName = c => LANG_NAMES[c] || c;
+
+
+// formatSize() stops at GB and is used for file rows; volumes are routinely in
+// terabytes, so the disk readout gets its own scale.
+function fmtBytes(bytes) {
+  if (bytes == null) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let value = bytes, i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+  return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${units[i]}`;
+}
+
+
+// How full is too full, in one place. The sidebar bar and the file page's bar
+// were each carrying their own pair of numbers, and they had already drifted
+// apart: the same volume read amber in one and fine in the other.
+//
+// Past 92% a 4K season may not fit, which is the number worth a red bar.
+function diskLevel(pct) {
+  if (pct >= 92) return 'is-critical';
+  if (pct >= 80) return 'is-warning';
+  return '';
+}

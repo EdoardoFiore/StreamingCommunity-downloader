@@ -502,3 +502,42 @@
     @media (prefers-reduced-motion: reduce) {
       .sc-switch-track, .sc-switch-thumb { transition: none; }
     }
+
+    /* ═══════════════════════════════════════════════════════
+       DISK — the one fact on the file page that can stop the
+       panel working, so it is a bar and not a sentence.
+       ═══════════════════════════════════════════════════════ */
+    .pg-disk {
+      min-width: 178px;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 8px 13px 9px;
+    }
+    .pg-disk-top {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    }
+    .pg-disk-label {
+      font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .pg-disk-free {
+      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+      font-size: 14px; color: var(--text);
+    }
+    .pg-disk-bar {
+      height: 4px; border-radius: 2px; margin: 6px 0 4px;
+      background: rgba(255,255,255,.08); overflow: hidden;
+    }
+    .pg-disk-bar > span {
+      display: block; height: 100%; width: 0; border-radius: 2px;
+      background: var(--text-muted); transition: width .4s ease;
+    }
+    .pg-disk-bar > span.is-warning  { background: var(--yellow); }
+    .pg-disk-bar > span.is-critical { background: var(--danger); }
+    .pg-disk-total {
+      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+      font-size: 10px; color: var(--text-dim);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pg-disk-bar > span { transition: none; }
+    }
