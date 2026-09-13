@@ -232,14 +232,14 @@ const _THUMB_RETRIES = 2;
 
 function thumbHtml(src, cls, alt = '') {
   if (!src) return `<span class="${cls} thumb is-failed" aria-hidden="true"></span>`;
+  // No onload: the image is visible from the start and the placeholder simply
+  // sits behind it. Gating visibility on a handler meant a missed load event
+  // hid the picture permanently.
   return `<span class="${cls} thumb">
     <img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy"
-         data-src="${escapeHtml(src)}"
-         onload="thumbLoaded(this)" onerror="thumbError(this)">
+         data-src="${escapeHtml(src)}" onerror="thumbError(this)">
   </span>`;
 }
-
-function thumbLoaded(img) { img.parentElement?.classList.add('is-loaded'); }
 
 function thumbError(img) {
   const tries = Number(img.dataset.tries || 0);
@@ -249,6 +249,7 @@ function thumbError(img) {
   // the browser ask again.
   const base = img.dataset.src;
   const sep = base.includes('?') ? '&' : '?';
+  img.parentElement?.classList.remove('is-failed');
   setTimeout(() => { img.src = `${base}${sep}_retry=${tries + 1}`; }, 500 * (tries + 1));
 }
 

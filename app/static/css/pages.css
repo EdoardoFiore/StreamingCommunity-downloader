@@ -1297,10 +1297,15 @@
       display: flex; align-items: center; justify-content: center;
       color: var(--text-dim); font-size: 15px;
     }
+    /* Visible by default, hidden only once it is known to have failed.
+       This was the other way round - opacity:0 until an onload handler added
+       .is-loaded - which meant any image whose load event the handler missed
+       stayed invisible for good, with the placeholder showing through it. A
+       cached image decoded before the markup was inserted, a lazy image in a
+       tab pane that was still hidden, or a re-render swapping the node were
+       all enough. The picture should never depend on a script running. */
     .thumb img {
       position: relative; z-index: 1;
       width: 100%; height: 100%; object-fit: cover; display: block;
-      opacity: 0; transition: opacity .2s ease;
     }
-    .thumb.is-loaded img { opacity: 1; }
     .thumb.is-failed img { display: none; }

@@ -270,13 +270,17 @@ function _tpRender() {
 }
 
 function _tpRenderHero() {
+  // Set straight away rather than behind a preload that flips a class on
+  // load: the same pattern on the episode stills left them invisible whenever
+  // the load event was missed. A backdrop that 404s simply paints nothing
+  // behind the gradient, which is what "no backdrop" looks like anyway.
   const art = document.getElementById('th-art');
   const src = _tp.meta?.backdrop;
   if (src) {
-    const img = new Image();
-    img.onload = () => { art.style.backgroundImage = `url("${encodeURI(src)}")`; art.classList.add('is-loaded'); };
-    img.src = src;
+    art.style.backgroundImage = `url("${encodeURI(src)}")`;
+    art.classList.add('is-loaded');
   } else {
+    art.style.backgroundImage = '';
     art.classList.remove('is-loaded');
   }
 
