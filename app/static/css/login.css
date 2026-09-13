@@ -117,22 +117,17 @@
     .setup-note strong { color: var(--text); font-weight: 600; }
 
     /* ── Fields ─────────────────────────────────────────────── */
-    .form-label {
-      color: var(--text-muted) !important;
-      font-size: 11px !important; font-weight: 500 !important;
-      text-transform: uppercase; letter-spacing: .06em;
-      margin-bottom: 6px !important;
-    }
+    /* Inherited from components.css: the field, its label and the spinner are
+       the same controls as everywhere else, and were copied here only because
+       this page used to load no shared stylesheet. What stays is the two
+       things that are genuinely this page's: a taller field, because there are
+       three of them and nothing else on the screen, and an accent focus ring
+       instead of the neutral one — on a page whose whole job is one form, the
+       focused field is the interface. */
     .form-control {
-      background: var(--bg-input) !important;
-      border: 1px solid var(--border-mid) !important;
-      border-radius: var(--radius-sm) !important;
-      color: var(--text) !important;
-      font-size: 13.5px !important;
       padding: 10px 13px !important;
       transition: border-color .15s, box-shadow .15s, background .15s;
     }
-    .form-control::placeholder { color: var(--text-dim) !important; }
     .form-control:focus {
       background: var(--bg-raised) !important;
       border-color: var(--accent) !important;
@@ -195,7 +190,6 @@
       color: var(--text-sub);
     }
 
-    .spinner-border { color: var(--accent) !important; }
 
     /* Everything above is decoration; none of it is how the page works. */
     @media (prefers-reduced-motion: reduce) {

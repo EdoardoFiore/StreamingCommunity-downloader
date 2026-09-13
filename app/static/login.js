@@ -2,6 +2,11 @@
 
 // Login / first-run setup page. Both forms post to /api/auth/*, which are the
 // only endpoints reachable without a session.
+//
+// Runs on base_bare.html: tokens, the shared components and core.js, but no
+// shell. It takes safeJson and escapeHtml from core.js rather than keeping its
+// own copies — this page had redeclared safeJson, which simply shadowed the
+// shared one and would have drifted from it.
 
 const $ = id => document.getElementById(id);
 
@@ -16,15 +21,15 @@ function clearAlert() {
   $('auth-alert').style.display = 'none';
 }
 
-function busy(btn, on, label) {
+// The button remembers its own label, so a caller cannot restore the wrong
+// one. Each of these was written out three times per button — once to go
+// busy, once for each way back — which is three chances to let them drift.
+function busy(btn, on, busyLabel) {
+  if (btn.dataset.label === undefined) btn.dataset.label = btn.innerHTML;
   btn.disabled = on;
   btn.innerHTML = on
-    ? '<span class="spinner-border spinner-border-sm me-1"></span>' + label
-    : label;
-}
-
-async function safeJson(res) {
-  try { return await res.json(); } catch { return {}; }
+    ? '<span class="spinner-border spinner-border-sm me-1"></span>' + busyLabel
+    : btn.dataset.label;
 }
 
 // Embedded as a Jellyfin custom tab, the parent frame already holds a valid
@@ -87,13 +92,13 @@ $('setup-form').addEventListener('submit', async e => {
     const data = await safeJson(res);
     if (!res.ok) {
       showAlert(data.detail || 'Configurazione fallita.');
-      busy(btn, false, '<i class="ti ti-plug-connected me-1"></i>Configura e accedi');
+      busy(btn, false);
       return;
     }
     window.location.href = '/';
   } catch {
     showAlert('Errore di rete.');
-    busy(btn, false, '<i class="ti ti-plug-connected me-1"></i>Configura e accedi');
+    busy(btn, false);
   }
 });
 
@@ -106,13 +111,13 @@ $('skip-setup-btn').addEventListener('click', async () => {
     const data = await safeJson(res);
     if (!res.ok) {
       showAlert(data.detail || 'Operazione fallita.');
-      busy(btn, false, 'Continua senza Jellyfin');
+      busy(btn, false);
       return;
     }
     window.location.href = '/';
   } catch {
     showAlert('Errore di rete.');
-    busy(btn, false, 'Continua senza Jellyfin');
+    busy(btn, false);
   }
 });
 
@@ -133,13 +138,13 @@ $('login-form').addEventListener('submit', async e => {
     const data = await safeJson(res);
     if (!res.ok) {
       showAlert(data.detail || 'Accesso fallito.');
-      busy(btn, false, '<i class="ti ti-login me-1"></i>Accedi');
+      busy(btn, false);
       return;
     }
     window.location.href = '/';
   } catch {
     showAlert('Errore di rete.');
-    busy(btn, false, '<i class="ti ti-login me-1"></i>Accedi');
+    busy(btn, false);
   }
 });
 

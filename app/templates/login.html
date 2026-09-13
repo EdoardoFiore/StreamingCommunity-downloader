@@ -1,18 +1,12 @@
-<!doctype html>
-<html lang="it">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>Accedi — SC Panel</title>
-  <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}"/>
-  <link rel="stylesheet" href="{{ asset('vendor/fonts/fonts.css') }}"/>
-  <link rel="stylesheet" href="{{ asset('vendor/tabler-1.4.0/tabler.min.css') }}"/>
-  <link rel="stylesheet" href="{{ asset('vendor/tabler-icons-3.19.0/tabler-icons.min.css') }}"/>
-  <link rel="stylesheet" href="{{ asset('css/tokens.css') }}"/>
-  <link rel="stylesheet" href="{{ asset('css/login.css') }}"/>
-</head>
-<body class="antialiased">
+{% extends 'base_bare.html' %}
 
+{% block title %}Accedi — SC Panel{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ asset('css/login.css') }}"/>
+{% endblock %}
+
+{% block content %}
 <!-- Decoration only, and inert: two drifting pools of the brand colours.
      Stops entirely under prefers-reduced-motion. -->
 <div class="aurora" aria-hidden="true"><span></span><span></span></div>
@@ -83,7 +77,8 @@
     <div class="auth-footer" id="login-server"></div>
   </form>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script src="{{ asset('login.js') }}"></script>
-</body>
-</html>
+{% endblock %}
