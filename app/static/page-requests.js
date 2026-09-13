@@ -24,10 +24,6 @@ const REQUEST_STATUS_LABELS = {
 // "cancelled" in the state machine, so there is nothing to offer there.
 const MINE_ACTIVE_STATUSES = ['pending', 'approved', 'downloading', 'needs_attention'];
 
-// NOTIFICATION_ICONS and NOTIFICATION_LABELS live in app.js, which loads first:
-// the settings modal needs them as module constants to build the per-channel
-// event picker, and this file already depends on app.js's helpers.
-
 let _queue = [];
 let _myRequests = [];
 
@@ -189,7 +185,28 @@ function _matchesQueueFilter(status, filter) {
   return status === filter;
 }
 
+// The figures in the page head, counted over everything loaded rather than
+// over what the current filter shows: their job is to say whether switching
+// filter would find anything.
+function _renderStats(elementId, chips) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.innerHTML = chips.map(([value, label, cls]) =>
+    `<span class="pg-stat ${value ? cls : 'pg-stat-zero'}"><b>${value}</b><span>${label}</span></span>`
+  ).join('');
+}
+
+function renderQueueStats() {
+  const n = status => _queue.filter(r => _matchesQueueFilter(r.status, status)).length;
+  _renderStats('queue-stats', [
+    [n('action'), 'Da gestire', 'pg-stat-warn'],
+    [n('in_progress'), 'In corso', 'pg-stat-live'],
+    [_queue.length, 'Totali', 'pg-stat-zero'],
+  ]);
+}
+
 function renderRequestQueue() {
+  renderQueueStats();
   const container = document.getElementById('requests-list');
   const filter = queueFilter();
   const groups = groupRequests(_queue)
@@ -211,7 +228,7 @@ function renderQueueRow(r, compact = false) {
   return `
     <div class="req-row ${r.status === 'needs_attention' ? 'req-row-attention' : ''}">
       <input type="checkbox" class="req-check" ${checked}
-             onclick="event.stopPropagation(); toggleSelected('queue', ${r.id})">
+             data-action="req:toggle" data-page="queue" data-id="${r.id}">
       ${compact ? '' : requestPoster(r)}
       <div class="req-main">
         <div class="req-title">${escapeHtml(title)}${!compact && r.year ? ` <span class="text-muted">(${escapeHtml(r.year)})</span>` : ''}</div>
@@ -237,12 +254,12 @@ function renderQueueRow(r, compact = false) {
               <span class="form-check-label">Auto i prossimi</span>
             </label>` : ''}
           ${['pending', 'needs_attention'].includes(r.status) ? `
-            <button class="btn btn-sm btn-success" onclick="approveRequests([${r.id}])">
+            <button class="btn btn-sm btn-success" data-action="queue:approveOne" data-id="${r.id}">
               <i class="ti ti-check me-1"></i>${r.status === 'needs_attention' ? 'Riprova' : 'Approva'}</button>
-            <button class="btn btn-sm btn-outline-danger" onclick="openDenyModal([${r.id}])">
+            <button class="btn btn-sm btn-outline-danger" data-action="queue:denyOne" data-id="${r.id}">
               <i class="ti ti-x"></i></button>` : ''}
           ${r.status === 'needs_attention' ? `
-            <button class="btn btn-sm btn-outline-warning" onclick="openFixModal(${r.id})">
+            <button class="btn btn-sm btn-outline-warning" data-action="queue:fix" data-id="${r.id}">
               <i class="ti ti-tool me-1"></i>Correggi</button>` : ''}
         </div>
       </div>
@@ -259,10 +276,10 @@ function renderQueueGroup(g) {
 
   return `
     <div class="req-group ${expanded ? 'expanded' : ''}" data-group-key="${escapeHtml(g.key)}">
-      <div class="req-group-header" onclick="toggleGroup(this.closest('.req-group').dataset.groupKey)">
+      <div class="req-group-header" data-action="req:toggleGroup" data-key="${escapeHtml(g.key)}">
         <input type="checkbox" class="req-check" ${allSelected ? 'checked' : ''}
                ${someSelected ? 'data-indeterminate="1"' : ''}
-               onclick="event.stopPropagation(); toggleGroupSelected('queue', ${JSON.stringify(ids)})">
+               data-action="req:toggleGroupSel" data-page="queue" data-ids="${ids.join(',')}">
         <i class="ti ti-chevron-right req-group-chevron"></i>
         ${requestPoster(g)}
         <div>
@@ -488,7 +505,7 @@ function renderMineRow(r, compact = false) {
   const cancellable = MINE_ACTIVE_STATUSES.includes(r.status);
   const checkboxHtml = cancellable
     ? `<input type="checkbox" class="req-check" ${_selected.mine.has(r.id) ? 'checked' : ''}
-             onclick="event.stopPropagation(); toggleSelected('mine', ${r.id})">`
+             data-action="req:toggle" data-page="mine" data-id="${r.id}">`
     : '<span class="req-check-spacer"></span>';
   const title = compact ? episodeLabel(r) : requestTitle(r);
   return `
@@ -505,7 +522,7 @@ function renderMineRow(r, compact = false) {
       <div class="req-side">
         ${statusBadge(r.status)}
         <div class="req-actions">
-          ${cancellable ? `<button class="btn btn-sm btn-outline-secondary" onclick="withdrawRequest(${r.id})">
+          ${cancellable ? `<button class="btn btn-sm btn-outline-secondary" data-action="mine:withdraw" data-id="${r.id}">
             <i class="ti ti-trash me-1"></i>Annulla</button>` : ''}
         </div>
       </div>
@@ -522,12 +539,12 @@ function renderMineGroup(g) {
   const headerCheckbox = cancellableIds.length
     ? `<input type="checkbox" class="req-check" ${allSelected ? 'checked' : ''}
              ${someSelected ? 'data-indeterminate="1"' : ''}
-             onclick="event.stopPropagation(); toggleGroupSelected('mine', ${JSON.stringify(cancellableIds)})">`
+             data-action="req:toggleGroupSel" data-page="mine" data-ids="${cancellableIds.join(',')}">`
     : '<span class="req-check-spacer"></span>';
 
   return `
     <div class="req-group ${expanded ? 'expanded' : ''}" data-group-key="${escapeHtml(g.key)}">
-      <div class="req-group-header" onclick="toggleGroup(this.closest('.req-group').dataset.groupKey)">
+      <div class="req-group-header" data-action="req:toggleGroup" data-key="${escapeHtml(g.key)}">
         ${headerCheckbox}
         <i class="ti ti-chevron-right req-group-chevron"></i>
         ${requestPoster(g)}
@@ -543,7 +560,16 @@ function renderMineGroup(g) {
     </div>`;
 }
 
+function renderMineStats() {
+  const active = _myRequests.filter(r => MINE_ACTIVE_STATUSES.includes(r.status)).length;
+  _renderStats('mine-stats', [
+    [active, 'In corso', 'pg-stat-live'],
+    [_myRequests.length - active, 'Concluse', 'pg-stat-ok'],
+  ]);
+}
+
 function renderMyRequests() {
+  renderMineStats();
   const container = document.getElementById('my-requests-list');
   if (!_myRequests.length) {
     container.innerHTML = `<div class="empty-panel">
@@ -574,3 +600,29 @@ function renderMyRequests() {
 async function withdrawRequest(id) {
   await _cancelIds([id], 'mine');
 }
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+//
+// dataset values are strings; the selection sets hold the numeric ids the API
+// returns, so every id crossing this boundary is converted back.
+
+const _ids = d => (d.ids || '').split(',').filter(Boolean).map(Number);
+
+registerActions({
+  'queue:reload':        () => loadRequestQueue(),
+  'queue:filter':        d => setQueueFilter(d.filter),
+  'queue:approve':       () => approveSelected(),
+  'queue:deny':          () => denySelected(),
+  'queue:approveOne':    d => approveRequests([Number(d.id)]),
+  'queue:denyOne':       d => openDenyModal([Number(d.id)]),
+  'queue:fix':           d => openFixModal(Number(d.id)),
+  'mine:reload':         () => loadMyRequests(),
+  'mine:filter':         d => setMineFilter(d.filter),
+  'mine:withdraw':       d => withdrawRequest(Number(d.id)),
+  'req:toggle':          d => toggleSelected(d.page, Number(d.id)),
+  'req:toggleGroupSel':  d => toggleGroupSelected(d.page, _ids(d)),
+  'req:toggleGroup':     d => toggleGroup(d.key),
+  'req:cancelSelected':  d => cancelSelected(d.page),
+  'req:clearSelection':  d => clearSelection(d.page),
+});

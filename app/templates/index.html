@@ -157,26 +157,38 @@
 
         <!-- ── Request queue (approvers) ────────────────────────── -->
         <div id="page-requests" style="display:none">
-          <div class="queue-filters" id="queue-filters">
-            <button class="queue-filter active" data-filter="action" onclick="setQueueFilter('action')">Da gestire</button>
-            <button class="queue-filter" data-filter="in_progress" onclick="setQueueFilter('in_progress')">In corso</button>
-            <button class="queue-filter" data-filter="all" onclick="setQueueFilter('all')">Tutte</button>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadRequestQueue()">
-              <i class="ti ti-refresh"></i>
-            </button>
+          <div class="pg-head">
+            <div class="pg-head-main">
+              <h1 class="pg-h1">Coda richieste</h1>
+              <p class="pg-sub">
+                Approvare risolve di nuovo il titolo e verifica le tracce prima di scaricare:
+                una richiesta che non trova l'audio chiesto viene messa da parte, non sostituita.
+              </p>
+            </div>
+            <div class="pg-stats" id="queue-stats"></div>
+            <div class="pg-actions">
+              <button class="btn btn-sm btn-outline-secondary" data-action="queue:reload" title="Aggiorna">
+                <i class="ti ti-refresh me-1"></i>Aggiorna
+              </button>
+            </div>
+          </div>
+          <div class="pg-bar" id="queue-filters">
+            <button class="queue-filter active" data-action="queue:filter" data-filter="action">Da gestire</button>
+            <button class="queue-filter" data-action="queue:filter" data-filter="in_progress">In corso</button>
+            <button class="queue-filter" data-action="queue:filter" data-filter="all">Tutte</button>
           </div>
           <div class="fm-selection-bar" id="queue-selection-bar" style="visibility:hidden">
             <span class="fm-selection-count" id="queue-selection-count">0 selezionate</span>
-            <button class="btn btn-sm btn-success" onclick="approveSelected()">
+            <button class="btn btn-sm btn-success" data-action="queue:approve">
               <i class="ti ti-check me-1"></i>Approva
             </button>
-            <button class="btn btn-sm btn-outline-danger" onclick="denySelected()">
+            <button class="btn btn-sm btn-outline-danger" data-action="queue:deny">
               <i class="ti ti-x me-1"></i>Rifiuta
             </button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="cancelSelected('queue')">
+            <button class="btn btn-sm btn-outline-secondary" data-action="req:cancelSelected" data-page="queue">
               <i class="ti ti-ban me-1"></i>Annulla
             </button>
-            <button class="btn btn-sm btn-ghost-secondary" onclick="clearSelection('queue')">
+            <button class="btn btn-sm btn-ghost-secondary" data-action="req:clearSelection" data-page="queue">
               <i class="ti ti-x me-1"></i>Deseleziona
             </button>
           </div>
@@ -185,20 +197,32 @@
 
         <!-- ── My requests ─────────────────────────────────────── -->
         <div id="page-my-requests" style="display:none">
-          <div class="queue-filters" id="mine-filters">
-            <button class="queue-filter active" data-filter="active" onclick="setMineFilter('active')">In corso</button>
-            <button class="queue-filter" data-filter="closed" onclick="setMineFilter('closed')">Concluse</button>
-            <button class="queue-filter" data-filter="all" onclick="setMineFilter('all')">Tutte</button>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadMyRequests()">
-              <i class="ti ti-refresh"></i>
-            </button>
+          <div class="pg-head">
+            <div class="pg-head-main">
+              <h1 class="pg-h1">Le mie richieste</h1>
+              <p class="pg-sub">
+                Cosa hai chiesto e a che punto è. Una richiesta si può ritirare
+                finché non è stata risolta.
+              </p>
+            </div>
+            <div class="pg-stats" id="mine-stats"></div>
+            <div class="pg-actions">
+              <button class="btn btn-sm btn-outline-secondary" data-action="mine:reload" title="Aggiorna">
+                <i class="ti ti-refresh me-1"></i>Aggiorna
+              </button>
+            </div>
+          </div>
+          <div class="pg-bar" id="mine-filters">
+            <button class="queue-filter active" data-action="mine:filter" data-filter="active">In corso</button>
+            <button class="queue-filter" data-action="mine:filter" data-filter="closed">Concluse</button>
+            <button class="queue-filter" data-action="mine:filter" data-filter="all">Tutte</button>
           </div>
           <div class="fm-selection-bar" id="mine-selection-bar" style="visibility:hidden">
             <span class="fm-selection-count" id="mine-selection-count">0 selezionate</span>
-            <button class="btn btn-sm btn-outline-secondary" onclick="cancelSelected('mine')">
+            <button class="btn btn-sm btn-outline-secondary" data-action="req:cancelSelected" data-page="mine">
               <i class="ti ti-trash me-1"></i>Annulla selezionate
             </button>
-            <button class="btn btn-sm btn-ghost-secondary" onclick="clearSelection('mine')">
+            <button class="btn btn-sm btn-ghost-secondary" data-action="req:clearSelection" data-page="mine">
               <i class="ti ti-x me-1"></i>Deseleziona
             </button>
           </div>

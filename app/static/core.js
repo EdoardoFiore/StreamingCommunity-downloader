@@ -298,6 +298,11 @@ const _ACTIONS = Object.create(null);
 
 function registerActions(map) { Object.assign(_ACTIONS, map); }
 
+// A checkbox's click event carries its own activation: cancelling it un-checks
+// the box the user just checked. So the default is only suppressed for things
+// that have no useful default of their own.
+const _KEEPS_ITS_DEFAULT = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'OPTION', 'LABEL']);
+
 function _dispatchAction(event, attribute) {
   const el = event.target.closest(`[${attribute}]`);
   if (!el || el.disabled) return;
@@ -305,9 +310,26 @@ function _dispatchAction(event, attribute) {
   if (!handler) return;
   // Only swallow the event once something is actually going to handle it: an
   // unregistered name must look broken, not silently eat the click.
-  if (event.type === 'click') event.preventDefault();
+  if (event.type === 'click' && !_KEEPS_ITS_DEFAULT.has(el.tagName)) event.preventDefault();
   handler(el.dataset, el, event);
 }
 
 document.addEventListener('click', e => _dispatchAction(e, 'data-action'));
 document.addEventListener('change', e => _dispatchAction(e, 'data-change'));
+
+
+// ── Language names ───────────────────────────────────────────────────────────
+//
+// Shared, not owned by a page: the title page names the tracks you are picking
+// and the request pages name the tracks a request was made with. This lived in
+// the detail view until splitting the scripts showed the request rows reaching
+// across for it.
+//
+// Anything not listed is shown as the source spelled it, rather than dropped.
+
+const LANG_NAMES = {
+  ita:'Italiano', eng:'English', fra:'Français', spa:'Español',
+  deu:'Deutsch', por:'Português', jpn:'日本語', zho:'中文',
+  ara:'العربية', rus:'Русский', kor:'한국어',
+};
+const langName = c => LANG_NAMES[c] || c;

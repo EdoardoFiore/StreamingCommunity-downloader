@@ -596,14 +596,7 @@ async function tpRequestSeason() {
 // Moved here from app.js: after the detail page replaced the three modals,
 // this page is the only caller of any of it.
 
-// ── Detail Modal ───────────────────────────────────────────────────────────────
-
-const LANG_NAMES = {
-  ita:'Italiano', eng:'English', fra:'Français', spa:'Español',
-  deu:'Deutsch', por:'Português', jpn:'日本語', zho:'中文',
-  ara:'العربية', rus:'Русский', kor:'한국어',
-};
-const langName = c => LANG_NAMES[c] || c;
+// ── Tracce audio e sottotitoli ───────────────────────────────────────────────
 
 // Which subtitle tracks start selected.
 //
