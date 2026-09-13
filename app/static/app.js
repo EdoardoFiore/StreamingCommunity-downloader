@@ -184,15 +184,15 @@ function showPage(page) {
   if (mobileMenu && mobileMenu.classList.contains('show')) {
     mobileMenu.classList.remove('show');
   }
-  ['search','downloads','files','requests','my-requests','watches','users'].forEach(p => {
+  ['search','downloads','files','requests','my-requests','watches','users','detail'].forEach(p => {
     const el = document.getElementById(`page-${p}`);
     if (el) el.style.display = p === page ? '' : 'none';
   });
   document.getElementById('page-title').textContent = {
     search:'Cerca', downloads:'Download', files:'File',
     requests:'Coda richieste', 'my-requests':'Le mie richieste',
-    watches:'Serie seguite', users:'Utenti',
-  }[page] || 'Cerca';
+    watches:'Serie seguite', users:'Utenti', detail:'',
+  }[page] ?? 'Cerca';
   document.querySelectorAll('.nav-link[data-page]').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page));
   // The search page had no loader at all. This covers the boot too, since
@@ -204,6 +204,11 @@ function showPage(page) {
   if (page === 'my-requests') loadMyRequests();
   if (page === 'watches') loadWatches();
   if (page === 'users') loadUsersPage();
+  // The title page owns the hash. Navigating away has to release it, or the
+  // next reload lands back on a title the user already left.
+  if (page !== 'detail' && (location.hash || '').startsWith('#/title/')) {
+    history.replaceState(null, '', location.pathname + location.search);
+  }
 }
 
 // ── Serie seguite ────────────────────────────────────────────────────────────
@@ -312,6 +317,25 @@ function renderWatchesList() {
 // The follow toggle lives in two modals whose contexts are shaped differently,
 // so both are flattened to the same shape here rather than in each caller.
 function _followTarget(kind) {
+  if (kind === 'page') {
+    // The title page, which serves both sources from one screen.
+    const anime = _tp.type === 'anime';
+    return {
+      btnId: 'th-follow-btn',
+      source: anime ? 'animeunity' : 'streamingcommunity',
+      media_type: anime ? 'anime' : 'tv',
+      external_id: String(_tp.id ?? ''),
+      title: _tp.name,
+      slug: _tp.slug,
+      year: _tp.year,
+      poster: _tp.poster,
+      anime_type: _tp.animeType,
+      audio_languages: _tpPicked('audio'),
+      subtitle_languages: _tpPicked('subs'),
+      // A film has no next episode to wait for.
+      followable: _tp.type !== 'movie' && (!anime || (_tp.animeType || 'tv') !== 'movie'),
+    };
+  }
   if (kind === 'anime') {
     return {
       btnId: 'follow-anime-btn',
@@ -1628,7 +1652,7 @@ function renderResultCards(items, container, baseIndex,
       ? ''
       : `<div class="status-ribbon" data-ribbon-for="${escapeHtml(String(item.id))}"></div>`;
     card.innerHTML = `
-      <div class="result-card" onclick="openDetailModal(${idx})">
+      <div class="result-card" onclick="openTitle(${idx})">
         <div class="poster-wrap">
           ${posterHtml}
           <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
@@ -1799,7 +1823,7 @@ function renderShelves() {
   const shelves = _homeCache[currentSource] || [];
   host.innerHTML = '';
   // One flat array across every rail, reset once here and appended to in order,
-  // so openDetailModal(idx) needs no special case for the start page.
+  // so openTitle(idx) needs no special case for the start page.
   _searchResults = [];
   _requestStatus = {};
   const ribbonIds = [];

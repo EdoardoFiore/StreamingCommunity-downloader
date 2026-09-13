@@ -56,6 +56,10 @@ EMPTY: dict = {
     "logo": None,
     "trailer_url": None,
     "tmdb_id": None,
+    "name": None,
+    "poster": None,
+    "type": None,
+    "seasons_count": None,
     "cast": [],
     "directors": [],
     "original_name": None,
@@ -168,6 +172,14 @@ def _from_props(props: dict) -> dict:
         # records, plus the original title, the release status, a quality
         # label and an age rating. All of it rides in the payload already
         # fetched for tmdb_id, so none of it costs a request.
+        # The title's own identity. The detail view is a page with an
+        # address now, so opening it from a pasted URL has no search result to
+        # borrow a name and a poster from - it has to be able to rebuild
+        # itself from the id alone.
+        "name": props.get("name") or None,
+        "poster": _source_image(props.get("images"), "poster"),
+        "type": props.get("type") or None,
+        "seasons_count": props.get("seasons_count"),
         "cast": _people(props.get("main_actors")),
         "directors": _people(props.get("main_directors")),
         "original_name": props.get("original_name") or None,

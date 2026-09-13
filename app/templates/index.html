@@ -1,6 +1,8 @@
 {% extends 'base.html' %}
 
 {% block content %}
+{% include 'pages/_title.html' %}
+
 
         <!-- ── Dominio sorgente cambiato ───────────────────────── -->
         <!--
@@ -214,5 +216,6 @@
 
 {% block scripts %}
 <script src="{{ asset('app.js') }}"></script>
+<script src="{{ asset('page-title.js') }}"></script>
 <script src="{{ asset('panel.js') }}"></script>
 {% endblock %}
