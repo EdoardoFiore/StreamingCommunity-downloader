@@ -918,3 +918,23 @@
       .ep-thumb-cell { display: none; }
       .ep-plot { -webkit-line-clamp: 1; }
     }
+
+    /* ── Title facts and cast, on the detail view ───────────
+       Label-then-value pairs. The label is the quiet half: it
+       is there to be skipped once you know the shape. */
+    .detail-facts, .detail-cast {
+      margin-bottom: 8px;
+      font-size: 12.5px; line-height: 1.6;
+      color: var(--text-sub);
+    }
+    .df-k {
+      color: var(--text-muted);
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+      margin-right: 5px;
+    }
+    .df-sep { margin: 0 8px; color: var(--text-dim); }
+    /* The overflow count carries the full list as its tooltip. */
+    .df-more {
+      color: var(--text-muted); cursor: help;
+      border-bottom: 1px dotted var(--border-strong);
+    }

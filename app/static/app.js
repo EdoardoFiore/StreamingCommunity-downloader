@@ -1973,6 +1973,13 @@ function _resetDetailExtras() {
   const genres = document.getElementById('detail-genres');
   genres.innerHTML = ''; genres.style.display = 'none';
   document.getElementById('detail-trailer-btn').style.display = 'none';
+  // Same reason as the tooltip below: these are filled only when the title
+  // has them, so without a reset one title's cast follows the modal onto the
+  // next title that has none.
+  for (const id of ['detail-facts', 'detail-cast', 'detail-quality-badge']) {
+    const el = document.getElementById(id);
+    el.innerHTML = ''; el.style.display = 'none';
+  }
   // The class is rewritten further down on every open; the tooltip is not, so
   // a stale warning would follow the modal onto the next title.
   document.getElementById('detail-action-btn').title = '';
@@ -2002,6 +2009,45 @@ function renderTitleMetadata(meta) {
     trailer.href = meta.trailer_url;
     trailer.style.display = '';
   }
+  // Original title and release status. Shown only when they add something:
+  // an original title identical to the localised one is noise.
+  const facts = [];
+  if (meta.original_name && meta.original_name !== document.getElementById('detail-title').textContent) {
+    facts.push(`<span class="df-k">Titolo originale</span> ${escapeHtml(meta.original_name)}`);
+  }
+  if (meta.status) facts.push(`<span class="df-k">Stato</span> ${escapeHtml(meta.status)}`);
+  if (facts.length) {
+    const el = document.getElementById('detail-facts');
+    el.innerHTML = facts.join('<span class="df-sep">·</span>');
+    el.style.display = '';
+  }
+
+  // Quality is on the title page only - the search payload has no such field,
+  // so this badge cannot appear on a grid card.
+  if (meta.quality) {
+    const q = document.getElementById('detail-quality-badge');
+    q.textContent = meta.quality;
+    q.style.display = '';
+  }
+
+  const people = [];
+  if (meta.directors?.length) {
+    people.push(`<div><span class="df-k">Regia</span> ${escapeHtml(meta.directors.join(', '))}</div>`);
+  }
+  if (meta.cast?.length) {
+    // Six is what fits on one line at the modal's width; the rest are a title.
+    const shown = meta.cast.slice(0, 6);
+    const rest = meta.cast.length - shown.length;
+    const more = rest > 0
+      ? ` <span class="df-more" title="${escapeHtml(meta.cast.join(', '))}">+${rest}</span>` : '';
+    people.push(`<div><span class="df-k">Con</span> ${escapeHtml(shown.join(', '))}${more}</div>`);
+  }
+  if (people.length) {
+    const el = document.getElementById('detail-cast');
+    el.innerHTML = people.join('');
+    el.style.display = '';
+  }
+
   // The source carries no rating for many titles; TMDB's fills that gap rather
   // than replacing a score already on screen.
   const scoreEl = document.getElementById('detail-score');

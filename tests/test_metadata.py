@@ -33,6 +33,16 @@ PROPS = {
         {"type": "background", "filename": "bg.jpg"},
         {"type": "logo", "filename": "logo.jpg"},
     ],
+    # Shapes below were read off a real title page before being relied on, as
+    # the metadata rule in CLAUDE.md requires - people arrive as records, not
+    # as bare strings.
+    "main_actors": [{"id": 1, "name": "Bryan Cranston"}, {"id": 2, "name": "Aaron Paul"}],
+    "main_directors": [{"id": 9, "name": "Vince Gilligan"}],
+    "original_name": "Breaking Bad",
+    "original_language": "en",
+    "status": "Ended",
+    "quality": "HD",
+    "age": 16,
 }
 
 
@@ -277,3 +287,54 @@ def test_applying_a_candidate_clears_the_metadata(client, monkeypatch, props):
 
     metadata.title_metadata("tv", "1", "test-series", "v1")
     assert len(props) == 2
+
+
+# ── Cast and the rest of the title page ───────────────────────────────────────
+
+def test_the_cast_and_crew_come_through(client, admin, props):
+    data = client.get("/api/metadata/tv/1?slug=test-series&version=v1").json()
+
+    assert data["cast"] == ["Bryan Cranston", "Aaron Paul"]
+    assert data["directors"] == ["Vince Gilligan"]
+
+
+def test_the_title_page_facts_come_through(client, admin, props):
+    data = client.get("/api/metadata/tv/1?slug=test-series&version=v1").json()
+
+    assert data["original_name"] == "Breaking Bad"
+    assert data["original_language"] == "en"
+    assert data["status"] == "Ended"
+    assert data["quality"] == "HD"
+    assert data["age"] == 16
+
+
+def test_people_without_a_name_are_dropped_and_duplicates_collapse(monkeypatch):
+    """These are a third party's records. A malformed one must cost a name,
+    not the cast row."""
+    from app.core import metadata
+
+    assert metadata._people([
+        {"id": 1, "name": "Ada"}, {"id": 2}, {"id": 3, "name": ""},
+        None, {"id": 4, "name": "Ada"}, {"id": 5, "name": "Grace"},
+    ]) == ["Ada", "Grace"]
+
+
+def test_the_cast_is_bounded():
+    from app.core import metadata
+
+    many = [{"id": i, "name": f"Attore {i}"} for i in range(100)]
+    assert len(metadata._people(many)) == metadata._MAX_PEOPLE
+
+
+def test_a_miss_still_answers_with_every_key(client, admin, monkeypatch):
+    """The router returns dict(EMPTY) when lookup fails, so a field added to
+    the payload but not to EMPTY would be missing exactly when the frontend
+    has least to work with."""
+    from app.core import metadata, tv
+
+    monkeypatch.setattr(
+        tv, "get_title_props", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+    )
+    data = client.get("/api/metadata/movie/1?slug=x&version=v1").json()
+
+    assert set(data) == set(metadata.EMPTY)

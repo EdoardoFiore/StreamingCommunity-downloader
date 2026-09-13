@@ -56,6 +56,13 @@ EMPTY: dict = {
     "logo": None,
     "trailer_url": None,
     "tmdb_id": None,
+    "cast": [],
+    "directors": [],
+    "original_name": None,
+    "original_language": None,
+    "status": None,
+    "quality": None,
+    "age": None,
 }
 
 
@@ -123,6 +130,21 @@ def _source_image(images: list | None, kind: str) -> str | None:
     return None
 
 
+# Enough to fill a cast row without turning the payload into a crew list. The
+# source sends eight for a film; a long-running series can send many more.
+_MAX_PEOPLE = 20
+
+
+def _people(entries: list | None) -> list[str]:
+    """Names out of the source's person records, in the order it sent them."""
+    names = []
+    for entry in entries or []:
+        name = (entry or {}).get("name")
+        if name and name not in names:
+            names.append(name)
+    return names[:_MAX_PEOPLE]
+
+
 def _from_props(props: dict) -> dict:
     """Everything the title page carries — which is nearly everything."""
     score = props.get("score")
@@ -141,6 +163,20 @@ def _from_props(props: dict) -> dict:
             f"https://www.youtube.com/watch?v={youtube_id}" if youtube_id else None
         ),
         "tmdb_id": props.get("tmdb_id"),
+        # Measured against a real title before being added, as the rule above
+        # requires: the page carries main_actors and main_directors as person
+        # records, plus the original title, the release status, a quality
+        # label and an age rating. All of it rides in the payload already
+        # fetched for tmdb_id, so none of it costs a request.
+        "cast": _people(props.get("main_actors")),
+        "directors": _people(props.get("main_directors")),
+        "original_name": props.get("original_name") or None,
+        "original_language": props.get("original_language") or None,
+        "status": props.get("status") or None,
+        # Only on the title page. The search payload has no quality field, so
+        # this cannot be put on a grid card without a request per poster.
+        "quality": props.get("quality") or None,
+        "age": props.get("age"),
     }
 
 
