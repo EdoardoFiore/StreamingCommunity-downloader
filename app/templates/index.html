@@ -243,17 +243,40 @@
 
         <!-- ── Users ───────────────────────────────────────────── -->
         <div id="page-users" style="display:none">
-          <div class="card mb-3">
-            <div class="card-body py-3">
-              <label class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" id="open-signin" onchange="saveOpenSignin()">
-                <span class="form-check-label">
-                  Consenti l'accesso a qualsiasi account Jellyfin
-                  <span class="d-block text-muted" style="font-size:11px">
-                    Disattivato: gli utenti vanno importati esplicitamente qui sotto.
-                  </span>
-                </span>
-              </label>
+          <div class="pg-head">
+            <div class="pg-head-main">
+              <h1 class="pg-h1">Utenti</h1>
+              <p class="pg-sub">
+                Gli account arrivano da Jellyfin; il pannello decide solo cosa
+                ciascuno può fare. I permessi sono indipendenti fra loro — non
+                esiste un permesso di amministratore che implichi gli altri.
+              </p>
+            </div>
+            <div class="pg-stats" id="users-stats"></div>
+            <div class="pg-actions">
+              <button class="btn btn-sm btn-outline-secondary" data-action="users:reload" title="Aggiorna">
+                <i class="ti ti-refresh me-1"></i>Aggiorna
+              </button>
+            </div>
+          </div>
+
+          <label class="sc-switch mb-3" for="open-signin">
+            <input class="sc-switch-input" type="checkbox" id="open-signin" data-change="users:openSignin">
+            <span class="sc-switch-track"><span class="sc-switch-thumb"></span></span>
+            <span class="sc-switch-text">
+              Consenti l'accesso a qualsiasi account Jellyfin
+              <span>Disattivato: gli utenti vanno importati esplicitamente qui sotto.</span>
+            </span>
+          </label>
+
+          <div class="pg-bar" id="users-filters">
+            <button class="queue-filter active" data-action="users:filter" data-filter="all">Tutti</button>
+            <button class="queue-filter" data-action="users:filter" data-filter="imported">Importati</button>
+            <button class="queue-filter" data-action="users:filter" data-filter="new">Non importati</button>
+            <div class="pg-bar-end">
+              <input type="text" id="users-search" class="form-control form-control-sm"
+                     style="width:190px" placeholder="Cerca utente..." autocomplete="off"
+                     data-input="users:search">
             </div>
           </div>
           <div id="users-list"></div>

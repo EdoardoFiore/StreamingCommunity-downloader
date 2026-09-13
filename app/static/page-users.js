@@ -51,9 +51,61 @@ function _permissionCheckboxes(rowId, permissions) {
     </label>`).join('');
 }
 
+// ── Filtering, and what the page opens with ──────────────────────────────────
+//
+// A Jellyfin server with fifty accounts renders fifty permission grids, and
+// the ones that matter — who is already importato, who is disabled — are
+// scattered among them.
+
+let _usersFilter = 'all';
+let _usersQuery = '';
+
+function setUsersFilter(filter) {
+  _usersFilter = filter;
+  document.querySelectorAll('#users-filters .queue-filter').forEach(el =>
+    el.classList.toggle('active', el.dataset.filter === filter));
+  renderUsers();
+}
+
+function setUsersQuery(value) {
+  _usersQuery = value.trim().toLowerCase();
+  renderUsers();
+}
+
+function _userMatches(u) {
+  if (_usersQuery && !(u.username || '').toLowerCase().includes(_usersQuery)) return false;
+  if (_usersFilter === 'imported') return !!u.panel_user;
+  if (_usersFilter === 'new') return !u.panel_user;
+  return true;
+}
+
+function renderUsersStats() {
+  const el = document.getElementById('users-stats');
+  if (!el) return;
+  const imported = _jellyfinUsers.filter(u => u.panel_user).length;
+  const disabled = _jellyfinUsers.filter(u => u.panel_user && !u.panel_user.enabled).length;
+  const chips = [
+    [imported, 'Importati', 'pg-stat-ok'],
+    [_jellyfinUsers.length - imported, 'Da importare', 'pg-stat-warn'],
+    [disabled, 'Disabilitati', 'pg-stat-error'],
+  ];
+  el.innerHTML = chips.map(([value, label, cls]) =>
+    `<span class="pg-stat ${value ? cls : 'pg-stat-zero'}"><b>${value}</b><span>${label}</span></span>`
+  ).join('');
+}
+
 function renderUsers() {
+  renderUsersStats();
   const container = document.getElementById('users-list');
-  container.innerHTML = _jellyfinUsers.map(u => {
+  const shown = _jellyfinUsers.filter(_userMatches);
+  if (!shown.length) {
+    container.innerHTML = `<div class="empty-panel">
+      <i class="ti ti-users"></i><p>${_jellyfinUsers.length
+        ? 'Nessun utente corrisponde al filtro.'
+        : 'Nessun account trovato su Jellyfin.'}</p></div>`;
+    return;
+  }
+  container.innerHTML = shown.map(u => {
     const panel = u.panel_user;
     const rowId = panel ? `u${panel.id}` : `j${u.jellyfin_user_id}`;
     return `
@@ -72,13 +124,15 @@ function renderUsers() {
       </div>
       <div class="user-actions">
         ${panel ? `
-          <button class="btn btn-sm btn-primary" onclick="saveUserPermissions(${panel.id}, '${rowId}')">
+          <button class="btn btn-sm btn-primary" data-action="users:save"
+                  data-id="${panel.id}" data-row="${rowId}">
             <i class="ti ti-device-floppy me-1"></i>Salva</button>
           <button class="btn btn-sm ${panel.enabled ? 'btn-outline-danger' : 'btn-outline-success'}"
-            onclick="toggleUserEnabled(${panel.id}, ${!panel.enabled})">
+                  data-action="users:toggle" data-id="${panel.id}" data-enable="${panel.enabled ? '0' : '1'}"
+                  title="${panel.enabled ? 'Disabilita' : 'Abilita'}">
             ${panel.enabled ? '<i class="ti ti-user-off"></i>' : '<i class="ti ti-user-check"></i>'}</button>`
-        : `<button class="btn btn-sm btn-success"
-             onclick="importUser('${escapeHtml(u.jellyfin_user_id)}', '${rowId}')">
+        : `<button class="btn btn-sm btn-success" data-action="users:import"
+                   data-jf="${escapeHtml(u.jellyfin_user_id)}" data-row="${rowId}">
              <i class="ti ti-download me-1"></i>Importa</button>`}
       </div>
     </div>`;
@@ -127,8 +181,7 @@ async function toggleUserEnabled(userId, enabled) {
   loadUsersPage();
 }
 
-async function saveOpenSignin() {
-  const allow = document.getElementById('open-signin').checked;
+async function saveOpenSignin(allow) {
   const settings = await fetch('/api/users/settings').then(r => r.json());
   const res = await fetch('/api/users/settings', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -142,3 +195,16 @@ async function saveOpenSignin() {
     ? 'Chiunque abbia un account Jellyfin può ora accedere'
     : 'Accesso limitato agli utenti importati', 'info');
 }
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+
+registerActions({
+  'users:reload':     () => loadUsersPage(),
+  'users:filter':     d => setUsersFilter(d.filter),
+  'users:search':     (d, el) => setUsersQuery(el.value),
+  'users:save':       d => saveUserPermissions(Number(d.id), d.row),
+  'users:toggle':     d => toggleUserEnabled(Number(d.id), d.enable === '1'),
+  'users:import':     d => importUser(d.jf, d.row),
+  'users:openSignin': (d, el) => saveOpenSignin(el.checked),
+});

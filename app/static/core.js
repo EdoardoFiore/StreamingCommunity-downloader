@@ -316,6 +316,7 @@ function _dispatchAction(event, attribute) {
 
 document.addEventListener('click', e => _dispatchAction(e, 'data-action'));
 document.addEventListener('change', e => _dispatchAction(e, 'data-change'));
+document.addEventListener('input', e => _dispatchAction(e, 'data-input'));
 
 
 // ── Language names ───────────────────────────────────────────────────────────
