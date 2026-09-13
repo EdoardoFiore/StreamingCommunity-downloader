@@ -42,7 +42,7 @@
         <label class="form-label" for="domain-input">Domain</label>
         <input type="text" id="domain-input" class="form-control" placeholder="streamingcommunityz.parts">
         <div class="settings-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="saveDomain()" id="save-domain-btn">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveDomain" id="save-domain-btn">
             Verifica e salva
           </button>
           <div id="domain-feedback" class="form-text"></div>
@@ -80,10 +80,10 @@
         <input type="number" id="domain-check-interval" class="form-control" min="30" max="1440">
 
         <div class="settings-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="saveDomainRecovery()" id="save-domain-recovery-btn">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveRecovery" id="save-domain-recovery-btn">
             Salva
           </button>
-          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="checkDomainNow()" id="domain-check-btn">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-action="cfg:checkDomain" id="domain-check-btn">
             <i class="ti ti-refresh me-1"></i>Controlla ora
           </button>
           <div id="domain-recovery-feedback" class="form-text"></div>
@@ -107,7 +107,7 @@
           volume montato su <code>/app/videos</code>.
         </p>
         <div id="libraries-list" class="mb-2"></div>
-        <button class="btn btn-sm btn-outline-secondary" onclick="addLibrary()">
+        <button class="btn btn-sm btn-outline-secondary" data-action="cfg:addLibrary">
           <i class="ti ti-plus me-1"></i>Aggiungi libreria
         </button>
 
@@ -117,7 +117,7 @@
         <div class="form-text">Nomi separati da virgola, ignorati sfogliando le librerie.</div>
 
         <div class="settings-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="saveLibraries()" id="save-libraries-btn">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveLibraries" id="save-libraries-btn">
             Salva librerie e cartelle
           </button>
           <div id="libraries-feedback" class="form-text"></div>
@@ -208,10 +208,10 @@
         </div>
 
         <div class="settings-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="saveNamingTemplates()" id="save-naming-btn">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveNaming" id="save-naming-btn">
             Salva
           </button>
-          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetNamingTemplates()">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-action="cfg:resetNaming">
             Ripristina predefiniti
           </button>
           <div id="naming-feedback" class="form-text"></div>
@@ -250,7 +250,7 @@
           </div>
         </div>
         <div class="settings-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="savePerfSettings()" id="save-perf-btn">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:savePerf" id="save-perf-btn">
             Salva performance
           </button>
           <div id="perf-settings-feedback" class="form-text"></div>
@@ -284,7 +284,7 @@
           </div>
           <div class="form-text mt-1">Serve un account amministratore Jellyfin. La password non viene salvata.</div>
           <div class="settings-actions">
-            <button type="button" class="btn btn-primary btn-sm" id="jf-connect-btn" onclick="connectJellyfin(false)">
+            <button type="button" class="btn btn-primary btn-sm" id="jf-connect-btn" data-action="cfg:jfConnect" data-reconfigure="0">
               <i class="ti ti-plug-connected me-1"></i>Collega a Jellyfin
             </button>
             <div id="jf-connect-feedback" class="form-text"></div>
@@ -297,7 +297,7 @@
           </p>
           <div id="jf-reconfigure-wrap" style="display:none">
             <div class="settings-actions">
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleJellyfinReconfigure()">
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cfg:jfReconfigure">
                 Cambia server Jellyfin
               </button>
             </div>
@@ -321,7 +321,7 @@
                 </div>
               </div>
               <div class="settings-actions">
-                <button type="button" class="btn btn-primary btn-sm" id="jf-reconnect-btn" onclick="connectJellyfin(true)">
+                <button type="button" class="btn btn-primary btn-sm" id="jf-reconnect-btn" data-action="cfg:jfConnect" data-reconfigure="1">
                   Aggiorna configurazione
                 </button>
                 <div id="jf-reconnect-feedback" class="form-text"></div>
@@ -363,12 +363,12 @@
             <input type="text" id="notif-channel-url" class="form-control" placeholder="discord://id_webhook/token_webhook">
           </div>
           <div class="col-sm-2 d-grid">
-            <button type="button" class="btn btn-primary btn-sm" onclick="saveNotificationChannel()"
+            <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveChannel"
                     id="notif-channel-save-btn">Aggiungi</button>
           </div>
         </div>
 
-        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleNotificationChannelForm()"
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cfg:toggleChannelForm"
                 id="notif-channel-add-btn">
           <i class="ti ti-plus me-1"></i>Aggiungi canale
         </button>
@@ -392,7 +392,7 @@
         </label>
         <div class="form-text" id="jf-refresh-status"></div>
         <div class="settings-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="saveJellyfinRefresh()" id="save-jf-refresh-btn">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveJfRefresh" id="save-jf-refresh-btn">
             Salva
           </button>
           <div id="jf-refresh-feedback" class="form-text"></div>
@@ -436,13 +436,13 @@
                       placeholder="Corpo, opzionale."></textarea>
           </div>
           <div class="col-12 d-flex justify-content-end">
-            <button type="button" class="btn btn-primary btn-sm" onclick="saveHook()" id="hook-save-btn">
+            <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveHook" id="hook-save-btn">
               Aggiungi
             </button>
           </div>
         </div>
 
-        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleHookForm()" id="hook-add-btn">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cfg:toggleHookForm" id="hook-add-btn">
           <i class="ti ti-plus me-1"></i>Aggiungi webhook
         </button>
         <div class="settings-actions">

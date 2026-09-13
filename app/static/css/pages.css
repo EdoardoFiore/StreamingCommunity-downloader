@@ -1232,7 +1232,6 @@
       background: none; border: none; outline: none;
       color: var(--text-sub);
       font-family: var(--font-mono); font-size: 11.5px;
-      color-scheme: dark;
     }
     @media (max-width: 575px) {
       .th-season-batch { margin-left: 0; width: 100%; }

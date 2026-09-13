@@ -134,13 +134,23 @@ function trackBadges(request) {
   </div>`;
 }
 
+// Swaps the broken <img> for the same empty slot the no-poster branch below
+// renders. It was a fragment of HTML written into an attribute, entity-escaped
+// quotes and all, which is unreadable and one stray quote from breaking.
+function reqPosterError(img) {
+  const slot = document.createElement('div');
+  slot.className = 'req-poster req-poster-empty';
+  slot.textContent = '\u{1F3AC}';
+  img.replaceWith(slot);
+}
+
 function requestPoster(request) {
   if (!request.poster) return '<div class="req-poster req-poster-empty">🎬</div>';
   const url = request.poster.startsWith('http')
     ? request.poster
     : `/api/image/${request.poster}`;
   return `<img class="req-poster" src="${escapeHtml(url)}" alt=""
-            onerror="this.outerHTML='<div class=&quot;req-poster req-poster-empty&quot;>🎬</div>'">`;
+            onerror="reqPosterError(this)">`;
 }
 
 function fmtDate(iso) {
@@ -625,4 +635,8 @@ registerActions({
   'req:toggleGroup':     d => toggleGroup(d.key),
   'req:cancelSelected':  d => cancelSelected(d.page),
   'req:clearSelection':  d => clearSelection(d.page),
+  // The two request modals. They stay modals on purpose: an interruption
+  // asking for one answer is not a place.
+  'queue:confirmDeny':   () => confirmDeny(),
+  'queue:confirmFix':    () => confirmFix(),
 });

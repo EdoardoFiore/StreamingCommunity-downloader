@@ -7,7 +7,7 @@
       </a>
       <!-- Mobile-only controls: settings icon + hamburger -->
       <div class="d-flex align-items-center gap-2 d-lg-none">
-        <button class="btn-icon-mobile" onclick="openSettings()" title="Impostazioni">
+        <button class="btn-icon-mobile" data-action="settings:open" title="Impostazioni">
           <i class="ti ti-settings" style="font-size:19px"></i>
         </button>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu">
@@ -17,27 +17,27 @@
       <div class="collapse navbar-collapse" id="sidebar-menu">
         <ul class="navbar-nav pt-lg-3">
           <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
-            <a class="nav-link active" href="#" data-page="search" onclick="showPage('search');return false">
+            <a class="nav-link active" href="#" data-page="search" data-action="nav">
               <span class="nav-link-icon"><i class="ti ti-search"></i></span>
               <span class="nav-link-title">Cerca</span>
             </a>
           </li>
           <li class="nav-item" data-perm="DOWNLOAD|MANAGE_REQUESTS">
-            <a class="nav-link" href="#" data-page="downloads" onclick="showPage('downloads');return false">
+            <a class="nav-link" href="#" data-page="downloads" data-action="nav">
               <span class="nav-link-icon"><i class="ti ti-download"></i></span>
               <span class="nav-link-title">Download</span>
               <span class="badge bg-red ms-auto" id="active-jobs-badge" style="display:none"></span>
             </a>
           </li>
           <li class="nav-item" data-perm="MANAGE_REQUESTS">
-            <a class="nav-link" href="#" data-page="requests" onclick="showPage('requests');return false">
+            <a class="nav-link" href="#" data-page="requests" data-action="nav">
               <span class="nav-link-icon"><i class="ti ti-inbox"></i></span>
               <span class="nav-link-title">Richieste</span>
               <span class="badge bg-yellow ms-auto" id="queue-pending-count" style="display:none"></span>
             </a>
           </li>
           <li class="nav-item" data-perm="REQUEST|DOWNLOAD" data-hide-perm="DOWNLOAD" data-requires-auth="1">
-            <a class="nav-link" href="#" data-page="my-requests" onclick="showPage('my-requests');return false">
+            <a class="nav-link" href="#" data-page="my-requests" data-action="nav">
               <span class="nav-link-icon"><i class="ti ti-send"></i></span>
               <span class="nav-link-title">Le mie richieste</span>
             </a>
@@ -45,19 +45,19 @@
           <!-- No data-requires-auth: a followed series works without Jellyfin
                too, it just belongs to the panel instead of to a user. -->
           <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
-            <a class="nav-link" href="#" data-page="watches" onclick="showPage('watches');return false">
+            <a class="nav-link" href="#" data-page="watches" data-action="nav">
               <span class="nav-link-icon"><i class="ti ti-bell-ringing"></i></span>
               <span class="nav-link-title">Serie seguite</span>
             </a>
           </li>
           <li class="nav-item" data-perm="VIEW_LIBRARY">
-            <a class="nav-link" href="#" data-page="files" onclick="showPage('files');return false">
+            <a class="nav-link" href="#" data-page="files" data-action="nav">
               <span class="nav-link-icon"><i class="ti ti-folder-filled"></i></span>
               <span class="nav-link-title">File</span>
             </a>
           </li>
           <li class="nav-item" data-perm="MANAGE_USERS">
-            <a class="nav-link" href="#" data-page="users" onclick="showPage('users');return false">
+            <a class="nav-link" href="#" data-page="users" data-action="nav">
               <span class="nav-link-icon"><i class="ti ti-users"></i></span>
               <span class="nav-link-title">Utenti</span>
             </a>
@@ -80,7 +80,7 @@
             <div class="sb-disk-bar"><span id="sb-disk-fill"></span></div>
             <div class="sb-disk-text" id="sb-disk-text"></div>
           </div>
-          <button class="btn-sidebar-settings" data-perm="MANAGE_SETTINGS" onclick="openSettings()">
+          <button class="btn-sidebar-settings" data-perm="MANAGE_SETTINGS" data-action="settings:open">
             <i class="ti ti-settings" style="font-size:15px;flex-shrink:0"></i>
             Impostazioni
           </button>

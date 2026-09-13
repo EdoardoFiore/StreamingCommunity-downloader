@@ -541,3 +541,42 @@
     @media (prefers-reduced-motion: reduce) {
       .pg-disk-bar > span { transition: none; }
     }
+
+    /* ═══════════════════════════════════════════════════════
+       CODE — literal text: a path, a naming token, a URL scheme
+
+       Left entirely to Tabler until now, which meant it was the
+       one piece of text on the page whose colour came from
+       light-dark() and a grey ramp we do not control. Both of
+       its outcomes were wrong here: resolved, #4b5563 at 2.1:1;
+       unresolved, an inherited near-white that read as ordinary
+       body text in a mono face.
+
+       So it is ours, through our own tokens, and it no longer
+       depends on light-dark() being supported. Mono because
+       these are the {title} templates, the /app/videos paths and
+       the discord:// URLs — data, by the same rule as segment
+       counts and S01E05. --text-sub is 7.0:1 on the chip and
+       deliberately brighter than the --text-muted sentence
+       around it, so a literal lifts off the line it sits in.
+       ═══════════════════════════════════════════════════════ */
+    code, kbd, samp {
+      font-family: var(--font-mono) !important;
+      font-size: .86em;
+      color: var(--text-sub) !important;
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      padding: .1em .4em;
+      /* A path or an Apprise URL is long and must not widen its
+         container; it breaks rather than pushing the layout. */
+      overflow-wrap: break-word;
+      word-break: break-word;
+    }
+    /* Inside a link the code is the link, and takes its colour. */
+    a > code { color: inherit !important; background: none; border: 0; padding: 0; }
+    /* In a block the chip is the <pre>, not each token inside it. */
+    pre { color: var(--text-sub); }
+    pre code {
+      background: none; border: 0; padding: 0; font-size: inherit; color: inherit !important;
+    }

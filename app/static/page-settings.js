@@ -167,7 +167,7 @@ function _renderEventPicker(ch) {
                data-channel="${ch.id}"
                ${all || ch.events.includes(event) ? 'checked' : ''}
                ${all ? 'disabled' : ''}
-               onchange="updateChannelEvents(${ch.id})">
+               data-change="cfg:channelEvents" data-id="${ch.id}">
         <span class="form-check-label" style="font-size:12px">
           <i class="ti ${NOTIFICATION_ICONS[event] || 'ti-bell'} me-1"></i>${NOTIFICATION_LABELS[event]}
         </span>
@@ -184,7 +184,7 @@ function _renderEventPicker(ch) {
       <label class="form-check form-switch mb-2">
         <input class="form-check-input" type="checkbox" ${all ? 'checked' : ''}
                id="notif-all-events-${ch.id}"
-               onchange="toggleAllChannelEvents(${ch.id}, this.checked)">
+               data-change="cfg:channelAllEvents" data-id="${ch.id}">
         <span class="form-check-label" style="font-size:12px">Tutti gli eventi</span>
       </label>
       ${groups}
@@ -205,20 +205,20 @@ function renderNotificationChannelsList() {
       <div class="d-flex align-items-center gap-2 py-1">
         <label class="form-check form-switch mb-0">
           <input class="form-check-input" type="checkbox" ${ch.enabled ? 'checked' : ''}
-                 onchange="toggleNotificationChannel(${ch.id}, this.checked)">
+                 data-change="cfg:channelEnabled" data-id="${ch.id}">
         </label>
         <div class="flex-fill text-truncate">
           <span style="color:var(--text)">${escapeHtml(ch.name)}</span>
           <span class="text-muted small ms-2">${escapeHtml(_maskAppriseUrl(ch.apprise_url))}</span>
         </div>
         <button type="button" class="btn btn-sm btn-ghost-secondary"
-                onclick="toggleChannelEvents(${ch.id})" title="Scegli quali notifiche ricevere">
+                data-action="cfg:channelPicker" data-id="${ch.id}" title="Scegli quali notifiche ricevere">
           <i class="ti ti-${open ? 'chevron-up' : 'chevron-down'} me-1"></i>${_eventSummary(ch)}
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testNotificationChannel(${ch.id})">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cfg:testChannel" data-id="${ch.id}">
           <i class="ti ti-send me-1"></i>Test
         </button>
-        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteNotificationChannel(${ch.id})">
+        <button type="button" class="btn btn-sm btn-outline-danger" data-action="cfg:deleteChannel" data-id="${ch.id}">
           <i class="ti ti-trash"></i>
         </button>
       </div>
@@ -616,17 +616,17 @@ function renderHooksList() {
       <div class="d-flex align-items-center gap-2 py-1">
         <label class="form-check form-switch mb-0">
           <input class="form-check-input" type="checkbox" ${hook.enabled ? 'checked' : ''}
-                 onchange="toggleHook(${hook.id}, this.checked)">
+                 data-change="cfg:hookEnabled" data-id="${hook.id}">
         </label>
         <div class="flex-fill text-truncate">
           <span style="color:var(--text)">${escapeHtml(hook.name)}</span>
           <span class="text-muted small ms-2">${escapeHtml(hook.method)} ${escapeHtml(hook.url_masked || '')}</span>
         </div>
         <span class="badge bg-secondary-lt">${escapeHtml(_hookEventSummary(hook))}</span>
-        <button class="btn btn-sm btn-outline-secondary" onclick="testHook(${hook.id})">
+        <button class="btn btn-sm btn-outline-secondary" data-action="cfg:testHook" data-id="${hook.id}">
           <i class="ti ti-send me-1"></i>Test
         </button>
-        <button class="btn btn-sm btn-outline-danger" onclick="deleteHook(${hook.id})">
+        <button class="btn btn-sm btn-outline-danger" data-action="cfg:deleteHook" data-id="${hook.id}">
           <i class="ti ti-trash"></i>
         </button>
       </div>
@@ -867,7 +867,7 @@ function renderLibrariesList() {
     <div class="row g-2 mb-2 align-items-center">
       <div class="col-4"><select class="form-select form-select-sm" id="lib-type-${i}"><option value="">Tipo...</option>${opts}</select></div>
       <div class="col"><input type="text" class="form-control form-control-sm" id="lib-path-${i}" value="${escapeHtml(lib.path)}" placeholder="/srv/nfs/films"></div>
-      <div class="col-auto"><button class="btn btn-sm btn-outline-danger" onclick="removeLibrary(${i})"><i class="ti ti-trash"></i></button></div>
+      <div class="col-auto"><button class="btn btn-sm btn-outline-danger" data-action="cfg:removeLibrary" data-index="${i}"><i class="ti ti-trash"></i></button></div>
     </div>`;
   }).join('');
 }
@@ -908,3 +908,35 @@ async function saveLibraries() {
   } catch(e) { _feedback('libraries-feedback', 'Errore di rete', 'danger'); }
   finally { btn.disabled = false; }
 }
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+
+registerActions({
+  'settings:open':        () => openSettings(),
+  'cfg:saveDomain':       () => saveDomain(),
+  'cfg:saveRecovery':     () => saveDomainRecovery(),
+  'cfg:checkDomain':      () => checkDomainNow(),
+  'cfg:addLibrary':       () => addLibrary(),
+  'cfg:saveLibraries':    () => saveLibraries(),
+  'cfg:removeLibrary':    d => removeLibrary(Number(d.index)),
+  'cfg:saveNaming':       () => saveNamingTemplates(),
+  'cfg:resetNaming':      () => resetNamingTemplates(),
+  'cfg:savePerf':         () => savePerfSettings(),
+  'cfg:jfConnect':        d => connectJellyfin(d.reconfigure === '1'),
+  'cfg:jfReconfigure':    () => toggleJellyfinReconfigure(),
+  'cfg:saveJfRefresh':    () => saveJellyfinRefresh(),
+  'cfg:saveChannel':      () => saveNotificationChannel(),
+  'cfg:toggleChannelForm': () => toggleNotificationChannelForm(),
+  'cfg:channelPicker':    d => toggleChannelEvents(Number(d.id)),
+  'cfg:channelEvents':    d => updateChannelEvents(Number(d.id)),
+  'cfg:channelAllEvents': (d, el) => toggleAllChannelEvents(Number(d.id), el.checked),
+  'cfg:channelEnabled':   (d, el) => toggleNotificationChannel(Number(d.id), el.checked),
+  'cfg:testChannel':      d => testNotificationChannel(Number(d.id)),
+  'cfg:deleteChannel':    d => deleteNotificationChannel(Number(d.id)),
+  'cfg:saveHook':         () => saveHook(),
+  'cfg:toggleHookForm':   () => toggleHookForm(),
+  'cfg:hookEnabled':      (d, el) => toggleHook(Number(d.id), el.checked),
+  'cfg:testHook':         d => testHook(Number(d.id)),
+  'cfg:deleteHook':       d => deleteHook(Number(d.id)),
+});

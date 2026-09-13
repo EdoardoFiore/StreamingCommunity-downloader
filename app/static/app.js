@@ -134,6 +134,12 @@ async function dismissDomainCandidate() {
 registerActions({
   'domain:apply':   () => applyDomainCandidate(),
   'domain:dismiss': () => dismissDomainCandidate(),
+  // The sidebar's nav. The page name rides on the same data-page the active
+  // highlight already reads, so the two cannot disagree about which link is
+  // which. These are still <a href="#"> and showPage() still switches by
+  // display: giving each page its own hash is a separate change, because the
+  // title page currently owns the hash and clears it on the way out.
+  'nav':            d => showPage(d.page),
 });
 
 // ── Navigation ─────────────────────────────────────────────────────────────────

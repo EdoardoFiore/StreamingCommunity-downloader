@@ -45,7 +45,7 @@ async function refreshNotifications() {
               <div class="notif-text">${escapeHtml(n.message)}</div>
               <div class="notif-time">${fmtDate(n.created_at)}</div>
             </div>
-            <button class="notif-del" onclick="deleteNotification(${n.id})"
+            <button class="notif-del" data-action="notif:delete" data-id="${n.id}"
                     title="Elimina questa notifica" aria-label="Elimina">
               <i class="ti ti-x"></i>
             </button>
@@ -104,4 +104,14 @@ document.addEventListener('click', event => {
   if (!event.target.closest('#notif-panel') && !event.target.closest('#notif-button')) {
     panel.style.display = 'none';
   }
+});
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+
+registerActions({
+  'notif:toggle':   () => toggleNotifications(),
+  'notif:readAll':  () => markAllNotificationsRead(),
+  'notif:clearAll': () => clearAllNotifications(),
+  'notif:delete':   d => deleteNotification(Number(d.id)),
 });

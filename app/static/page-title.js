@@ -282,7 +282,7 @@ function _tpRenderHero() {
   // A back control, not just a trail. The trail alone was a row of grey text
   // against artwork and read as a caption rather than as the way out.
   document.getElementById('th-crumbs').innerHTML =
-    `<button class="th-back" onclick="tpBack()" title="Torna alla ricerca">
+    `<button class="th-back" data-action="tp:back" title="Torna alla ricerca">
        <i class="ti ti-arrow-left"></i>Cerca
      </button>` +
     `<span class="sep">›</span><span>${escapeHtml(kindLabel)}</span>` +
@@ -339,13 +339,13 @@ function _tpRenderCta() {
     <label class="th-sched" title="Lascia vuoto per scaricare subito">
       <i class="ti ti-clock"></i>
       <input type="datetime-local" id="th-sched-at" value="${escapeHtml(_tp.scheduledRaw)}"
-             onchange="tpSetSchedule(this.value)">
+             data-change="tp:schedule">
     </label>` : '';
 
   // An anime requester has nothing batchable to press: every episode is its
   // own request, from the rows below.
   const primary = (wants && _tp.type === 'anime') ? '' : `
-    <button class="btn btn-primary" onclick="tpPrimary()">
+    <button class="btn btn-primary" data-action="tp:primary">
       <i class="ti ${icon} me-1"></i>${label}
     </button>`;
 
@@ -354,8 +354,8 @@ function _tpRenderCta() {
     ${primary}
     <!-- Left bare: _renderFollowButton owns this button's class and label,
          and rewriting them here would fight it. -->
-    ${followable ? `<button id="th-follow-btn" onclick="tpToggleFollow()"></button>` : ''}
-    <button class="th-icon-btn" onclick="tpSetTab('tracks')" title="Scegli audio e sottotitoli">
+    ${followable ? `<button id="th-follow-btn" data-action="tp:follow"></button>` : ''}
+    <button class="th-icon-btn" data-action="tp:tab" data-tab="tracks" title="Scegli audio e sottotitoli">
       <i class="ti ti-adjustments"></i>
     </button>`;
   if (followable) tpRefreshFollow();
@@ -365,7 +365,7 @@ function _tpRenderTabsBar() {
   document.getElementById('th-tabs').innerHTML = _tpTabs()
     .map(([k, label]) =>
       `<button class="th-tab${_tp.tab === k ? ' active' : ''}" data-tab="${k}" role="tab"
-        onclick="tpSetTab('${k}')">${escapeHtml(label)}</button>`).join('');
+        data-action="tp:tab" data-tab="${k}">${escapeHtml(label)}</button>`).join('');
 }
 
 function _tpRenderAbout() {
@@ -402,7 +402,7 @@ function _tpRenderTracks() {
     const list = _tp[which] || [];
     const chips = list.length
       ? list.map(t => `<button class="th-track${t.on ? ' on' : ''}"
-          onclick="tpToggleTrack('${which}','${escapeHtml(t.code)}')">${escapeHtml(langName(t.code))}</button>`).join('')
+          data-action="tp:track" data-which="${which}" data-code="${escapeHtml(t.code)}">${escapeHtml(langName(t.code))}</button>`).join('')
       : `<span class="th-empty" style="padding:0">${empty}</span>`;
     return `<div class="th-track-group">
         <div class="th-track-h"><i class="ti ${icon}"></i>${title}</div>
@@ -449,7 +449,7 @@ function _tpRenderTrailer() {
   card.hidden = false;
   const still = _tp.meta?.backdrop ? `style="background-image:url('${encodeURI(_tp.meta.backdrop)}')"` : '';
   document.getElementById('th-trailer').innerHTML =
-    `<button class="th-trailer-facade" ${still} onclick="tpPlayTrailer()" aria-label="Riproduci il trailer"></button>`;
+    `<button class="th-trailer-facade" ${still} data-action="tp:trailer" aria-label="Riproduci il trailer"></button>`;
 }
 
 function tpPlayTrailer() {
@@ -470,7 +470,7 @@ function _tpRenderEpisodes() {
   const pills = _tp.type === 'tv' && _tp.seasonsCount > 1
     ? `<div class="th-season-pills">${Array.from({ length: _tp.seasonsCount }, (_, i) => i + 1)
         .map(n => `<button class="th-season-pill${n === _tp.season ? ' active' : ''}"
-          onclick="tpLoadSeason(${n})">S${String(n).padStart(2, '0')}</button>`).join('')}</div>` : '';
+          data-action="tp:season" data-n="${n}">S${String(n).padStart(2, '0')}</button>`).join('')}</div>` : '';
 
   // Batching is a download privilege; a requester asks episode by episode.
   // The verb follows the schedule field, so the button says what will happen.
@@ -479,12 +479,12 @@ function _tpRenderEpisodes() {
   if (_tp.episodes?.length) {
     if (can('DOWNLOAD')) {
       batch = _tp.type === 'anime'
-        ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadAllAnime()">
+        ? `<button class="btn btn-sm btn-outline-primary" data-action="tp:batchAnime">
              <i class="ti ti-download me-1"></i>${verb} tutti gli episodi</button>`
-        : `<button class="btn btn-sm btn-outline-primary" onclick="downloadWholeSeason(${_tp.season})">
+        : `<button class="btn btn-sm btn-outline-primary" data-action="tp:batchSeason" data-season="${_tp.season}">
              <i class="ti ti-download me-1"></i>${verb} la stagione</button>`;
     } else if (_tp.type === 'tv' && can('REQUEST')) {
-      batch = `<button class="btn btn-sm btn-outline-primary" onclick="tpRequestSeason()">
+      batch = `<button class="btn btn-sm btn-outline-primary" data-action="tp:requestSeason">
                  <i class="ti ti-send me-1"></i>Richiedi la stagione</button>`;
     }
   }
@@ -509,7 +509,6 @@ function _tpRenderEpisodes() {
   }
 
   const wants = !can('DOWNLOAD');
-  const fn = _tp.type === 'anime' ? 'startAnimeDownload' : 'startEpisodeDownload';
   const rows = _tp.episodes.map((ep, i) => {
     // Only when the source has one. The placeholder means "an image was
     // expected and did not arrive", which is true of a StreamingCommunity
@@ -529,7 +528,8 @@ function _tpRenderEpisodes() {
           ${plot}
         </div>
         ${dur}${owned}
-        <button class="btn btn-sm ${wants ? 'btn-outline-primary' : 'btn-primary'}" onclick="${fn}(${i})">
+        <button class="btn btn-sm ${wants ? 'btn-outline-primary' : 'btn-primary'}"
+                data-action="tp:episode" data-index="${i}">
           <i class="ti ${wants ? 'ti-send' : 'ti-download'} me-1"></i>${wants ? 'Richiedi' : 'Scarica'}
         </button>
       </div>`;
@@ -830,3 +830,26 @@ async function downloadAllAnime() {
     scheduled_at: scheduledAt || null,
   });
 }
+
+
+// ── Delegated handlers ───────────────────────────────────────────────────────
+//
+// The episode button used to name its handler as a string and interpolate the
+// index into an attribute. Which of the two it is depends on the title's kind,
+// which is state this page already holds, so the branch belongs here and not
+// in the markup.
+
+registerActions({
+  'tp:back':          () => tpBack(),
+  'tp:primary':       () => tpPrimary(),
+  'tp:follow':        () => tpToggleFollow(),
+  'tp:tab':           d => tpSetTab(d.tab),
+  'tp:track':         d => tpToggleTrack(d.which, d.code),
+  'tp:trailer':       () => tpPlayTrailer(),
+  'tp:season':        d => tpLoadSeason(Number(d.n)),
+  'tp:schedule':      (d, el) => tpSetSchedule(el.value),
+  'tp:requestSeason': () => tpRequestSeason(),
+  'tp:batchSeason':   d => downloadWholeSeason(Number(d.season)),
+  'tp:batchAnime':    () => downloadAllAnime(),
+  'tp:episode':       d => (_tp.type === 'anime' ? startAnimeDownload : startEpisodeDownload)(Number(d.index)),
+});

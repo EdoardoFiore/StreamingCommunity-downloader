@@ -104,11 +104,11 @@ function renderSearchFilters() {
   if (!bar) return;
   const chips = (KIND_FILTERS[currentSource] || []).map(([value, label]) =>
     `<button class="source-btn${value === _kindFilter ? ' active' : ''}" ` +
-    `onclick="setKindFilter('${value}')">${label}</button>`).join('');
+    `data-action="search:kind" data-kind="${value}">${label}</button>`).join('');
   // AnimeUnity keeps an Italian dub as a record of its own, so this is a real
   // filter there and meaningless on the other source.
   const dub = currentSource === 'animeunity'
-    ? `<button class="source-btn${_dubOnly ? ' active' : ''}" onclick="setDubOnly(${!_dubOnly})">` +
+    ? `<button class="source-btn${_dubOnly ? ' active' : ''}" data-action="search:dub" data-on="${_dubOnly ? '0' : '1'}">` +
       `<i class="ti ti-microphone"></i>Solo doppiati IT</button>`
     : '';
   bar.innerHTML = chips + dub;
@@ -174,7 +174,7 @@ function renderResultCards(items, container, baseIndex,
     card.className = wrapperClass;
     card.dataset.idx = String(idx);
     const posterHtml = posterUrl
-      ? `<img src="${posterUrl}" alt="" onerror="this.closest('.poster-wrap').querySelector('.poster-noimg').style.display='flex';this.style.display='none'">`
+      ? `<img src="${posterUrl}" alt="" onerror="posterError(this)">`
       : '';
     // Movie cards carry no status ribbon: a movie can be requested again
     // freely (denied/failed/cancelled never block it), so a "richiesto" chip
@@ -184,7 +184,7 @@ function renderResultCards(items, container, baseIndex,
       ? ''
       : `<div class="status-ribbon" data-ribbon-for="${escapeHtml(String(item.id))}"></div>`;
     card.innerHTML = `
-      <div class="result-card" onclick="openTitle(${idx})">
+      <div class="result-card" data-action="search:open" data-idx="${idx}">
         <div class="poster-wrap">
           ${posterHtml}
           <div class="poster-noimg" style="${posterUrl?'display:none':''}">&#127916;</div>
@@ -525,4 +525,7 @@ registerActions({
   'search:source': d => setSource(d.source),
   'search:run':    () => doSearch(),
   'search:more':   () => loadMoreResults(),
+  'search:kind':   d => setKindFilter(d.kind),
+  'search:dub':    d => setDubOnly(d.on === '1'),
+  'search:open':   d => openTitle(Number(d.idx)),
 });

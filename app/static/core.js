@@ -231,7 +231,7 @@ function showToast(message, type = 'info') {
   toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;left:auto;z-index:9999;min-width:220px;max-width:calc(100vw - 2rem)';
   toast.innerHTML = `<div class="alert ${colors[type]||'bg-info'} alert-dismissible text-white mb-0 shadow" role="alert">
     ${escapeHtml(message)}
-    <button type="button" class="btn-close btn-close-white" onclick="this.closest('.alert').parentElement.remove()"></button>
+    <button type="button" class="btn-close btn-close-white" data-action="toast:dismiss"></button>
   </div>`;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
@@ -268,6 +268,17 @@ function thumbError(img) {
   const sep = base.includes('?') ? '&' : '?';
   img.parentElement?.classList.remove('is-failed');
   setTimeout(() => { img.src = `${base}${sep}_retry=${tries + 1}`; }, 500 * (tries + 1));
+}
+
+// A poster that will not load: reveal the placeholder already sitting behind
+// it and take the broken image out. Named, rather than three statements
+// written into an onerror attribute — error does not bubble, so this one
+// genuinely cannot be delegated, but it does not have to be inline JS either.
+function posterError(img) {
+  const wrap = img.closest('.poster-wrap');
+  const placeholder = wrap && wrap.querySelector('.poster-noimg');
+  if (placeholder) placeholder.style.display = 'flex';
+  img.style.display = 'none';
 }
 
 // A title's poster. AnimeUnity sends an absolute URL; StreamingCommunity sends
@@ -364,3 +375,11 @@ function diskLevel(pct) {
   if (pct >= 80) return 'is-warning';
   return '';
 }
+
+
+registerActions({
+  'session:logout': () => logout(),
+  // The button sits inside the .alert; the positioned wrapper is its parent,
+  // and that is what has to go, or an invisible box keeps covering the corner.
+  'toast:dismiss':  (d, el) => el.closest('.alert')?.parentElement?.remove(),
+});
