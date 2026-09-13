@@ -57,6 +57,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     setInterval(refreshNotifications, 60000);
   }
   if (can('VIEW_LIBRARY')) { setupFileManager(); loadSidebarDisk(); }
+  // Hidden for downloaders, unless a followed series has filed some for them.
+  if (can('DOWNLOAD')) revealMyRequestsIfUsed();
   setupSettingsTabs();
   setupSearchDebounce();
   renderSearchFilters();

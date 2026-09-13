@@ -82,6 +82,13 @@ async function initAuth() {
     const needed = el.dataset.perm.split('|');
     el.style.display = needed.some(can) ? '' : 'none';
   });
+  // The inverse: hidden *because* the user holds a permission. Someone who
+  // downloads directly never files a request, so the queue of their own
+  // requests is an empty page with a name. Applied second so it can override
+  // a data-perm that just showed the element.
+  document.querySelectorAll('[data-hide-perm]').forEach(el => {
+    if (el.dataset.hidePerm.split('|').some(can)) el.style.display = 'none';
+  });
   // Without Jellyfin there is no identity or request queue to show, even for
   // the one permission (DOWNLOAD) that would otherwise leave them visible.
   if (!_authEnabled) {
