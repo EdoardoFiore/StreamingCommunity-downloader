@@ -28,6 +28,7 @@
       --accent-ring:   rgba(61,107,245,.28);   /* borders */
       --accent-wash:   rgba(61,107,245,.08);   /* selected rows */
       --accent-glow:   rgba(61,107,245,.30);   /* shadows */
+      --accent-hover:  #3360E8;                /* pressed / hovered fills */
 
       /* Failure. Only ever this. */
       --danger:        #E4485D;

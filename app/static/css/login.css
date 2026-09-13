@@ -1,0 +1,210 @@
+    /* The login page.
+       Palette comes from tokens.css - this file only shapes the one screen a
+       visitor sees before they are anybody. It used to carry its own copy of
+       fourteen theme variables, which is why it was still red and still set
+       in the old typefaces long after the panel had moved on. */
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body, body.antialiased {
+      background: var(--bg-base) !important;
+      color: var(--text) !important;
+      font-family: var(--font-ui) !important;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Aurora ─────────────────────────────────────────────
+       The page's one effect. Two wide, heavily blurred pools of
+       the brand colours, drifting slowly behind everything.
+       Fixed and non-interactive, far below the card, and low
+       enough in opacity that nothing sitting on it loses
+       contrast. */
+    .aurora { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+    .aurora span {
+      position: absolute;
+      width: 60vmax; height: 60vmax;
+      border-radius: 50%;
+      filter: blur(90px);
+      opacity: .18;
+      will-change: transform;
+    }
+    .aurora span:nth-child(1) {
+      background: var(--accent);
+      top: -26vmax; left: -14vmax;
+      animation: drift-a 26s ease-in-out infinite alternate;
+    }
+    .aurora span:nth-child(2) {
+      background: var(--purple);
+      bottom: -30vmax; right: -16vmax;
+      animation: drift-b 32s ease-in-out infinite alternate;
+    }
+    @keyframes drift-a {
+      from { transform: translate3d(0, 0, 0) scale(1); }
+      to   { transform: translate3d(12vmax, 8vmax, 0) scale(1.12); }
+    }
+    @keyframes drift-b {
+      from { transform: translate3d(0, 0, 0) scale(1.08); }
+      to   { transform: translate3d(-10vmax, -7vmax, 0) scale(1); }
+    }
+
+    /* ── Card ───────────────────────────────────────────────── */
+    .auth-card {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 408px;
+      /* Plain colour first: color-mix is recent, and a card with no
+         background at all would put the aurora straight behind the text. */
+      background: var(--bg-surface);
+      background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius-lg);
+      padding: 30px 30px 26px;
+      box-shadow: 0 24px 70px rgba(0,0,0,.55);
+      animation: card-in .5s cubic-bezier(.2,.7,.3,1) both;
+    }
+    /* A single lit edge along the top, where the light would fall. */
+    .auth-card::before {
+      content: '';
+      position: absolute; inset: 0 0 auto; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent-ring), transparent);
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(14px) scale(.985); }
+      to   { opacity: 1; transform: none; }
+    }
+
+    /* ── Brand ──────────────────────────────────────────────── */
+    .brand { display: flex; align-items: center; gap: 13px; margin-bottom: 26px; }
+    .brand-icon {
+      width: 42px; height: 42px; flex-shrink: 0;
+      background: var(--accent);
+      border-radius: var(--radius);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 20px;
+      box-shadow: 0 6px 20px var(--accent-glow);
+    }
+    .brand-text {
+      font-family: var(--font-brand);
+      font-size: 18px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .14em;
+      color: var(--text); line-height: 1.1;
+    }
+    .brand-sub { color: var(--text-muted); font-size: 11.5px; margin-top: 3px; }
+
+    /* ── Copy ───────────────────────────────────────────────── */
+    .auth-title {
+      font-family: var(--font-brand);
+      font-size: 24px; font-weight: 700; letter-spacing: -.015em;
+      color: var(--text); margin: 0 0 5px;
+    }
+    .auth-hint { color: var(--text-muted); font-size: 13px; margin: 0 0 20px; }
+
+    .setup-note {
+      background: var(--accent-wash);
+      border: 1px solid var(--accent-ring);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px; margin-bottom: 20px;
+      color: var(--text-sub); font-size: 12px; line-height: 1.55;
+    }
+    .setup-note strong { color: var(--text); font-weight: 600; }
+
+    /* ── Fields ─────────────────────────────────────────────── */
+    .form-label {
+      color: var(--text-muted) !important;
+      font-size: 11px !important; font-weight: 500 !important;
+      text-transform: uppercase; letter-spacing: .06em;
+      margin-bottom: 6px !important;
+    }
+    .form-control {
+      background: var(--bg-input) !important;
+      border: 1px solid var(--border-mid) !important;
+      border-radius: var(--radius-sm) !important;
+      color: var(--text) !important;
+      font-size: 13.5px !important;
+      padding: 10px 13px !important;
+      transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    .form-control::placeholder { color: var(--text-dim) !important; }
+    .form-control:focus {
+      background: var(--bg-raised) !important;
+      border-color: var(--accent) !important;
+      box-shadow: 0 0 0 3px var(--accent-dim) !important;
+      outline: none !important;
+    }
+
+    /* ── Buttons ────────────────────────────────────────────── */
+    .btn-auth {
+      width: 100%;
+      background: var(--accent); color: #fff;
+      border: none; border-radius: var(--radius-sm);
+      padding: 11px 16px;
+      font-size: 14px; font-weight: 600;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, transform .12s, box-shadow .15s;
+      box-shadow: 0 6px 18px var(--accent-glow);
+    }
+    .btn-auth:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
+    .btn-auth:active:not(:disabled) { transform: none; }
+    .btn-auth:disabled { opacity: .6; cursor: default; box-shadow: none; }
+
+    .btn-auth-ghost {
+      width: 100%;
+      background: transparent; color: var(--text-muted);
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius-sm);
+      padding: 9px 16px; margin-top: 10px;
+      font-size: 13px; cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .btn-auth-ghost:hover { background: var(--bg-hover); color: var(--text-sub); border-color: var(--border-strong); }
+
+    .skip-hint { color: var(--text-dim); font-size: 11px; margin: 9px 0 0; line-height: 1.5; }
+
+    .auth-footer {
+      margin-top: 18px; padding-top: 15px;
+      border-top: 1px solid var(--border);
+      color: var(--text-dim); font-size: 11.5px;
+      text-align: center; word-break: break-all;
+      font-family: var(--font-mono);
+    }
+
+    /* ── Alert ──────────────────────────────────────────────
+       Class name and the display toggle are login.js's contract. */
+    .auth-alert {
+      display: none;
+      background: var(--danger-dim);
+      border: 1px solid var(--danger-ring);
+      color: var(--danger);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px; margin-bottom: 16px;
+      font-size: 12.5px; line-height: 1.5;
+      animation: card-in .25s ease both;
+    }
+    .auth-alert.info {
+      background: var(--accent-wash);
+      border-color: var(--accent-ring);
+      color: var(--text-sub);
+    }
+
+    .spinner-border { color: var(--accent) !important; }
+
+    /* Everything above is decoration; none of it is how the page works. */
+    @media (prefers-reduced-motion: reduce) {
+      .aurora span { animation: none; }
+      .auth-card, .auth-alert { animation: none; }
+      .btn-auth:hover:not(:disabled) { transform: none; }
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 16px; }
+      .auth-card { padding: 24px 20px 22px; }
+    }
