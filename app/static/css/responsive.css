@@ -117,8 +117,6 @@
       .fm-check { width: 18px !important; height: 18px !important; }
 
       /* Episode/anime/settings modals: use more screen space */
-      #episode-modal .modal-dialog,
-      #anime-modal .modal-dialog,
       #settings-modal .modal-dialog {
         margin: 0.5rem auto !important;
         max-width: calc(100% - 1rem) !important;
@@ -163,8 +161,6 @@
       }
 
       /* Full-screen modals on phones */
-      #episode-modal .modal-dialog,
-      #anime-modal .modal-dialog,
       #settings-modal .modal-dialog {
         margin: 0 !important;
         max-width: 100% !important;
@@ -173,8 +169,6 @@
         display: flex;
         flex-direction: column;
       }
-      #episode-modal .modal-content,
-      #anime-modal .modal-content,
       #settings-modal .modal-content {
         border-radius: 0 !important;
         flex: 1;

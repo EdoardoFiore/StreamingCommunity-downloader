@@ -559,10 +559,6 @@
          the tabs exactly where picking one with twenty-four did, and the list
          scrolls inside. The cost is space under a short season, which is the
          price of the tabs not moving. */
-      #episode-modal .modal-content,
-      #anime-modal .modal-content {
-        height: min(720px, calc(100vh - 5rem));
-      }
     }
     .settings-section-hint {
       font-size: 12px;
@@ -839,83 +835,20 @@
     @media (max-width: 575px) {
       .user-row { flex-wrap: wrap; }
       .user-actions { width: 100%; }
-    }
-
-    /* ═══════════════════════════════════════════════════════
-       EPISODE ROWS — the season list
-       ═══════════════════════════════════════════════════════ */
-    .ep-num {
-      width: 1%;
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-      font-variant-numeric: tabular-nums;
-      text-align: right;
-      white-space: nowrap;
-    }
-
-    .ep-thumb-cell { width: 1%; padding-right: 0 !important; }
-
-    .ep-still {
-      display: block;
-      width: 72px; min-width: 72px; max-width: 72px;
-      aspect-ratio: 16 / 9;
-      object-fit: cover;
-      border-radius: var(--radius-sm);
-      background: var(--bg-raised);
-    }
-    .ep-still-empty {
-      display: flex; align-items: center; justify-content: center;
-      color: var(--text-dim);
-      border: 1px solid var(--border);
-    }
-
-    .ep-head {
-      display: flex; align-items: baseline; gap: 8px;
-      color: var(--text); font-weight: 500;
-    }
-    .ep-dur {
-      color: var(--text-muted); font-size: 11.5px;
-      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-      white-space: nowrap;
-    }
-
-    /* Two lines. A synopsis is context for choosing, not something to read
-       here - the full text lives on the title page. */
-    .ep-plot {
+    }/* Two lines. A synopsis is context for choosing {
       margin-top: 3px;
       color: var(--text-muted); font-size: 12px; line-height: 1.45;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
       overflow: hidden;
-    }
-
-    /* Already downloaded. Stated quietly: it is a fact about the library, not
-       a warning, and the download button stays available for a re-fetch. */
-    .ep-owned { color: var(--green); margin-right: 6px; font-size: 15px; vertical-align: middle; }
-    .ep-row-owned .ep-head { color: var(--text-sub); }
+    }/* Already downloaded. Stated quietly: it is a fact about the library,
+    not
+       a warning { color: var(--green); margin-right: 6px; font-size: 15px; vertical-align: middle; }
 
     @media (max-width: 575px) {
-      .ep-thumb-cell { display: none; }
-      .ep-plot { -webkit-line-clamp: 1; }
-    }
-
-    /* ── Title facts and cast, on the detail view ───────────
-       Label-then-value pairs. The label is the quiet half: it
-       is there to be skipped once you know the shape. */
-    .detail-facts, .detail-cast {
+    }/* ── Title facts and cast {
       margin-bottom: 8px;
       font-size: 12.5px; line-height: 1.6;
       color: var(--text-sub);
-    }
-    .df-k {
-      color: var(--text-muted);
-      font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
-      margin-right: 5px;
-    }
-    .df-sep { margin: 0 8px; color: var(--text-dim); }
-    /* The overflow count carries the full list as its tooltip. */
-    .df-more {
-      color: var(--text-muted); cursor: help;
-      border-bottom: 1px dotted var(--border-strong);
     }
 
     /* ═══════════════════════════════════════════════════════

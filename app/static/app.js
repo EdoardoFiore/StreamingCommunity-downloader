@@ -2045,273 +2045,15 @@ function dedupeLangs(codes) {
   return [...new Set(codes || [])];
 }
 
-function _getLangSelections() {
-  const audio = [...document.querySelectorAll('.lang-audio-check:checked')].map(cb => cb.value);
-  const subs  = [...document.querySelectorAll('.lang-sub-check:checked')].map(cb => cb.value);
-  return {
-    audio: audio.length ? audio : ['ita'],
-    subs:  subs,
-  };
-}
 
 // Guards against a stale response painting over a newer one: open a title, close
 // it, open another before the first reply lands, and the first one used to win.
-let _detailToken = 0;
 // The two fetches of one open land in either order, and each needs something
 // the other has: the failure message depends on whether a fallback exists.
-let _detailState = { langsError: null };
 
-function _resetDetailExtras() {
-  _detailState = { langsError: null };
-  document.getElementById('detail-backdrop').style.display = 'none';
-  const plot = document.getElementById('detail-plot');
-  plot.textContent = ''; plot.style.display = 'none';
-  const genres = document.getElementById('detail-genres');
-  genres.innerHTML = ''; genres.style.display = 'none';
-  document.getElementById('detail-trailer-btn').style.display = 'none';
-  // Same reason as the tooltip below: these are filled only when the title
-  // has them, so without a reset one title's cast follows the modal onto the
-  // next title that has none.
-  for (const id of ['detail-facts', 'detail-cast', 'detail-quality-badge']) {
-    const el = document.getElementById(id);
-    el.innerHTML = ''; el.style.display = 'none';
-  }
-  // The class is rewritten further down on every open; the tooltip is not, so
-  // a stale warning would follow the modal onto the next title.
-  document.getElementById('detail-action-btn').title = '';
-}
 
-function renderTitleMetadata(meta) {
-  if (!meta) return;
 
-  if (meta.backdrop) {
-    const backdrop = document.getElementById('detail-backdrop');
-    backdrop.style.backgroundImage = `url("${encodeURI(meta.backdrop)}")`;
-    backdrop.style.display = '';
-  }
-  if (meta.plot) {
-    const plot = document.getElementById('detail-plot');
-    plot.textContent = meta.plot;
-    plot.style.display = '';
-  }
-  if (meta.genres?.length) {
-    const genres = document.getElementById('detail-genres');
-    genres.innerHTML = meta.genres.slice(0, 4)
-      .map(g => `<span class="badge bg-secondary-lt">${escapeHtml(g)}</span>`).join('');
-    genres.style.display = '';
-  }
-  if (meta.trailer_url) {
-    const trailer = document.getElementById('detail-trailer-btn');
-    trailer.href = meta.trailer_url;
-    trailer.style.display = '';
-  }
-  // Original title and release status. Shown only when they add something:
-  // an original title identical to the localised one is noise.
-  const facts = [];
-  if (meta.original_name && meta.original_name !== document.getElementById('detail-title').textContent) {
-    facts.push(`<span class="df-k">Titolo originale</span> ${escapeHtml(meta.original_name)}`);
-  }
-  if (meta.status) facts.push(`<span class="df-k">Stato</span> ${escapeHtml(meta.status)}`);
-  if (facts.length) {
-    const el = document.getElementById('detail-facts');
-    el.innerHTML = facts.join('<span class="df-sep">·</span>');
-    el.style.display = '';
-  }
 
-  // Quality is on the title page only - the search payload has no such field,
-  // so this badge cannot appear on a grid card.
-  if (meta.quality) {
-    const q = document.getElementById('detail-quality-badge');
-    q.textContent = meta.quality;
-    q.style.display = '';
-  }
-
-  const people = [];
-  if (meta.directors?.length) {
-    people.push(`<div><span class="df-k">Regia</span> ${escapeHtml(meta.directors.join(', '))}</div>`);
-  }
-  if (meta.cast?.length) {
-    // Six is what fits on one line at the modal's width; the rest are a title.
-    const shown = meta.cast.slice(0, 6);
-    const rest = meta.cast.length - shown.length;
-    const more = rest > 0
-      ? ` <span class="df-more" title="${escapeHtml(meta.cast.join(', '))}">+${rest}</span>` : '';
-    people.push(`<div><span class="df-k">Con</span> ${escapeHtml(shown.join(', '))}${more}</div>`);
-  }
-  if (people.length) {
-    const el = document.getElementById('detail-cast');
-    el.innerHTML = people.join('');
-    el.style.display = '';
-  }
-
-  // The source carries no rating for many titles; TMDB's fills that gap rather
-  // than replacing a score already on screen.
-  const scoreEl = document.getElementById('detail-score');
-  if (meta.rating && !scoreEl.innerHTML) {
-    scoreEl.innerHTML =
-      `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${meta.rating}</span>`;
-  }
-}
-
-function renderDetailSourceError(detail) {
-  _detailState.langsError = detail;
-  const langsEl = document.getElementById('detail-langs');
-  const trimmed = (detail || '').slice(0, 140);
-  // No alternative provider is registered (see app/core/_shared.py), so this
-  // must not promise one. Saying "the alternative source will be tried" when
-  // nothing will be tried is worse than the silence this replaced.
-  langsEl.innerHTML =
-    `<div class="alert bg-warning py-1 px-2 mb-0 small" style="border-color:#e6a23c">
-       <i class="ti ti-alert-triangle me-1"></i>
-       Sorgente non raggiungibile per questo titolo. Le lingue non sono selezionabili
-       e il download potrebbe fallire.
-       ${trimmed ? `<div class="text-muted mt-1">${escapeHtml(trimmed)}</div>` : ''}
-     </div>`;
-
-  // Deliberately still enabled. The fallback may well work, and disabling the
-  // button removes the one path that might; saying so is the honest version of
-  // taking the choice away.
-  const btn = document.getElementById('detail-action-btn');
-  if (btn) {
-    // The title goes on regardless: "Richiedi" is already btn-warning for its
-    // own reason, and the tooltip is what actually carries the warning.
-    btn.title = hasFallback
-      ? 'La sorgente principale non risponde: verr\u00e0 tentata quella alternativa.'
-      : 'La sorgente non risponde: il download potrebbe fallire.';
-    if (!btn.className.includes('btn-warning')) btn.className = 'btn btn-warning';
-  }
-}
-
-function openDetailModal(idx) {
-  const item = _searchResults[idx];
-  if (!item) return;
-  // The modal is reused, so anything filled in asynchronously has to be cleared
-  // first — a plot left over from the previous title under a new heading reads
-  // as fact — and late responses have to be able to tell they are late.
-  const token = ++_detailToken;
-  _resetDetailExtras();
-  const isAnime = item.type === 'anime';
-  const isMovie = item.type === 'movie';
-  const year = itemYear(item);
-  const score = item.score ? parseFloat(item.score).toFixed(1) : null;
-  const posterUrl = item.poster
-    ? (item.poster.startsWith('http') ? item.poster : `/api/image/${item.poster}`)
-    : '';
-
-  const poster = document.getElementById('detail-poster');
-  if (posterUrl) { poster.src=posterUrl; poster.style.display=''; poster.onerror=()=>poster.style.display='none'; }
-  else poster.style.display='none';
-
-  document.getElementById('detail-title').textContent = item.name;
-  const tb = document.getElementById('detail-type-badge');
-  // The same lookup the card uses, so the two never disagree about a title.
-  const kind = kindBadge(item);
-  tb.className = `badge me-1 ${kind.cls}`;
-  tb.textContent = kind.label;
-  const ab = document.getElementById('detail-age-badge');
-  if (item.age) { ab.textContent=`${item.age}+`; ab.style.display=''; } else ab.style.display='none';
-
-  const meta = [];
-  if (year) meta.push(year);
-  if (isAnime && item.episodes_count) meta.push(`${item.episodes_count} episodi`);
-  else if (!isMovie && item.seasons_count) meta.push(`${item.seasons_count} stagion${item.seasons_count===1?'e':'i'}`);
-  document.getElementById('detail-meta').textContent = meta.join(' · ');
-  document.getElementById('detail-score').innerHTML = score
-    ? `<span class="badge bg-yellow-lt fs-5"><i class="ti ti-star-filled me-1"></i>${score}</span>` : '';
-
-  const scheduleWrap = document.getElementById('detail-schedule-wrap');
-  const scheduledAtInput = document.getElementById('detail-scheduled-at');
-  scheduledAtInput.value = '';
-  // Scheduling a download is part of the download privilege; a requester picks
-  // tracks and the approver decides when it runs.
-  scheduleWrap.style.display = can('DOWNLOAD') ? '' : 'none';
-
-  const requestOnly = !can('DOWNLOAD');
-  const btn = document.getElementById('detail-action-btn');
-  const readAt = () => (can('DOWNLOAD') && scheduledAtInput.value)
-    ? new Date(scheduledAtInput.value).toISOString() : null;
-
-  if (isAnime) {
-    btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
-    btn.onclick = () => {
-      const { audio, subs } = _getLangSelections();
-      hideModal('detail-modal');
-      openAnimeBrowser(item.id, item.name, item.type, year, readAt(), audio, subs);
-    };
-  } else if (isMovie) {
-    btn.className = requestOnly ? 'btn btn-warning' : 'btn btn-primary';
-    btn.innerHTML = requestOnly
-      ? '<i class="ti ti-send me-1"></i>Richiedi'
-      : '<i class="ti ti-download me-1"></i>Scarica';
-    btn.onclick = () => {
-      const { audio, subs } = _getLangSelections();
-      hideModal('detail-modal');
-      startFilmDownload(item.id, item.name, year, readAt(), audio, subs, item.poster);
-    };
-  } else {
-    btn.className='btn btn-success'; btn.innerHTML='<i class="ti ti-list me-1"></i>Episodi';
-    btn.onclick = () => {
-      const { audio, subs } = _getLangSelections();
-      hideModal('detail-modal');
-      openEpisodeBrowser(item.id, item.name, item.slug, year, readAt(), audio, subs, item.poster);
-    };
-  }
-
-  const langsEl = document.getElementById('detail-langs');
-  if (isAnime) {
-    langsEl.innerHTML = '';
-    showModal('detail-modal');
-    return;
-  }
-
-  langsEl.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Caricamento lingue...';
-  showModal('detail-modal');
-
-  const p = new URLSearchParams({ type:isMovie?'movie':'tv', slug:item.slug||'', version:currentVersion||'' });
-
-  // Independent of the languages call and started alongside it: one is metadata,
-  // the other reaches the stream host, and neither should wait on the other.
-  fetch(`/api/metadata/${isMovie ? 'movie' : 'tv'}/${item.id}?${p}`)
-    .then(r => r.ok ? r.json() : null)
-    .then(meta => { if (token === _detailToken) renderTitleMetadata(meta); })
-    .catch(() => { /* the modal simply stays as it was */ });
-
-  fetch(`/api/search/languages/${item.id}?${p}`)
-    .then(async r => {
-      if (r.ok) return r.json();
-      // Used to be swallowed: no chips, no explanation, and a download button
-      // that looked entirely fine.
-      const body = await safeJson(r).catch(() => ({}));
-      throw new Error(body.detail || `HTTP ${r.status}`);
-    })
-    .then(info => {
-      if (token !== _detailToken) return;
-      if (!info) { langsEl.innerHTML=''; return; }
-      let html='';
-      if (info.audio?.length) {
-        const audioHtml = dedupeLangs(info.audio).map(c => {
-          const checked = (c === 'ita' || (info.audio.length === 1)) ? 'checked' : '';
-          return `<label class="me-2 mb-1" style="cursor:pointer"><input type="checkbox" class="lang-audio-check me-1" value="${escapeHtml(c)}" ${checked}><span class="badge bg-blue-lt">${langName(c)}</span></label>`;
-        }).join('');
-        html+=`<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span>${audioHtml}</div>`;
-      } else {
-        html+=`<div class="mb-1"><span class="text-muted me-1"><i class="ti ti-volume ti-sm"></i> Audio:</span><span class="text-muted fst-italic">originale</span></div>`;
-      }
-      if (info.subtitles?.length) {
-        const preferred = preferredSubSelection(info.subtitles);
-        const subHtml = dedupeLangs(info.subtitles).map(c => {
-          const checked = preferred.has(c) ? 'checked' : '';
-          return `<label class="me-2 mb-1" style="cursor:pointer"><input type="checkbox" class="lang-sub-check me-1" value="${escapeHtml(c)}" ${checked}><span class="badge bg-teal-lt">${langName(c)}</span></label>`;
-        }).join('');
-        html+=`<div><span class="text-muted me-1"><i class="ti ti-subtitles ti-sm"></i> Sub:</span>${subHtml}</div>`;
-      }
-      langsEl.innerHTML=html;
-    })
-    .catch(err => {
-      if (token !== _detailToken) return;
-      renderDetailSourceError(err && err.message);
-    });
-}
 
 // ── Requesting ─────────────────────────────────────────────────────────────────
 
@@ -2378,113 +2120,8 @@ async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLa
 
 let _epCtx = {};
 
-async function openEpisodeBrowser(tvId, tvName, slug, year=null, scheduledAt=null, audioLangs=null, subLangs=null, poster=null) {
-  _epCtx = { tvId, tvName, slug, year, scheduledAt, token:null, episodes:[], currentSeason:null, poster,
-    audioLangs: audioLangs || ['ita'], subLangs: subLangs || ['ita', 'eng'] };
-  document.getElementById('episode-modal-title').textContent = tvName;
-  document.getElementById('season-tabs-wrap').style.display='none';
-  document.getElementById('dl-whole-series-btn').style.display='none';
-  document.getElementById('episode-modal-body').innerHTML =
-    '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
-  showModal('episode-modal');
-  checkWatchStatus('tv');
 
-  try {
-    const [tokenData, seasonsData] = await Promise.all([
-      fetch(`/api/tv/${tvId}/token`).then(r=>r.json()),
-      fetch(`/api/tv/${tvId}/seasons?slug=${encodeURIComponent(slug)}&version=${encodeURIComponent(currentVersion)}`).then(r=>r.json()),
-    ]);
-    _epCtx.token = tokenData.token;
-    _epCtx.seasonsCount = seasonsData.seasons_count;
-    renderSeasonTabs(seasonsData.seasons_count);
-    loadSeason(1);
-  } catch(e) {
-    document.getElementById('episode-modal-body').innerHTML=`<div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div>`;
-  }
-}
 
-function renderSeasonTabs(count) {
-  const tabs = document.getElementById('season-tabs');
-  tabs.innerHTML='';
-  for (let s=1; s<=count; s++) {
-    const li=document.createElement('li');
-    li.className='nav-item';
-    li.innerHTML=`<a class="nav-link${s===1?' active':''}" href="#" data-season="${s}">S${s}</a>`;
-    li.querySelector('a').addEventListener('click', (e)=>{
-      e.preventDefault();
-      tabs.querySelectorAll('.nav-link').forEach(a=>a.classList.remove('active'));
-      e.target.classList.add('active');
-      loadSeason(s);
-    });
-    tabs.appendChild(li);
-  }
-  const wrap = document.getElementById('season-tabs-wrap');
-  wrap.style.display = 'flex';
-  const dlAllBtn = document.getElementById('dl-whole-series-btn');
-  dlAllBtn.style.display = count > 1 ? '' : 'none';
-}
-
-async function loadSeason(season) {
-  const { tvId, slug, token } = _epCtx;
-  const container = document.getElementById('episode-modal-body');
-  container.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';
-  try {
-    // title and year let the server say which episodes are already on disk.
-    // They are the same values this page would post to start the download.
-    const params = new URLSearchParams({
-      slug, version: currentVersion, token,
-      title: _epCtx.tvName || '', year: _epCtx.year || '',
-    });
-    const res = await fetch(`/api/tv/${tvId}/seasons/${season}/episodes?${params}`);
-    const eps = await safeJson(res);
-    if (!res.ok) { container.innerHTML=`<div class="alert alert-danger">${escapeHtml(eps.detail||'Errore caricamento episodi')}</div>`; return; }
-    if (!Array.isArray(eps)) { container.innerHTML=`<div class="alert alert-danger">Risposta non valida dal server</div>`; return; }
-    _epCtx.episodes=eps; _epCtx.currentSeason=season;
-
-    const rows = eps.map((ep, idx) => {
-      // Every field but the number and the id is optional: the source may
-      // simply not carry it, and a row missing its synopsis is still a row.
-      const still = ep.still
-        ? `<img class="ep-still" src="${escapeHtml(ep.still)}" alt="" loading="lazy">`
-        : `<span class="ep-still ep-still-empty"><i class="ti ti-photo-off"></i></span>`;
-      const dur = ep.duration ? `<span class="ep-dur">${escapeHtml(String(ep.duration))} min</span>` : '';
-      const plot = ep.plot ? `<div class="ep-plot">${escapeHtml(ep.plot)}</div>` : '';
-      const owned = ep.in_library
-        ? `<span class="ep-owned" title="Già nella libreria"><i class="ti ti-circle-check-filled"></i></span>`
-        : '';
-      return `
-      <tr class="ep-row${ep.in_library ? ' ep-row-owned' : ''}">
-        <td class="ep-num">${escapeHtml(String(ep.n))}</td>
-        <td class="ep-thumb-cell">${still}</td>
-        <td>
-          <div class="ep-head">${escapeHtml(ep.name || 'Senza titolo')}${dur}</div>
-          ${plot}
-        </td>
-        <td class="w-1 text-nowrap">
-          ${owned}
-          <button class="btn btn-sm btn-primary" onclick="startEpisodeDownload(${idx})" title="Scarica">
-            <i class="ti ti-download"></i>
-          </button>
-        </td>
-      </tr>`;
-    }).join('');
-
-    container.innerHTML=`
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <span class="text-muted small">${eps.length} episodi</span>
-        <button class="btn btn-sm btn-outline-success" onclick="downloadWholeSeason(${season})">
-          <i class="ti ti-download me-1"></i>Tutta la stagione
-        </button>
-      </div>
-      <div class="table-responsive" style="max-height:380px;overflow-y:auto">
-        <table class="table table-sm table-hover">
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-  } catch(e) {
-    container.innerHTML=`<div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div>`;
-  }
-}
 
 async function startEpisodeDownload(epIndex) {
   const { tvId, tvName, slug, year, scheduledAt, token, episodes, currentSeason, audioLangs, subLangs, poster } = _epCtx;
@@ -2524,6 +2161,8 @@ async function startEpisodeDownload(epIndex) {
 // Whole seasons and whole series are one call: the server lists the episodes
 // itself and queues them as a batch. That is also what lets it report the season
 // once at the end instead of pinging for every episode.
+// modalId is optional: the title page is a page, so there is nothing to
+// close behind it. It remains for the callers that are still modals.
 async function _startBatch(path, body, modalId) {
   const res = await fetch(path, {
     method: 'POST',
@@ -2539,7 +2178,7 @@ async function _startBatch(path, body, modalId) {
     body.scheduled_at ? `${data.count} episodi programmati` : `${data.count} episodi in coda`,
     'success',
   );
-  hideModal(modalId);
+  if (modalId) hideModal(modalId);
   showPage('downloads');
   return true;
 }
@@ -2552,7 +2191,7 @@ async function downloadWholeSeason(season) {
     tv_id: tvId, slug, tv_name: tvName, season, year,
     audio_languages: audioLangs, subtitle_languages: subLangs,
     scheduled_at: scheduledAt || null,
-  }, 'episode-modal');
+  });
 }
 
 async function downloadWholeSeries() {
@@ -2563,109 +2202,11 @@ async function downloadWholeSeries() {
     tv_id: tvId, slug, tv_name: tvName, year,
     audio_languages: audioLangs, subtitle_languages: subLangs,
     scheduled_at: scheduledAt || null,
-  }, 'episode-modal');
+  });
 }
 
 // ── Anime Browser (AnimeUnity) ─────────────────────────────────────────────────
 
-async function openAnimeBrowser(animeId, animeName, animeType, animeYear = null, scheduledAt = null, audioLangs = null, subLangs = null) {
-  // Whether this is a film decides the layout on disk — Name (YYYY)/Name.mp4
-  // rather than a season folder — so it is worth getting from the source rather
-  // than inferring. AnimeUnity classifies its own catalogue, and the archive
-  // search now carries that word through as media_type.
-  //
-  // The episode count stays as the fallback, for a record whose media_type is
-  // missing. It is only ever a proxy: it called a one-episode Special a film,
-  // which is the layout that suits it, and it called a film listed in two parts
-  // a series, which is not. Keeping it means nothing already in a library moves.
-  const entry = _searchResults.find(r => r.id === animeId);
-  const isAutoFilm = String(entry?.media_type || '').toLowerCase() === 'movie'
-    || entry?.episodes_count === 1;
-  const effectiveType = (isAutoFilm && animeType === 'anime') ? 'movie' : animeType;
-
-  _animeCtx = { animeId, animeName, animeType: effectiveType, animeYear, scheduledAt, episodes: [], isAutoFilm,
-    audioLangs: audioLangs || ['ita'], subLangs: subLangs || ['ita', 'eng'] };
-  document.getElementById('anime-modal-title').textContent = animeName;
-  document.getElementById('anime-modal-body').innerHTML =
-    '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
-  showModal('anime-modal');
-  checkWatchStatus('anime');
-
-  try {
-    const res = await fetch(`/api/anime/${encodeURIComponent(animeId)}/episodes`);
-    const episodes = await safeJson(res);
-    if (!res.ok) throw new Error(episodes.detail || 'Errore');
-    _animeCtx.episodes = episodes;
-
-    if (!episodes.length) {
-      document.getElementById('anime-modal-body').innerHTML =
-        '<p class="text-muted">Nessun episodio trovato.</p>';
-      return;
-    }
-
-    const rows = episodes.map((ep, idx) => {
-      let epNum = ep.number;
-      try { epNum = String(parseFloat(ep.number)); } catch(e) {}
-      // If only one episode and it's auto-detected as film, don't show as series
-      if (_animeCtx.isAutoFilm && episodes.length === 1) {
-        return `
-          <tr>
-            <td class="text-muted w-1 text-nowrap">Film</td>
-            <td class="text-muted" style="font-size:12px">1 episodio</td>
-            <td class="w-1">
-              <button class="btn btn-sm btn-primary" onclick="startAnimeDownload(${idx})" title="Scarica">
-                <i class="ti ti-download"></i>
-              </button>
-            </td>
-          </tr>`;
-      }
-      return `
-        <tr>
-          <td class="text-muted w-1 text-nowrap">E${epNum}</td>
-          <td class="text-muted" style="font-size:12px">ep. ${epNum}</td>
-          <td class="w-1">
-            <button class="btn btn-sm btn-primary" onclick="startAnimeDownload(${idx})" title="Scarica">
-              <i class="ti ti-download"></i>
-            </button>
-          </td>
-        </tr>`;
-    }).join('');
-
-    let typeToggle = '';
-    if (_animeCtx.isAutoFilm) {
-      const currentType = _animeCtx.animeType === 'movie' ? 'Film' : 'Serie';
-      typeToggle = `
-        <div class="mb-2 d-flex align-items-center gap-2">
-          <span class="text-muted small">Tipo:</span>
-          <button class="btn btn-sm ${_animeCtx.animeType === 'movie' ? 'btn-primary' : 'btn-outline-secondary'}"
-                  onclick="toggleAnimeType('movie')" title="Film">
-            <i class="ti ti-ticket me-1"></i>Film
-          </button>
-          <button class="btn btn-sm ${_animeCtx.animeType === 'tv' ? 'btn-primary' : 'btn-outline-secondary'}"
-                  onclick="toggleAnimeType('tv')" title="Serie">
-            <i class="ti ti-list me-1"></i>Serie
-          </button>
-        </div>`;
-    }
-
-    document.getElementById('anime-modal-body').innerHTML = `
-      ${typeToggle}
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <span class="text-muted small">${episodes.length} episodi</span>
-        <button class="btn btn-sm btn-outline-success" onclick="downloadAllAnime()">
-          <i class="ti ti-download me-1"></i>Scarica tutti
-        </button>
-      </div>
-      <div class="table-responsive" style="max-height:380px;overflow-y:auto">
-        <table class="table table-sm table-hover">
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-  } catch(e) {
-    document.getElementById('anime-modal-body').innerHTML =
-      `<div class="alert alert-danger">Errore: ${escapeHtml(e.message)}</div>`;
-  }
-}
 
 async function startAnimeDownload(epIndex) {
   const { animeId, animeName, animeType, animeYear, scheduledAt, episodes, audioLangs, subLangs } = _animeCtx;
@@ -2701,11 +2242,6 @@ async function startAnimeDownload(epIndex) {
   } catch(e) { showToast('Errore di rete', 'danger'); }
 }
 
-function toggleAnimeType(newType) {
-  _animeCtx.animeType = newType;
-  const { animeId, animeName, animeYear, scheduledAt, audioLangs, subLangs } = _animeCtx;
-  openAnimeBrowser(animeId, animeName, newType, animeYear, scheduledAt, audioLangs, subLangs);
-}
 
 async function downloadAllAnime() {
   const { animeId, animeName, animeType, animeYear, episodes, scheduledAt,
@@ -2717,7 +2253,7 @@ async function downloadAllAnime() {
     year: animeYear,
     audio_languages: audioLangs, subtitle_languages: subLangs,
     scheduled_at: scheduledAt || null,
-  }, 'anime-modal');
+  });
 }
 
 // ── Global SSE stream ──────────────────────────────────────────────────────────
