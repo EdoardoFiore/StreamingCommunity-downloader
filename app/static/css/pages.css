@@ -357,75 +357,21 @@
     .phase-bar-done    { background: var(--green) !important; }
     .phase-bar-error   { background: var(--danger) !important; }
 
-    /* ── The phase rail ─────────────────────────────────────
-       A download is not one bar, it is an ordered pipeline:
-       video, join, one pass per audio track, merge. The job
-       already carries that list, so the rail draws the real
-       thing - one cell per phase, the one in flight filled by
-       its own percentage. It replaces a generic bar that could
-       not say which of five stages you were waiting on. */
-    .job-phases {
-      display: flex; align-items: stretch; gap: 3px;
-      margin: 6px 0 3px;
-    }
-
-    /* Cells share the space. A five-phase job and a two-phase job both fill
-       the row, so the rail always reads as one object. */
-    .jp { flex: 1 1 0; min-width: 0; }
-
-    .jp-track {
-      display: block; height: 4px;
-      background: var(--bg-raised);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    .jp-fill {
-      display: block; height: 100%; width: 0;
-      background: var(--text-dim);
-      border-radius: 2px;
-      transition: width .25s linear;
-    }
-
-    .jp-label {
-      display: block;
-      margin-top: 4px;
-      font-family: var(--font-mono);
-      font-size: 9.5px; letter-spacing: .02em;
+    /* Download phase steps. A breadcrumb, not a second progress bar: the
+       card already has one, and the question this answers is "which stage",
+       not "how far". */
+    .job-phases { display:flex; align-items:center; flex-wrap:wrap; margin:3px 0 1px; gap:0; }
+    .jp {
+      font-size: 10.5px;
       color: var(--text-dim);
-      text-align: center;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      padding: 1px 5px;
+      white-space: nowrap;
+      border-radius: var(--radius-xs);
+      transition: background .15s, color .15s;
     }
-
-    .jp.complete .jp-fill  { background: var(--green); }
-    .jp.complete .jp-label { color: var(--text-muted); }
-
-    .jp.active .jp-fill  { background: var(--accent); }
-    .jp.active .jp-label { color: var(--accent); font-weight: 500; }
-
-    /* Only while something is actually moving, and never for a reader who
-       asked for less motion. */
-    .job-card.is-running .jp.active .jp-track::after {
-      content: '';
-      position: absolute; inset: 0;
-      background: linear-gradient(90deg, transparent, var(--accent-wash), transparent);
-      animation: jp-shimmer 1.6s ease-in-out infinite;
-    }
-    .job-card.is-running .jp.active .jp-track { position: relative; }
-
-    @keyframes jp-shimmer {
-      from { transform: translateX(-100%); }
-      to   { transform: translateX(100%); }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .jp-fill { transition: none; }
-      .job-card.is-running .jp.active .jp-track::after { animation: none; content: none; }
-    }
-
-    /* A phone shows the rail but not five labels across 340px. */
-    @media (max-width: 575px) {
-      .jp-label { display: none; }
-      .job-phases { margin: 6px 0; }
-    }
+    .jp + .jp::before { content:'›'; margin-right:4px; color:var(--text-dim); font-size:9px; }
+    .jp.active   { color: var(--accent); font-weight:600; background: var(--accent-dim); }
+    .jp.complete { color: var(--green); opacity:.75; }
 
     /* Active downloads pill */
     #dl-active-pill {

@@ -133,3 +133,37 @@ def test_the_stream_indicator_is_shown_exactly_when_the_stream_is_opened():
     guard = re.search(r"if \(([^{\n]*)\)\s*\{\s*connectGlobalStream\(\);", app_js)
     assert guard, "connectGlobalStream must stay behind a permission check"
     assert set(re.findall(r"can\('(\w+)'\)", guard.group(1))) == required
+
+
+# ── The phase vocabulary, server and client ────────────────────────────────────
+
+def test_every_phase_the_server_emits_has_a_client_entry():
+    """Four lookup tables in app.js turn a phase into a label, a badge, a bar
+    colour and a border. "video" - the first phase of every download - was in
+    none of them, so a card rebuilt mid-download (switching page and back)
+    fell through to the grey fallback and lost its colour, border and label.
+
+    Live updates hid it: the progress handler only sets the bar's width, so
+    the card kept the colour it was created with until something rebuilt it.
+    """
+    import re
+
+    from app.jobs import JobManager
+
+    # Audio phases are per-language (audio_ita, audio_eng, ...) and the client
+    # resolves them with a startsWith fallback, so only the fixed names have
+    # to be present by name.
+    phases = [p for p in JobManager._compute_phases(["ita"]) if not p.startswith("audio_")]
+    assert "video" in phases, "the phase this test exists for has been renamed"
+
+    app_js = _read("static", "app.js")
+    missing = []
+    for table in ("PHASE_LABELS", "PHASE_BADGE", "PHASE_BAR", "PHASE_BORDER_MAP"):
+        match = re.search(rf"const {table} = \{{(.*?)\n\}};", app_js, re.S)
+        assert match, f"{table} not found in app.js"
+        body = match.group(1)
+        for phase in phases:
+            if not re.search(rf"\b{re.escape(phase)}\s*:", body):
+                missing.append(f"{table}.{phase}")
+
+    assert not missing, "phases the client cannot render: " + ", ".join(missing)
