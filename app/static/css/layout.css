@@ -253,7 +253,17 @@
     /* The title column is the one that gives way; the actions keep their size. */
     .page-header .row > .col { min-width: 0; }
 
-    .page-body { padding-top: 24px !important; flex: 1; }
+    .page-body {
+      padding-top: 24px !important;
+      flex: 1;
+      min-width: 0;
+      /* Nothing on a page may widen it sideways. The shelves deliberately
+         bleed past the content column, and a rail of posters is wider than
+         any screen - both are meant to be clipped here, not to turn into a
+         horizontal scrollbar on the whole page. `clip` rather than `hidden`
+         so this does not become a scroll container. */
+      overflow-x: clip;
+    }
 
     /* ═══════════════════════════════════════════════════════
        HEADER — current user and notifications

@@ -124,9 +124,13 @@
       scroll-snap-type: x proximity;
       scroll-behavior: smooth;
       /* .result-card lifts 7px on hover, and an overflow-x container clips
-         vertically too, so the rail pays for the lift in padding. */
-      padding: 8px 4px 10px;
-      margin: 0 -4px;
+         vertically too, so the rail pays for the lift in padding.
+         The horizontal padding is the container's own gutter, given back:
+         the wrapper cancels it so the rail can reach the edge of the page,
+         and this puts the first and last poster back in line with every
+         other element on the page. */
+      padding: 8px calc(var(--bs-gutter-x, 1.5rem) / 2) 10px;
+      margin: 0;
       scrollbar-width: thin;
     }
     .shelf-rail::-webkit-scrollbar { height: 6px; }
@@ -138,7 +142,15 @@
     /* The arrows sit over the rail's own edges, on a fade of the page ground so
        cards slide under them rather than being cut off. Kept off until the
        pointer is on the shelf: it is a browse, not a control panel. */
-    .shelf-rail-wrap { position: relative; }
+    /* The rail runs the full width of the page body rather than the content
+       column, so the arrows land where the screen actually ends. Without this
+       the right-hand one sat inside the column, and on a narrow window it
+       could fall outside the visible area entirely. */
+    .shelf-rail-wrap {
+      position: relative;
+      margin-inline: calc(var(--bs-gutter-x, 1.5rem) / -2);
+      min-width: 0;
+    }
     .shelf-arrow {
       position: absolute;
       top: 8px;
@@ -181,11 +193,11 @@
        ends. Inset by a few pixels they read as part of the rail and get lost
        against the posters. */
     .shelf-arrow-prev {
-      left: calc(-.5 * var(--bs-gutter-x, 1.5rem));
+      left: 0;
       background: linear-gradient(to right, var(--bg-base) 45%, rgba(7,10,18,0));
     }
     .shelf-arrow-next {
-      right: calc(-.5 * var(--bs-gutter-x, 1.5rem));
+      right: 0;
       background: linear-gradient(to left, var(--bg-base) 45%, rgba(7,10,18,0));
     }
     .shelf-arrow:hover { color: var(--accent); }
