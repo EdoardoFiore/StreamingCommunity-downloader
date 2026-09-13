@@ -226,6 +226,20 @@
       background: var(--bg-base);
       display: flex;
       flex-direction: column;
+      /* The column is exactly the screen minus the sidebar, and it clips.
+         Clipping only .page-body was not enough: the header sits outside it,
+         and anything overflowing anywhere under here turned the whole right
+         side into a horizontal scroller - the title scrolling away with it,
+         and the shelf arrows ending up somewhere off the visible edge.
+         Pinning the width means no descendant can widen it, whichever one
+         it was. */
+      min-width: 0;
+      max-width: calc(100% - var(--sidebar-w));
+      overflow-x: clip;
+    }
+    @media (max-width: 991px) {
+      /* No sidebar gutter to subtract once it collapses. */
+      .page-wrapper { max-width: 100%; }
     }
 
     .page-header, .page-header.d-print-none {
