@@ -651,6 +651,15 @@
       backdrop-filter: blur(4px);
     }
     .status-ribbon i { font-size: 11px; }
+    /* The count rides inside the pill rather than beside it: a second chip on
+       the poster would compete with the ribbon instead of qualifying it. Every
+       ribbon colour is saturated, so one translucent black works on all of
+       them, under white text and dark text alike. */
+    .ribbon-count {
+      padding: 0 4px; border-radius: 20px;
+      background: rgba(0,0,0,.2); font-size: 9px; font-weight: 800;
+      letter-spacing: 0; white-space: nowrap;
+    }
     .status-ribbon.ribbon-pending,
     .status-ribbon.ribbon-approved,
     .status-ribbon.ribbon-download,

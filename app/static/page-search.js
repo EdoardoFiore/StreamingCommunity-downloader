@@ -506,8 +506,12 @@ const STATUS_RIBBONS = {
   pending:         { label: 'Richiesto',    cls: 'ribbon-pending',   icon: 'ti-clock' },
   approved:        { label: 'Approvato',    cls: 'ribbon-approved',  icon: 'ti-check' },
   downloading:     { label: 'In download',  cls: 'ribbon-download',  icon: 'ti-download' },
-  completed:       { label: 'Disponibile',  cls: 'ribbon-available', icon: 'ti-circle-check' },
-  available:       { label: 'Disponibile',  cls: 'ribbon-available', icon: 'ti-circle-check' },
+  // Not "Disponibile": the panel never learns how many episodes a series has
+  // without asking the source, and this ribbon is painted from one call that
+  // decorates a whole page of cards. "In libreria" is what it can actually
+  // vouch for — the count says how much, instead of implying all of it.
+  completed:       { label: 'In libreria',  cls: 'ribbon-available', icon: 'ti-circle-check' },
+  available:       { label: 'In libreria',  cls: 'ribbon-available', icon: 'ti-circle-check' },
   denied:          { label: 'Rifiutato',    cls: 'ribbon-denied',    icon: 'ti-x' },
   failed:          { label: 'Fallito',      cls: 'ribbon-denied',    icon: 'ti-alert-triangle' },
   needs_attention: { label: 'Attenzione',   cls: 'ribbon-attention', icon: 'ti-alert-circle' },
@@ -529,13 +533,31 @@ async function loadRequestStatuses(externalIds) {
   } catch (e) { /* the cards simply stay plain */ }
 }
 
+const IN_LIBRARY_STATUSES = new Set(['completed', 'available']);
+
+// What the ribbon can add without overstating: one episode names itself, more
+// than one is counted. The server sends season and episode_number precisely so
+// this does not have to guess, and a film is never counted — it is one file,
+// and films carry no ribbon anyway.
+function ribbonDetail(info) {
+  if (!IN_LIBRARY_STATUSES.has(info.status) || info.media_type === 'film') return '';
+  const n = info.library_count || 0;
+  if (n === 1 && info.season != null && info.episode_number != null) {
+    const pad = v => String(v).padStart(2, '0');
+    return `S${pad(info.season)}E${pad(info.episode_number)}`;
+  }
+  return n ? `${n} ep` : '';
+}
+
 function renderRequestRibbons() {
   document.querySelectorAll('[data-ribbon-for]').forEach(el => {
     const info = _requestStatus[el.dataset.ribbonFor];
     const style = info && STATUS_RIBBONS[info.status];
     if (!style) { el.innerHTML = ''; el.className = 'status-ribbon'; return; }
+    const detail = ribbonDetail(info);
     el.className = `status-ribbon ${style.cls}`;
-    el.innerHTML = `<i class="ti ${style.icon}"></i>${style.label}`;
+    el.innerHTML = `<i class="ti ${style.icon}"></i>${style.label}` +
+      (detail ? `<span class="ribbon-count">${escapeHtml(detail)}</span>` : '');
   });
 }
 

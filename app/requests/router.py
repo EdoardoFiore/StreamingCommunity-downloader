@@ -7,6 +7,7 @@ actually offers — both arrive from a POST body otherwise.
 
 import asyncio
 import logging
+import os
 import re
 import sqlite3
 
@@ -365,6 +366,79 @@ def list_my_requests(http_request: HttpRequest):
 # card should not look blocked either.
 VISIBLE_ON_CARD = models.OPEN_STATUSES + (models.AVAILABLE, models.COMPLETED)
 
+IN_LIBRARY = (models.COMPLETED, models.AVAILABLE)
+
+# Which open state a card shows when several episodes of one series disagree.
+# NEEDS_ATTENTION leads because it is the only one waiting on a person: a
+# download in flight finishes by itself, a parked request never does, and the
+# search card is the one place it would otherwise go unnoticed.
+OPEN_PRIORITY = (
+    models.NEEDS_ATTENTION,
+    models.DOWNLOADING,
+    models.APPROVED,
+    models.PENDING,
+)
+
+
+def _still_on_disk(request: models.Request) -> bool:
+    """Whether the file a finished request claims is still there.
+
+    The status of a finished request is a claim about the filesystem, and the
+    filesystem is free to disagree: files get deleted, a library gets repointed
+    somewhere else, a database outlives the downloads it describes. Trusting
+    the row alone told people a title was in their library long after it left.
+    """
+    if request.output_path and os.path.exists(request.output_path):
+        return True
+    # Rows written before output_path was recorded carry none, and a file can
+    # have been remuxed to .mkv or renamed by a template change since. The
+    # resolver already knows every name the file could be under.
+    try:
+        return resolver.existing_file(request) is not None
+    except Exception:
+        # A library that cannot be probed at all must not blank every badge on
+        # the page: "nothing you own is downloaded" is a worse lie than the
+        # stale row this check exists to catch.
+        logger.exception("Library probe failed for request %s", request.id)
+        return True
+
+
+def _summarise_card(requests: list[models.Request]) -> dict | None:
+    """One card's worth of state, out of every request row behind it.
+
+    A series is requested an episode at a time, so the ribbon summarises rows
+    rather than reading one. It deliberately does not try to say whether the
+    series is *complete*: that needs the source's episode count, and this
+    endpoint decorates a whole page of cards in a single call — it cannot go
+    and ask. What it can say honestly is how many episodes are on disk.
+    """
+    # Counted before the status is picked: nine episodes on the shelf and a
+    # tenth downloading should still be able to report the nine.
+    in_library = [r for r in requests if r.status in IN_LIBRARY and _still_on_disk(r)]
+    # Distinct episodes, not rows — the same episode asked for in two audio
+    # tracks is two requests and one file.
+    episodes = {(r.season, r.episode_number) for r in in_library}
+
+    open_rows = [r for r in requests if r.status in models.OPEN_STATUSES]
+    if open_rows:
+        lead = min(open_rows, key=lambda r: OPEN_PRIORITY.index(r.status))
+    elif in_library:
+        lead = in_library[0]
+    else:
+        # Every finished row named a file that is gone. A plain card is the
+        # honest answer, and it leaves the title free to be asked for again.
+        return None
+
+    return {
+        "id": lead.id,
+        "status": lead.status,
+        "media_type": lead.media_type,
+        "season": lead.season,
+        "episode_number": lead.episode_number,
+        "library_count": len(episodes),
+        "open_count": len(open_rows),
+    }
+
 
 @router.post("/status", dependencies=CAN_SEE_OWN)
 def request_status(body: StatusQuery, http_request: HttpRequest):
@@ -373,7 +447,7 @@ def request_status(body: StatusQuery, http_request: HttpRequest):
     can_see_all = user.has(Permission.MANAGE_REQUESTS)
     wanted = set(body.external_ids)
 
-    result: dict[str, dict] = {}
+    by_title: dict[str, list[models.Request]] = {}
     for request in models.list_all():
         if request.source != body.source or request.external_id not in wanted:
             continue
@@ -381,16 +455,13 @@ def request_status(body: StatusQuery, http_request: HttpRequest):
             continue
         if not can_see_all and user.id not in models.subscribers(request.id):
             continue
-        # An open or completed state beats an older closed one on the same card.
-        current = result.get(request.external_id)
-        if current is None or request.status in models.OPEN_STATUSES:
-            result[request.external_id] = {
-                "id": request.id,
-                "status": request.status,
-                "media_type": request.media_type,
-                "season": request.season,
-                "episode_number": request.episode_number,
-            }
+        by_title.setdefault(request.external_id, []).append(request)
+
+    result: dict[str, dict] = {}
+    for external_id, requests in by_title.items():
+        card = _summarise_card(requests)
+        if card is not None:
+            result[external_id] = card
     return result
 
 
