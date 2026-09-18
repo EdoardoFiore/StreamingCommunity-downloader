@@ -83,13 +83,11 @@
 
     /* ── Brand ──────────────────────────────────────────────── */
     .brand { display: flex; align-items: center; gap: 13px; margin-bottom: 26px; }
+    /* Same treatment as the sidebar brand — see layout.css. */
     .brand-icon {
       width: 42px; height: 42px; flex-shrink: 0;
-      background: var(--accent);
-      border-radius: var(--radius);
-      display: flex; align-items: center; justify-content: center;
-      color: #fff; font-size: 20px;
-      box-shadow: 0 6px 20px var(--accent-glow);
+      object-fit: contain;
+      filter: drop-shadow(0 6px 18px var(--accent-glow));
     }
     .brand-text {
       font-family: var(--font-brand);

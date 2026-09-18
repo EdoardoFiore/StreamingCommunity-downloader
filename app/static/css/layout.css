@@ -33,15 +33,16 @@
       flex-shrink: 0;
     }
 
+    /* The logo carries its own silhouette and gradient, so it sits on the
+       sidebar directly rather than inside the accent tile the glyph needed:
+       a coloured badge behind it read as a badge within a badge. object-fit
+       keeps it honest if the slot is ever sized to something non-square, and
+       the glow follows the shape now instead of a rectangle. */
     .brand-icon {
       width: 36px; height: 36px;
-      background: var(--accent);
-      border-radius: 9px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px;
-      color: #fff;
+      object-fit: contain;
       flex-shrink: 0;
-      box-shadow: 0 4px 16px var(--accent-glow);
+      filter: drop-shadow(0 4px 14px var(--accent-glow));
     }
 
     .brand-text {

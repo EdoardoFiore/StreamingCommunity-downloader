@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.png" alt="StreamingCommunity Downloader" width="520"/>
+  <img src="docs/banner.png" alt="StreamingCommunity Downloader" width="720"/>
 </p>
 
 <p align="center">
@@ -12,17 +12,94 @@
 
 ## Screenshots
 
+<p align="center">
+  <img src="docs/home.png" alt="Start page" width="90%"/>
+</p>
+<p align="center">
+  <sub><b>The start page</b> — the source's own shelves, browsable before you have searched for
+  anything.</sub>
+</p>
+
+### Finding something
+
 <table>
   <tr>
-    <td><img src="docs/search.png" alt="Search"/></td>
-    <td><img src="docs/serie-detail.png" alt="Series detail"/></td>
+    <td width="50%" valign="top">
+      <img src="docs/search.png" alt="Search results"/><br/>
+      <sub><b>Search</b> — films, series and anime across both sources, with the state of each
+      title readable on the card.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/film-detail.png" alt="Film page"/><br/>
+      <sub><b>Film page</b> — plot, genres, rating, artwork and trailer, taken from the title page
+      itself. No API key involved.</sub>
+    </td>
   </tr>
   <tr>
-    <td><img src="docs/episode-list.png" alt="Episode list"/></td>
-    <td><img src="docs/file-manager.png" alt="File manager"/></td>
+    <td width="50%" valign="top">
+      <img src="docs/serie-detail.png" alt="Series page"/><br/>
+      <sub><b>Series page</b> — seasons and episodes, with the audio and subtitle tracks each one
+      actually offers.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/downloads.png" alt="Downloads"/><br/>
+      <sub><b>Downloads</b> — live progress per phase (video → audio → merge), as one list rather
+      than a wall of cards.</sub>
+    </td>
+  </tr>
+</table>
+
+### Asking, approving, following
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/request.png" alt="My requests"/><br/>
+      <sub><b>My requests</b> — what you asked for and how far it got. A request can be withdrawn
+      until it is resolved.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/request-approval.png" alt="Request queue"/><br/>
+      <sub><b>Request queue</b> — approving re-resolves the title and verifies the tracks first: a
+      request that cannot find the audio asked for is parked, never substituted.</sub>
+    </td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/settings.png" alt="Settings" width="50%"/></td>
+    <td colspan="2" align="center" valign="top">
+      <img src="docs/series-follow.png" alt="Followed series" width="60%"/><br/>
+      <sub><b>Followed series</b> — new episodes are looked for on their own. A followed series
+      never downloads by itself: it opens a request, which goes through the queue or is approved
+      on the spot, according to the permissions of whoever follows it.</sub>
+    </td>
+  </tr>
+</table>
+
+### Running it
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/settings.png" alt="Settings"/><br/>
+      <sub><b>Settings</b> — libraries, performance, naming templates, notification channels and
+      download hooks.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/jellyfin-users.png" alt="Users"/><br/>
+      <sub><b>Users</b> — imported from Jellyfin, with independent permissions. There is no ADMIN
+      super-permission: an administrator who never sees the request queue is a valid setup.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/file-manager.png" alt="File manager"/><br/>
+      <sub><b>File manager</b> — drag-and-drop, video streaming in place, and the free space left
+      on the media volume.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/login.png" alt="Login"/><br/>
+      <sub><b>Login</b> — Jellyfin credentials, so no second account and no local password store.
+      Authentication is opt-in; the panel also runs open.</sub>
+    </td>
   </tr>
 </table>
 
