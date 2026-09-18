@@ -481,3 +481,29 @@ the video as `{name}.{lang}.vtt`, the layout Jellyfin expects.
 ## License
 
 MIT
+
+---
+
+## Disclaimer
+
+This project is published for **informational and educational purposes only**. It exists to
+demonstrate how HLS streams are parsed, how AES-CBC segment decryption works, how a download queue
+and a permission model are built, and how the result is organised into a Jellyfin library.
+
+It **hosts, stores and distributes nothing**. It contains no content, no catalogue and no index. It
+is a client: it talks to third-party websites that it neither operates nor controls, and it has no
+affiliation, sponsorship or endorsement from any of them — StreamingCommunity, AnimeUnity and
+Jellyfin included. Every trademark belongs to its owner. Whether those sites are lawful to use, and
+whether they remain reachable at all, is entirely outside this project's control.
+
+Using it is your decision and your responsibility. You are the one who has to comply with the
+copyright law of your country and with the terms of service of any site you point it at, and you
+should only download content you hold the rights to or are otherwise entitled to access. Neither
+the authors nor the contributors take any responsibility for how the software is used, nor for any
+damage or legal consequence that follows from using it.
+
+The software is provided "as is", without warranty of any kind, as set out in the
+[LICENSE](LICENSE).
+
+If you represent a rights holder and believe something here is a problem, please open an issue and
+it will be addressed.
