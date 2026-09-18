@@ -154,3 +154,28 @@ def test_a_batch_is_registered_before_any_job_is_submitted(client, panel, monkey
     _post(client, panel, "/api/download/season", SEASON_BODY)
 
     assert seen_at_submit == [1, 1, 1]
+
+
+def test_the_batch_label_reaches_the_client():
+    """Grouping rows by season is the client's job, and it needs a name to do it.
+
+    The label is composed once at submit. It used to be dropped by
+    _job_to_dict, which left the browser reparsing it back out of ``title`` — a
+    string that is itself already composed ("Nome Serie S02E05") and misreads
+    the first series whose own name contains something like S01.
+    """
+    from app.jobs import job_manager
+
+    job = job_manager._make_job(
+        "Test Series S01E01", "episode",
+        batch_id="b1", batch_kind="season", batch_label="Test Series — Stagione 1",
+        media_label="Test Series", season=1, episode_number="1",
+    )
+
+    wire = job_manager._job_to_dict(job)
+
+    assert wire["batch_label"] == "Test Series — Stagione 1"
+    assert wire["media_label"] == "Test Series"
+    # Still not on the wire: the jobs list is readable by anyone who can
+    # download, and the interface has no use for who asked.
+    assert "user_id" not in wire

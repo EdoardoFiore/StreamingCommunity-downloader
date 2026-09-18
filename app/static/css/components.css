@@ -1,0 +1,608 @@
+    /* ═══════════════════════════════════════════════════════
+       BADGES — full override
+       ═══════════════════════════════════════════════════════ */
+    .badge {
+      font-family: var(--font-ui) !important;
+      font-weight: 700 !important;
+      border-radius: 20px !important;
+      padding: 2px 7px !important;
+      font-size: 10px !important;
+      letter-spacing: .25px;
+      line-height: 1.5;
+    }
+
+    .bg-blue-lt    { background: var(--blue-dim) !important;   color: var(--blue) !important;   }
+    .bg-green-lt   { background: var(--green-dim) !important;  color: var(--green) !important;  }
+    .bg-yellow-lt  { background: var(--yellow-dim) !important; color: var(--yellow) !important; }
+    .bg-teal-lt    { background: var(--teal-dim) !important;   color: var(--teal) !important;   }
+    .bg-purple-lt  { background: var(--purple-dim) !important; color: var(--purple) !important; }
+    .bg-success-lt { background: var(--green-dim) !important;  color: var(--green) !important;  }
+    .bg-danger-lt  { background: var(--danger-dim) !important; color: var(--danger) !important; }
+    .bg-secondary-lt { background: rgba(255,255,255,.06) !important; color: var(--text-muted) !important; }
+
+    .bg-red        { background: var(--danger-solid) !important; color: #fff !important;        }
+    /* Undefined here until now, so Tabler's own .bg-yellow applied: white
+       text on yellow, at 2.1:1. That is what the pending-requests count in
+       the sidebar was wearing. Dark text on the same yellow is 9.3:1. */
+    .bg-yellow     { background: var(--yellow) !important;    color: var(--bg-base) !important; }
+    .bg-orange     { background: var(--orange) !important;    color: var(--bg-base) !important; }
+    .bg-blue       { background: var(--blue) !important;       color: #fff !important;          }
+    .bg-success    { background: var(--green) !important;      color: var(--bg-base) !important; }
+    .bg-danger     { background: var(--danger-solid) !important; color: #fff !important;        }
+    .bg-secondary  { background: rgba(255,255,255,.08) !important; color: var(--text-muted) !important; }
+    .bg-info       { background: var(--blue-dim) !important;   color: var(--blue) !important;   }
+    .bg-warning    { background: var(--yellow-dim) !important; color: var(--yellow) !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       BUTTONS
+       ═══════════════════════════════════════════════════════ */
+    .btn {
+      font-family: var(--font-ui) !important;
+      font-weight: 600 !important;
+      border-radius: var(--radius-sm) !important;
+      font-size: 13px !important;
+      transition: all .15s !important;
+    }
+
+    .btn-primary {
+      background: var(--accent) !important;
+      border-color: var(--accent) !important;
+      color: #fff !important;
+      box-shadow: 0 2px 10px var(--accent-glow) !important;
+    }
+    .btn-primary:hover { opacity: .86 !important; box-shadow: 0 4px 16px var(--accent-glow) !important; }
+    .btn-primary:disabled { opacity: .45 !important; box-shadow: none !important; }
+
+    .btn-success {
+      background: var(--green) !important;
+      border-color: var(--green) !important;
+      color: var(--bg-base) !important;
+    }
+    .btn-success:hover { opacity: .86 !important; }
+
+    .btn-secondary {
+      background: var(--bg-raised) !important;
+      border-color: var(--border-mid) !important;
+      color: var(--text-muted) !important;
+    }
+    .btn-secondary:hover { color: var(--text-sub) !important; border-color: var(--border-strong) !important; background: var(--bg-hover) !important; }
+
+    .btn-outline-danger {
+      background: transparent !important;
+      border-color: var(--danger-ring) !important;
+      color: var(--danger) !important;
+    }
+    .btn-outline-danger:hover { background: var(--danger-dim) !important; }
+
+    .btn-outline-primary {
+      background: transparent !important;
+      border-color: var(--blue-ring) !important;
+      color: var(--blue) !important;
+    }
+    .btn-outline-primary:hover { background: var(--blue-dim) !important; }
+
+    .btn-outline-secondary {
+      background: transparent !important;
+      border-color: var(--border-mid) !important;
+      color: var(--text-muted) !important;
+    }
+    .btn-outline-secondary:hover {
+      color: var(--text-sub) !important;
+      border-color: var(--border-strong) !important;
+      background: var(--bg-raised) !important;
+    }
+
+    .btn-outline-success {
+      background: transparent !important;
+      border-color: var(--green-ring) !important;
+      color: var(--green) !important;
+    }
+    .btn-outline-success:hover { background: var(--green-dim) !important; }
+
+    .btn-sm { padding: 4px 10px !important; font-size: 11.5px !important; }
+    .btn-close { opacity: .5 !important; }
+    .btn-close:hover { opacity: 1 !important; }
+    .btn-close-white { filter: invert(1) !important; }
+
+    /* Tabler paints this glyph with background-color clipped by a CSS mask —
+       not with a background image — and its colour is currentColor, which on a
+       dark header is already light. The .btn-close-white filter above then
+       inverts it back to near-black, which is why it read as invisible.
+       Colour and size come from Tabler's own variables; the only structural
+       override is position, because it is otherwise floated into the corner
+       (absolute, 3.5rem, z-index 10) on top of the follow button. Never set
+       width/height here: the button has no content, so an auto size collapses
+       it to nothing. */
+    .modal-header > .btn-close {
+      position: static !important;
+      margin: 0 0 0 auto !important;
+      filter: none !important;
+      /* Tabler sizes it 3.5rem for the floating corner hit area; in the flow
+         that would set the header's height. A fixed 2rem keeps a comfortable
+         target without stretching the row. */
+      width: 2rem !important;
+      height: 2rem !important;
+      --tblr-btn-close-color: #fff;
+      --tblr-btn-close-size: 1.25rem;
+      --tblr-btn-close-opacity: .85;
+      --tblr-btn-close-hover-opacity: 1;
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       CARDS
+       ═══════════════════════════════════════════════════════ */
+    .card {
+      background: var(--bg-surface) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: var(--radius-lg) !important;
+      box-shadow: none !important;
+    }
+
+    .card-header {
+      background: transparent !important;
+      border-bottom: 1px solid var(--border) !important;
+      padding: 13px 18px !important;
+    }
+
+    .card-title {
+      color: var(--text) !important;
+      font-family: var(--font-ui) !important;
+      font-weight: 600 !important;
+      font-size: 13.5px !important;
+      margin: 0 !important;
+    }
+
+    .card-options { display: flex; align-items: center; gap: 8px; }
+    .card-body { color: var(--text) !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       FORMS
+       ═══════════════════════════════════════════════════════ */
+    .form-control, .form-select {
+      background: var(--bg-input) !important;
+      border: 1px solid var(--border-mid) !important;
+      color: var(--text) !important;
+      border-radius: var(--radius-sm) !important;
+      font-family: var(--font-ui) !important;
+      font-size: 13.5px !important;
+    }
+
+    .form-control:focus, .form-select:focus {
+      border-color: var(--border-strong) !important;
+      box-shadow: 0 0 0 3px rgba(255,255,255,.04) !important;
+      background: var(--bg-input) !important;
+      color: var(--text) !important;
+    }
+
+    .form-control::placeholder { color: var(--text-dim) !important; }
+
+    .form-label {
+      color: var(--text-muted) !important;
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      margin-bottom: 6px !important;
+    }
+
+    .form-text {
+      color: var(--text-muted) !important;
+      font-size: 11.5px !important;
+      margin-top: 5px !important;
+    }
+
+    .form-text.text-success { color: var(--green) !important; }
+    .form-text.text-danger  { color: var(--danger) !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       MODALS
+       ═══════════════════════════════════════════════════════ */
+    .modal-backdrop {
+      background: rgba(0,0,0,.50) !important;
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+    }
+
+    .modal-content {
+      background: var(--bg-surface) !important;
+      border: 1px solid var(--border-mid) !important;
+      border-radius: var(--radius-lg) !important;
+      color: var(--text) !important;
+      box-shadow: 0 28px 70px rgba(0,0,0,.45) !important;
+    }
+
+    .modal-header {
+      border-bottom: 1px solid var(--border) !important;
+      padding: 16px 20px !important;
+      /* Three children in some headers (title, follow button, close), and
+         space-between would spread them evenly instead of keeping the actions
+         together on the right. */
+      gap: 10px;
+    }
+    .modal-header .modal-title { flex: 1 1 auto; min-width: 0; }
+
+    .modal-title {
+      font-family: var(--font-ui) !important;
+      font-weight: 700 !important;
+      font-size: 15px !important;
+      color: var(--text) !important;
+    }
+
+    .modal-body { padding: 20px !important; }
+
+    .modal-footer {
+      border-top: 1px solid var(--border) !important;
+      padding: 14px 20px !important;
+      background: transparent !important;
+    }
+
+    /* Nav tabs */
+    .nav-tabs {
+      border-bottom: 1px solid var(--border) !important;
+      gap: 2px;
+      flex-wrap: wrap;
+    }
+
+    .nav-tabs .nav-link {
+      color: var(--text-muted) !important;
+      background: transparent !important;
+      border: none !important;
+      border-bottom: 2px solid transparent !important;
+      padding: 6px 12px !important;
+      font-size: 12.5px !important;
+      font-weight: 700 !important;
+      border-radius: var(--radius-xs) var(--radius-xs) 0 0 !important;
+      transition: color .15s, border-color .15s !important;
+      text-decoration: none;
+    }
+
+    .nav-tabs .nav-link:hover { color: var(--text-sub) !important; background: var(--bg-raised) !important; }
+
+    .nav-tabs .nav-link.active {
+      color: var(--text) !important;
+      border-bottom-color: var(--accent) !important;
+      background: transparent !important;
+    }
+
+    /* Tables */
+    .table {
+      color: var(--text) !important;
+      border-color: var(--border) !important;
+    }
+
+    .table th {
+      color: var(--text-muted) !important;
+      font-size: 10.5px !important;
+      font-weight: 700 !important;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border-color: var(--border) !important;
+      padding: 8px 12px !important;
+      background: transparent !important;
+    }
+
+    .table td {
+      border-color: var(--border) !important;
+      padding: 9px 12px !important;
+      font-size: 13.5px !important;
+      vertical-align: middle;
+    }
+
+    .table-hover > tbody > tr:hover > td { background: var(--bg-raised) !important; }
+
+    /* Alerts */
+    .alert {
+      border-radius: var(--radius) !important;
+      font-size: 13.5px !important;
+      border: none !important;
+    }
+
+    .alert-danger {
+      background: var(--danger-dim) !important;
+      color: var(--danger) !important;
+    }
+
+    /* Spinners */
+    .spinner-border        { color: var(--accent) !important; }
+    .text-primary          { color: var(--blue) !important; }
+    .text-muted            { color: var(--text-muted) !important; }
+    .text-yellow           { color: var(--yellow) !important; }
+    .text-red              { color: var(--danger) !important; }
+
+    hr { border-color: var(--border) !important; opacity: 1 !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       TOASTS
+       ═══════════════════════════════════════════════════════ */
+    .alert.bg-success {
+      background: var(--green-dim) !important;
+      color: var(--green) !important;
+      border: 1px solid var(--green-ring) !important;
+    }
+    .alert.bg-danger {
+      background: var(--danger-dim) !important;
+      color: var(--danger) !important;
+      border: 1px solid var(--danger-ring) !important;
+    }
+    .alert.bg-info {
+      background: var(--blue-dim) !important;
+      color: var(--blue) !important;
+      border: 1px solid var(--blue-ring) !important;
+    }
+    .alert.bg-warning {
+      background: var(--yellow-dim) !important;
+      color: var(--yellow) !important;
+      border: 1px solid var(--yellow-ring) !important;
+    }
+    .alert-dismissible .btn-close-white { filter: none !important; opacity: .5 !important; }
+
+    /* ═══════════════════════════════════════════════════════
+       DATA — where the interface stops talking and starts
+       reporting. Machine output gets the mono face: it aligns
+       in a column, and it tells the reader at a glance that a
+       string is a path or a count rather than prose.
+       ═══════════════════════════════════════════════════════ */
+
+    /* Sizes and timestamps in the file manager. */
+    .fm-meta { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    /* Download telemetry: speed and ETA, rewritten twice a second. Tabular
+       figures stop the line from twitching as the digits change width. */
+    [id^="job-info-"] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    /* Naming templates and their rendered preview. These are literally
+       {token} strings and filesystem paths on both sides. */
+    [data-naming-slot],
+    [id^="naming-preview-"] { font-family: var(--font-mono); font-size: 12px; }
+
+    /* Any table of numbers should hold its columns. */
+    .table td, .table th { font-variant-numeric: tabular-nums; }
+
+    /* ── Checkboxes and switches ────────────────────────────
+       Tabler ships these unthemed, so every toggle in Settings
+       was drawing the browser's own blue box on a navy panel. */
+    .form-check-input {
+      background-color: var(--bg-input) !important;
+      border: 1px solid var(--border-strong) !important;
+      cursor: pointer;
+      transition: background-color .15s, border-color .15s, box-shadow .15s;
+    }
+    .form-check-input:checked {
+      background-color: var(--accent) !important;
+      border-color: var(--accent) !important;
+    }
+    .form-check-input:focus-visible {
+      outline: none !important;
+      box-shadow: 0 0 0 3px var(--accent-dim) !important;
+      border-color: var(--accent) !important;
+    }
+    .form-check-input:disabled { opacity: .45; cursor: default; }
+    .form-check-label { cursor: pointer; color: var(--text-sub); }
+
+    /* A switch reads as "on or off", which is what most of these settings
+       are; a tick reads as "selected from a list". */
+    .form-switch .form-check-input { width: 2.25rem; height: 1.25rem; }
+
+    /* ═══════════════════════════════════════════════════════
+       PAGE HEAD — the block every list page opens with
+
+       The top bar carries only the page's name, which left each
+       list starting cold: straight into rows, with the counts
+       that say whether anything needs attention buried inside
+       them. This is the same three-part block everywhere —
+       name and one line of what the page is for, the figures
+       that matter, and the actions — so moving between pages
+       does not mean relearning where anything is.
+       ═══════════════════════════════════════════════════════ */
+    .pg-head {
+      display: flex; align-items: flex-start; gap: 18px;
+      flex-wrap: wrap; margin-bottom: 16px;
+    }
+    .pg-head-main { min-width: 0; flex: 1 1 260px; }
+    .pg-h1 {
+      font-family: var(--font-brand); font-weight: 600;
+      font-size: 22px; letter-spacing: -.01em;
+      color: var(--text); margin: 0 0 3px;
+    }
+    .pg-sub {
+      font-size: 12.5px; color: var(--text-muted);
+      margin: 0; line-height: 1.45; max-width: 62ch;
+    }
+    .pg-actions {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap; margin-left: auto;
+    }
+
+    /* The figures. Numbers in mono and tabular so a column of them
+       stays aligned while they tick, and so a count cannot be
+       mistaken for a label. */
+    .pg-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pg-stat {
+      display: flex; flex-direction: column; gap: 1px;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 7px 13px; min-width: 74px;
+    }
+    .pg-stat b {
+      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+      font-size: 17px; font-weight: 500; line-height: 1.1; color: var(--text);
+    }
+    .pg-stat span {
+      font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    /* A count worth looking at colours its own figure, never the whole
+       chip: a page of coloured blocks says everything is urgent. */
+    .pg-stat-live b   { color: var(--blue); }
+    .pg-stat-warn b   { color: var(--yellow); }
+    .pg-stat-error b  { color: var(--danger); }
+    .pg-stat-ok b     { color: var(--green); }
+    .pg-stat-zero b   { color: var(--text-dim); }
+
+    /* The row under the head: filters on the left, controls on the right. */
+    .pg-bar {
+      display: flex; align-items: center; gap: 7px;
+      flex-wrap: wrap; margin-bottom: 14px;
+    }
+    .pg-bar-end { margin-left: auto; display: flex; gap: 7px; align-items: center; }
+
+    @media (max-width: 575.98px) {
+      .pg-h1 { font-size: 19px; }
+      .pg-stat { padding: 6px 10px; min-width: 62px; }
+      .pg-stat b { font-size: 15px; }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       SWITCH — a setting that takes effect when you flip it
+
+       Tabler's .form-switch is a 20px pill that reads, at this
+       size and on this ground, like a checkbox someone stretched.
+       This one is the same control with a target worth aiming at
+       and a state you can see from across the row: the track
+       carries the colour, the thumb carries the motion.
+       ═══════════════════════════════════════════════════════ */
+    .sc-switch {
+      display: flex; align-items: flex-start; gap: 12px; cursor: pointer;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 13px 15px; margin: 0;
+      transition: border-color .15s ease;
+    }
+    .sc-switch:hover { border-color: var(--border-mid); }
+    /* Off-screen rather than display:none: a hidden input is not focusable,
+       and this control has to be reachable by keyboard. */
+    .sc-switch-input {
+      position: absolute; opacity: 0; width: 0; height: 0;
+    }
+    .sc-switch-track {
+      position: relative; flex-shrink: 0; margin-top: 1px;
+      width: 40px; height: 22px; border-radius: var(--radius-pill);
+      background: var(--bg-input); border: 1px solid var(--border-mid);
+      transition: background .18s ease, border-color .18s ease;
+    }
+    .sc-switch-thumb {
+      position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--text-muted);
+      transition: transform .18s cubic-bezier(.3,.8,.4,1), background .18s ease;
+    }
+    .sc-switch-input:checked + .sc-switch-track {
+      background: var(--accent); border-color: var(--accent);
+    }
+    .sc-switch-input:checked + .sc-switch-track .sc-switch-thumb {
+      background: #fff; transform: translateX(18px);
+    }
+    .sc-switch-input:focus-visible + .sc-switch-track {
+      outline: 2px solid var(--accent-ring); outline-offset: 2px;
+    }
+    .sc-switch-input:disabled + .sc-switch-track { opacity: .45; }
+    .sc-switch-text { font-size: 13px; color: var(--text); line-height: 1.4; }
+    .sc-switch-text span {
+      display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .sc-switch-track, .sc-switch-thumb { transition: none; }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       DISK — the one fact on the file page that can stop the
+       panel working, so it is a bar and not a sentence.
+       ═══════════════════════════════════════════════════════ */
+    .pg-disk {
+      min-width: 178px;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 8px 13px 9px;
+    }
+    .pg-disk-top {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    }
+    .pg-disk-label {
+      font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .pg-disk-free {
+      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+      font-size: 14px; color: var(--text);
+    }
+    .pg-disk-bar {
+      height: 4px; border-radius: 2px; margin: 6px 0 4px;
+      background: rgba(255,255,255,.08); overflow: hidden;
+    }
+    .pg-disk-bar > span {
+      display: block; height: 100%; width: 0; border-radius: 2px;
+      background: var(--text-muted); transition: width .4s ease;
+    }
+    .pg-disk-bar > span.is-warning  { background: var(--yellow); }
+    .pg-disk-bar > span.is-critical { background: var(--danger); }
+    .pg-disk-total {
+      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+      font-size: 10px; color: var(--text-dim);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pg-disk-bar > span { transition: none; }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       CODE — literal text: a path, a naming token, a URL scheme
+
+       Left entirely to Tabler until now, which meant it was the
+       one piece of text on the page whose colour came from
+       light-dark() and a grey ramp we do not control. Both of
+       its outcomes were wrong here: resolved, #4b5563 at 2.1:1;
+       unresolved, an inherited near-white that read as ordinary
+       body text in a mono face.
+
+       So it is ours, through our own tokens, and it no longer
+       depends on light-dark() being supported. Mono because
+       these are the {title} templates, the /app/videos paths and
+       the discord:// URLs — data, by the same rule as segment
+       counts and S01E05. --text-sub is 7.0:1 on the chip and
+       deliberately brighter than the --text-muted sentence
+       around it, so a literal lifts off the line it sits in.
+       ═══════════════════════════════════════════════════════ */
+    code, kbd, samp {
+      font-family: var(--font-mono) !important;
+      font-size: .86em;
+      color: var(--text-sub) !important;
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      padding: .1em .4em;
+      /* A path or an Apprise URL is long and must not widen its
+         container; it breaks rather than pushing the layout. */
+      overflow-wrap: break-word;
+      word-break: break-word;
+    }
+    /* Inside a link the code is the link, and takes its colour. */
+    a > code { color: inherit !important; background: none; border: 0; padding: 0; }
+    /* In a block the chip is the <pre>, not each token inside it. */
+    pre { color: var(--text-sub); }
+    pre code {
+      background: none; border: 0; padding: 0; font-size: inherit; color: inherit !important;
+    }
+
+    /* The source moved, and a person has to decide. Amber rather than red:
+       nothing is broken yet — the panel found a replacement and verified it,
+       and is asking. It carried two raw hex values inline, the last ones
+       outside tokens.css. */
+    .domain-banner {
+      border-color: var(--yellow-ring) !important;
+      background: var(--yellow-dim) !important;
+      color: var(--text) !important;
+    }
+    .domain-banner > div > .ti-world-search { font-size: 18px; color: var(--yellow); }
+
+    /* A caveat inside a settings pane: something will not behave the way the
+       reader is about to assume. Amber, like the source-moved banner — it is
+       a thing to know, not a thing that has gone wrong. */
+    .settings-warn { color: var(--yellow) !important; }
+
+    /* The player. Chrome as dark as it goes, so nothing competes with the
+       frame, and the frame itself on true black. */
+    .player-shell {
+      background: var(--video-bg) !important;
+      border-color: rgba(255,255,255,.07) !important;
+    }
+    .player-video {
+      width: 100%; max-height: 70vh; background: var(--video-bg); display: block;
+    }

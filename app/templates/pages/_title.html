@@ -1,0 +1,53 @@
+<!-- ── Title detail ─────────────────────────────────────────────────────────
+     A page, not a modal. It replaces the detail / episode / anime modals and
+     puts everything one decision needs in one place: what the title is, which
+     tracks to take, and the episode you actually want.
+     Rebuilt entirely from the URL (#/title/<type>/<id>/<slug>), so it survives
+     a reload and can be shared. -->
+<div id="page-detail" style="display:none">
+
+  <div class="th-hero">
+    <div class="th-art" id="th-art" aria-hidden="true"></div>
+    <div class="th-hero-inner">
+      <nav class="th-crumbs" id="th-crumbs"></nav>
+
+      <div class="th-headline">
+        <div class="th-headline-main">
+          <h1 class="th-name" id="th-name">&nbsp;</h1>
+          <div class="th-chips" id="th-chips"></div>
+          <p class="th-plot" id="th-plot"></p>
+          <div class="th-scoreline">
+            <span id="th-score"></span>
+            <span class="th-genres" id="th-genres"></span>
+          </div>
+        </div>
+        <div class="th-cta" id="th-cta"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="th-grid">
+    <div class="th-main">
+      <div class="th-tabs" id="th-tabs" role="tablist"></div>
+
+      <div class="th-pane" id="th-pane-episodes" role="tabpanel"></div>
+      <div class="th-pane" id="th-pane-about"    role="tabpanel" hidden></div>
+      <div class="th-pane" id="th-pane-cast"     role="tabpanel" hidden></div>
+      <div class="th-pane" id="th-pane-tracks"   role="tabpanel" hidden></div>
+    </div>
+
+    <aside class="th-side">
+      <section class="th-card">
+        <h2 class="th-card-h">Info</h2>
+        <dl class="th-facts" id="th-facts"></dl>
+      </section>
+
+      <!-- Click-to-load. An iframe placed here on render would call YouTube
+           every time anyone opens any title, from a self-hosted panel. -->
+      <section class="th-card" id="th-trailer-card" hidden>
+        <h2 class="th-card-h">Trailer</h2>
+        <div id="th-trailer"></div>
+      </section>
+    </aside>
+  </div>
+</div>

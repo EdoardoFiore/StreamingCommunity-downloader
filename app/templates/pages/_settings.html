@@ -1,0 +1,466 @@
+<!-- ── Settings ─────────────────────────────────────────────────────────────
+     A page, not a dialog. It was a 470-line modal: seven tabs of forms in a
+     scrolling box, with no address, so "open settings and look at the naming
+     tab" was a sentence and not a link.
+
+     The panes stay in the DOM permanently - saving libraries reads its inputs
+     straight out of the document - and the tabs are still switched by hand by
+     switchSettingsTab(). Only the container changed. -->
+<div id="page-settings" style="display:none">
+  <div class="settings-page">
+      <!-- The same head every other page opens with. This one went straight
+           into its tabs, which read as a different application the moment the
+           list pages grew one. -->
+      <div class="pg-head">
+        <div class="pg-head-main">
+          <h1 class="pg-h1">Impostazioni</h1>
+          <p class="pg-sub">
+            Sorgente, librerie e schema dei nomi decidono dove finiscono i file
+            e come si chiamano. Ogni sezione si salva da sé.
+          </p>
+        </div>
+      </div>
+      <ul class="nav nav-tabs mb-3" id="settings-tabs">
+        <li class="nav-item">
+          <a class="nav-link active" href="#" data-settings-tab="sorgente">Sorgente</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-settings-tab="librerie">Librerie</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-settings-tab="nomi">Nomi</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-settings-tab="download">Download</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-settings-tab="accesso">Accesso</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-settings-tab="notifiche">Notifiche</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-settings-tab="hook">Hook</a>
+        </li>
+      </ul>
+
+      <div class="settings-pane" data-settings-pane="sorgente">
+      <!-- ── Sorgente ──────────────────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Sorgente</p>
+        <p class="settings-section-hint">
+          Il dominio da cui il pannello cerca e scarica. Salvando viene verificato.
+        </p>
+        <label class="form-label" for="domain-input">Domain</label>
+        <input type="text" id="domain-input" class="form-control" placeholder="streamingcommunityz.parts">
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveDomain" id="save-domain-btn">
+            Verifica e salva
+          </button>
+          <div id="domain-feedback" class="form-text"></div>
+        </div>
+      </div>
+
+      <!-- ── Recupero automatico del dominio ───────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Recupero automatico</p>
+        <p class="settings-section-hint">
+          Il dominio della sorgente cambia ogni poche settimane. Il pannello pu&ograve;
+          accorgersene e proporre quello nuovo, dopo averlo verificato.
+        </p>
+        <p class="settings-section-hint settings-warn">
+          <i class="ti ti-alert-triangle me-1"></i>
+          Il dominio viene letto da una pagina esterna che non controlliamo. Vengono presi in
+          considerazione solo domini di secondo livello con un nome riconosciuto, e solo se
+          rispondono davvero come la sorgente attesa. Con l&rsquo;applicazione automatica attiva
+          nessuno rilegge quella scelta prima che abbia effetto.
+        </p>
+
+        <label class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="domain-auto-check">
+          <span class="form-check-label">Controlla se la sorgente non risponde</span>
+        </label>
+        <label class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="domain-auto-apply">
+          <span class="form-check-label">Applica il dominio trovato senza chiedere</span>
+        </label>
+
+        <label class="form-label mt-3" for="domain-check-interval">
+          Intervallo del controllo (minuti)
+          <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(30&ndash;1440)</span>
+        </label>
+        <input type="number" id="domain-check-interval" class="form-control" min="30" max="1440">
+
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveRecovery" id="save-domain-recovery-btn">
+            Salva
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-action="cfg:checkDomain" id="domain-check-btn">
+            <i class="ti ti-refresh me-1"></i>Controlla ora
+          </button>
+          <div id="domain-recovery-feedback" class="form-text"></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-pane" data-settings-pane="librerie" style="display:none">
+      <!-- ── Librerie e cartelle ───────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Librerie multimediali</p>
+        <p class="settings-section-hint">
+          Dove finiscono i file scaricati, una cartella per tipo di contenuto.
+        </p>
+        <p class="settings-section-hint">
+          <strong>Su Docker serve il percorso interno al container</strong>, cioè
+          <code>/app/videos/&lt;cartella nel volume&gt;</code> — per esempio
+          <code>/app/videos/Anime</code>. Il percorso dell&rsquo;host
+          (<code>N:\Jellyfin\Anime</code>, <code>/srv/nfs/storage/Anime</code>) va nel
+          <code>docker-compose.yml</code>, non qui: è la parte a sinistra dei due punti nel
+          volume montato su <code>/app/videos</code>.
+        </p>
+        <div id="libraries-list" class="mb-2"></div>
+        <button class="btn btn-sm btn-outline-secondary" data-action="cfg:addLibrary">
+          <i class="ti ti-plus me-1"></i>Aggiungi libreria
+        </button>
+
+        <label class="form-label mt-3" for="excluded-input">Cartelle escluse</label>
+        <input type="text" id="excluded-input" class="form-control"
+               placeholder="lost+found, .recycle, @eaDir, ...">
+        <div class="form-text">Nomi separati da virgola, ignorati sfogliando le librerie.</div>
+
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveLibraries" id="save-libraries-btn">
+            Salva librerie e cartelle
+          </button>
+          <div id="libraries-feedback" class="form-text"></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-pane" data-settings-pane="nomi" style="display:none">
+      <!-- ── Schema dei nomi ───────────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Schema dei nomi</p>
+        <p class="settings-section-hint">
+          Come vengono chiamati cartelle e file. Segnaposto disponibili:
+          <code>{title}</code>, <code>{year}</code>, <code>{season}</code>,
+          <code>{season2}</code> (con lo zero), <code>{episode}</code>,
+          <code>{episode2}</code> (con lo zero). Quello che sta fra parentesi quadre compare
+          solo se i segnaposto al suo interno hanno un valore: <code>[ ({year})]</code> sparisce
+          del tutto quando l&rsquo;anno non &egrave; noto.
+        </p>
+        <p class="settings-section-hint">
+          I valori suggeriti nei campi sono quelli predefiniti e seguono la struttura
+          raccomandata dalla <a href="https://jellyfin.org/docs/general/server/media/movies/"
+          target="_blank" rel="noopener noreferrer">documentazione ufficiale di Jellyfin</a>:
+          <code>Film (2020)/Film (2020).mkv</code> e
+          <code>Serie (2019)/Season 01/Serie S01E01.mkv</code>. Cambiali solo se la tua libreria
+          segue una convenzione diversa: Jellyfin riconosce quella sopra senza configurazione.
+        </p>
+        <p class="settings-section-hint settings-warn">
+          <i class="ti ti-alert-triangle me-1"></i>
+          I file gi&agrave; scaricati non vengono rinominati. Continuano a essere riconosciuti
+          come presenti, quindi non verranno riscaricati, ma restano con il nome vecchio finch&eacute;
+          non li rinomini dal gestore file.
+        </p>
+
+        <p class="settings-section-label mt-3 mb-2">Film</p>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-film_folder">Cartella</label>
+            <input type="text" id="naming-film_folder" class="form-control" data-naming-slot="film_folder" placeholder="{title}[ ({year})]">
+            <div class="form-text" id="naming-preview-film_folder"></div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-film_file">File</label>
+            <input type="text" id="naming-film_file" class="form-control" data-naming-slot="film_file" placeholder="{title}[ ({year})]">
+            <div class="form-text" id="naming-preview-film_file"></div>
+          </div>
+        </div>
+        <p class="settings-section-label mt-3 mb-2">Serie TV</p>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-series_folder">Cartella serie</label>
+            <input type="text" id="naming-series_folder" class="form-control" data-naming-slot="series_folder" placeholder="{title}[ ({year})]">
+            <div class="form-text" id="naming-preview-series_folder"></div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-season_folder">Cartella stagione</label>
+            <input type="text" id="naming-season_folder" class="form-control" data-naming-slot="season_folder" placeholder="Season {season2}">
+            <div class="form-text" id="naming-preview-season_folder"></div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-episode_file">File episodio</label>
+            <input type="text" id="naming-episode_file" class="form-control" data-naming-slot="episode_file" placeholder="{title} S{season2}E{episode2}">
+            <div class="form-text" id="naming-preview-episode_file"></div>
+          </div>
+        </div>
+        <p class="settings-section-label mt-3 mb-2">Anime</p>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-anime_folder">Cartella</label>
+            <input type="text" id="naming-anime_folder" class="form-control" data-naming-slot="anime_folder" placeholder="{title}[ ({year})]">
+            <div class="form-text" id="naming-preview-anime_folder"></div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-anime_season_folder">Cartella stagione</label>
+            <input type="text" id="naming-anime_season_folder" class="form-control" data-naming-slot="anime_season_folder" placeholder="Season 01">
+            <div class="form-text" id="naming-preview-anime_season_folder"></div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-anime_episode_file">File episodio</label>
+            <input type="text" id="naming-anime_episode_file" class="form-control" data-naming-slot="anime_episode_file" placeholder="{title} S01E{episode2}">
+            <div class="form-text" id="naming-preview-anime_episode_file"></div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="naming-anime_movie_file">File film</label>
+            <input type="text" id="naming-anime_movie_file" class="form-control" data-naming-slot="anime_movie_file" placeholder="{title}">
+            <div class="form-text" id="naming-preview-anime_movie_file"></div>
+          </div>
+        </div>
+
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveNaming" id="save-naming-btn">
+            Salva
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-action="cfg:resetNaming">
+            Ripristina predefiniti
+          </button>
+          <div id="naming-feedback" class="form-text"></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-pane" data-settings-pane="download" style="display:none">
+      <!-- ── Performance download ──────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Download</p>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label" for="setting-max-concurrent">
+              Download contemporanei
+              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–32)</span>
+            </label>
+            <input type="number" id="setting-max-concurrent" class="form-control" min="1" max="32" value="3">
+            <div class="form-text">Suggerito: 2–4. Valori alti aumentano l'uso di rete e RAM.</div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="setting-max-workers">
+              Segmenti in parallelo
+              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(1–128)</span>
+            </label>
+            <input type="number" id="setting-max-workers" class="form-control" min="1" max="128" value="16">
+            <div class="form-text">Tetto massimo complessivo del pannello, non per singolo download. Se la fonte risponde 503 il pannello scende sotto questo valore da solo e risale quando torna a servire. Suggerito: 8–16.</div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="setting-watch-interval">
+              Controllo serie seguite
+              <span style="color:var(--text-dim);font-size:10px;text-transform:none;font-weight:400;letter-spacing:0;margin-left:4px">(15–1440 min)</span>
+            </label>
+            <input type="number" id="setting-watch-interval" class="form-control" min="15" max="1440" value="240">
+            <div class="form-text">Ogni quanto cercare nuovi episodi. Suggerito: 240 (4 ore).</div>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:savePerf" id="save-perf-btn">
+            Salva performance
+          </button>
+          <div id="perf-settings-feedback" class="form-text"></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-pane" data-settings-pane="accesso" style="display:none">
+      <!-- ── Accesso (Jellyfin SSO) ────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Accesso e utenti</p>
+
+        <div id="jf-not-connected" style="display:none">
+          <p class="settings-section-hint">
+            Il pannello sta funzionando senza Jellyfin: nessun login, nessuna coda richieste,
+            nessuna gestione utenti. Collegalo per abilitarli.
+          </p>
+          <div class="row g-2">
+            <div class="col-12">
+              <label class="form-label" for="jf-url">URL server Jellyfin</label>
+              <input type="text" id="jf-url" class="form-control" placeholder="http://192.168.1.10:8096">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="jf-username">Utente amministratore</label>
+              <input type="text" id="jf-username" class="form-control" autocomplete="off">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label" for="jf-password">Password</label>
+              <input type="password" id="jf-password" class="form-control" autocomplete="off">
+            </div>
+          </div>
+          <div class="form-text mt-1">Serve un account amministratore Jellyfin. La password non viene salvata.</div>
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="jf-connect-btn" data-action="cfg:jfConnect" data-reconfigure="0">
+              <i class="ti ti-plug-connected me-1"></i>Collega a Jellyfin
+            </button>
+            <div id="jf-connect-feedback" class="form-text"></div>
+          </div>
+        </div>
+
+        <div id="jf-connected" style="display:none">
+          <p class="settings-section-hint mb-0">
+            Collegato a <strong id="jf-connected-url" style="color:var(--text)"></strong>
+          </p>
+          <div id="jf-reconfigure-wrap" style="display:none">
+            <div class="settings-actions">
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cfg:jfReconfigure">
+                Cambia server Jellyfin
+              </button>
+            </div>
+            <div id="jf-reconfigure-form" style="display:none;margin-top:14px">
+              <p class="settings-section-hint settings-warn">
+                Chi sta usando il pannello senza login dovrà accedere di nuovo dopo l'aggiornamento.
+                Puntare a un server Jellyfin diverso renderà orfani gli utenti già importati.
+              </p>
+              <div class="row g-2">
+                <div class="col-12">
+                  <label class="form-label" for="jf-reconf-url">URL server Jellyfin</label>
+                  <input type="text" id="jf-reconf-url" class="form-control" placeholder="http://192.168.1.10:8096">
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label" for="jf-reconf-username">Utente amministratore</label>
+                  <input type="text" id="jf-reconf-username" class="form-control" autocomplete="off">
+                </div>
+                <div class="col-sm-6">
+                  <label class="form-label" for="jf-reconf-password">Password</label>
+                  <input type="password" id="jf-reconf-password" class="form-control" autocomplete="off">
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="jf-reconnect-btn" data-action="cfg:jfConnect" data-reconfigure="1">
+                  Aggiorna configurazione
+                </button>
+                <div id="jf-reconnect-feedback" class="form-text"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      </div>
+
+      <div class="settings-pane" data-settings-pane="notifiche" style="display:none">
+      <!-- ── Notifiche ─────────────────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Notifiche</p>
+        <p class="settings-section-hint">
+          Inoltra le notifiche del pannello a Discord, Telegram, ntfy, email e altri servizi.
+          Un canale è una URL Apprise, ad esempio
+          <code>discord://id_webhook/token_webhook</code> oppure <code>tgram://token_bot/id_chat</code>.
+          <a href="https://github.com/caronc/apprise/wiki#notification-services" target="_blank"
+             rel="noopener noreferrer">Elenco completo dei servizi e formato delle URL</a>.
+        </p>
+        <p class="settings-section-hint settings-warn">
+          <i class="ti ti-alert-triangle me-1"></i>
+          Questi canali sono <strong>del pannello, non del singolo utente</strong>: ricevono gli
+          eventi di <em>tutti</em>, comprese le richieste e i download avviati da altri. Pensali
+          come un canale di amministrazione — un webhook su un canale Discord privato, non un
+          gruppo condiviso con chi usa il pannello. Con «Tutti gli eventi» attivo su una libreria
+          usata da più persone il volume può essere notevole: conviene scegliere solo gli eventi
+          che ti interessano davvero.
+        </p>
+        <div id="notif-channels-list" class="mb-2"></div>
+
+        <div id="notif-channel-form" class="row g-2 mb-2" style="display:none">
+          <div class="col-sm-4">
+            <input type="text" id="notif-channel-name" class="form-control" placeholder="Nome (es. Discord admin)">
+          </div>
+          <div class="col-sm-6">
+            <input type="text" id="notif-channel-url" class="form-control" placeholder="discord://id_webhook/token_webhook">
+          </div>
+          <div class="col-sm-2 d-grid">
+            <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveChannel"
+                    id="notif-channel-save-btn">Aggiungi</button>
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cfg:toggleChannelForm"
+                id="notif-channel-add-btn">
+          <i class="ti ti-plus me-1"></i>Aggiungi canale
+        </button>
+        <div class="settings-actions">
+          <div id="notif-channels-feedback" class="form-text"></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-pane" data-settings-pane="hook" style="display:none">
+      <!-- ── Jellyfin ──────────────────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Libreria Jellyfin</p>
+        <p class="settings-section-hint">
+          A fine download il pannello pu&ograve; chiedere a Jellyfin di aggiornare la libreria,
+          invece di aspettare la sua scansione periodica.
+        </p>
+        <label class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="jf-refresh-on-download">
+          <span class="form-check-label">Aggiorna la libreria a fine download</span>
+        </label>
+        <div class="form-text" id="jf-refresh-status"></div>
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveJfRefresh" id="save-jf-refresh-btn">
+            Salva
+          </button>
+          <div id="jf-refresh-feedback" class="form-text"></div>
+        </div>
+      </div>
+
+      <!-- ── Webhook ───────────────────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Webhook</p>
+        <p class="settings-section-hint">
+          Una chiamata HTTP quando un download finisce. Nel corpo si possono usare
+          <code>{title}</code>, <code>{path}</code>, <code>{status}</code>, <code>{type}</code>,
+          <code>{season}</code>, <code>{episode}</code>, <code>{year}</code> e
+          <code>{error}</code>. Con il corpo vuoto viene inviato un JSON con tutti i campi.
+        </p>
+        <p class="settings-section-hint settings-warn">
+          <i class="ti ti-alert-triangle me-1"></i>
+          Un webhook pu&ograve; puntare anche a servizi della rete locale. Il pannello non
+          restituisce mai la risposta ricevuta, solo l&rsquo;esito: chi configura un hook sa se ha
+          funzionato, non cosa ha risposto l&rsquo;altro capo.
+        </p>
+
+        <div id="hooks-list" class="mb-2"></div>
+
+        <div id="hook-form" class="row g-2 mb-2" style="display:none">
+          <div class="col-sm-4">
+            <input type="text" id="hook-name" class="form-control" placeholder="Nome (es. Jellyfin)">
+          </div>
+          <div class="col-sm-5">
+            <input type="text" id="hook-url" class="form-control" placeholder="http://jellyfin.local:8096/...">
+          </div>
+          <div class="col-sm-3">
+            <select id="hook-method" class="form-select">
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="GET">GET</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <textarea id="hook-body" class="form-control" rows="2"
+                      placeholder="Corpo, opzionale."></textarea>
+          </div>
+          <div class="col-12 d-flex justify-content-end">
+            <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveHook" id="hook-save-btn">
+              Aggiungi
+            </button>
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="cfg:toggleHookForm" id="hook-add-btn">
+          <i class="ti ti-plus me-1"></i>Aggiungi webhook
+        </button>
+        <div class="settings-actions">
+          <div id="hooks-feedback" class="form-text"></div>
+        </div>
+      </div>
+      </div>
+  </div>
+</div>

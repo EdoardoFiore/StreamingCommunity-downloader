@@ -32,14 +32,42 @@ def _domain() -> str:
 
 @router.get("")
 async def search(
-    q: str = Query(..., min_length=1),
-    source: str = Query(default="streamingcommunity"),
+    q: str = Query(..., min_length=1, max_length=200),
+    # Constrained rather than free text: an unrecognised value used to fall
+    # through to StreamingCommunity in silence, and a typo answering with films
+    # is worse than a refusal.
+    source: str = Query(default="streamingcommunity",
+                        pattern="^(streamingcommunity|animeunity)$"),
+    # 1-based, and the same number for both sources even though their pages are
+    # different sizes (60 and 30): the caller asks for "the next lot" and each
+    # source works out what that means. Bounded so nobody asks the source for a
+    # preposterous row offset.
+    page: int = Query(default=1, ge=1, le=50),
+    # One canonical vocabulary on the wire, lower case; the mapping to
+    # AnimeUnity's own capitalisation lives in animeunity.TYPES.
+    media_type: str | None = Query(default=None, pattern="^(movie|tv|ova|ona|special)$"),
+    dubbed: bool = Query(default=False),
 ):
+    # One pattern cannot express two vocabularies, so the rest is checked here.
+    # A false `dubbed` is the default and must not be refused — only a caller
+    # actually asking StreamingCommunity for a filter it does not have.
+    if source == "streamingcommunity":
+        if media_type and media_type not in ("movie", "tv"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Tipo '{media_type}' non valido per StreamingCommunity")
+        if dubbed:
+            raise HTTPException(
+                status_code=422,
+                detail="Il filtro doppiaggio vale solo per AnimeUnity")
+
     try:
         if source == "animeunity":
-            results = await asyncio.to_thread(animeunity.search, q)
+            results = await asyncio.to_thread(
+                animeunity.search, q, page=page, media_type=media_type, dubbed=dubbed)
         else:
-            results = await asyncio.to_thread(core_search, q, _domain())
+            results = await asyncio.to_thread(
+                core_search, q, _domain(), page=page, media_type=media_type)
     except HTTPException:
         raise
     except Exception as e:

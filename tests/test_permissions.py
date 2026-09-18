@@ -19,6 +19,23 @@ def _as(client, permissions: Permission | int, username="user"):
     return user, session_for(client, user.id)
 
 
+@pytest.fixture(autouse=True)
+def _no_outbound_source(monkeypatch):
+    """Keep the sweep off the network.
+
+    These cases assert who may reach an endpoint, not what it answers, and
+    authorisation runs in the dependency before the handler body — so stubbing
+    the source changes nothing they measure. Unmocked, the search case resolves
+    a hostname for real on every parametrised run.
+    """
+    from app.core import animeunity, home
+    from app.routers import search as search_router
+
+    monkeypatch.setattr(search_router, "core_search", lambda *a, **kw: [])
+    monkeypatch.setattr(animeunity, "search", lambda *a, **kw: [])
+    monkeypatch.setattr(home, "shelves", lambda *a, **kw: [])
+
+
 # ── Endpoint coverage ──────────────────────────────────────────────────────────
 #
 # (granting permissions, method, path, body). Some endpoints accept any of
@@ -35,6 +52,7 @@ CASES = [
      {"anime_id": "1", "anime_name": "x"}),
     ((Permission.REQUEST, Permission.DOWNLOAD), "GET",
      "/api/search?q=abc&domain=example.test", None),
+    ((Permission.REQUEST, Permission.DOWNLOAD), "GET", "/api/home", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/domain/settings", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/download-hooks", None),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/domain/settings/naming-defaults", None),
@@ -55,6 +73,8 @@ CASES = [
     ((Permission.MANAGE_REQUESTS, Permission.DOWNLOAD), "POST",
      "/api/download/does-not-exist/fire", None),
     ((Permission.MANAGE_USERS,), "GET", "/api/users", None),
+    ((Permission.REQUEST,), "POST", "/api/requests/season",
+     {"external_id": "1", "title": "x", "slug": "x", "season": 1}),
 ]
 
 

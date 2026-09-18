@@ -31,15 +31,21 @@ def test_missing_asset_falls_back_to_an_unversioned_url():
 
 def test_templates_never_hardcode_a_static_path():
     """A hardcoded /static/... path is exactly the stale-cache bug coming back,
-    and it would be invisible until a deploy failed to take effect."""
+    and it would be invisible until a deploy failed to take effect.
+
+    Recursive on purpose. This swept only the top level once, which meant the
+    check would have quietly stopped covering anything the moment templates were
+    split into partials/ and pages/ — losing its grip exactly as the number of
+    files it had to watch went up.
+    """
     from pathlib import Path
 
     templates = Path(__file__).parent.parent / "app" / "templates"
     offenders = [
-        path.name for path in templates.glob("*.html")
+        str(path.relative_to(templates)) for path in templates.rglob("*.html")
         if '"/static/' in path.read_text(encoding="utf-8")
     ]
-    assert not offenders, f"hardcoded /static/ paths in: {', '.join(offenders)}"
+    assert not offenders, f"hardcoded /static/ paths in: {', '.join(sorted(offenders))}"
 
 
 def test_versioned_request_may_be_cached_forever(client):
@@ -88,6 +94,24 @@ def _read(*parts) -> str:
     return (Path(__file__).parent.parent / "app").joinpath(*parts).read_text(encoding="utf-8")
 
 
+def _all_panel_js() -> str:
+    """Every script the panel serves, concatenated.
+
+    The tables below used to be read out of app.js by name. That made the test
+    a lock on a filename rather than on the rule it exists for: splitting the
+    download page into its own script would have failed a test about phase
+    vocabulary, and the obvious "fix" — repointing it at the new file — leaves
+    the next split to fail the same way. What has to hold is that *the client*
+    can render every phase, wherever the table lives.
+    """
+    from pathlib import Path
+
+    static = Path(__file__).parent.parent / "app" / "static"
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(static.glob("*.js"))
+    )
+
+
 def test_the_stream_indicator_is_shown_exactly_when_the_stream_is_opened():
     """Three files state the same rule, and they drifted apart once already.
 
@@ -97,11 +121,24 @@ def test_the_stream_indicator_is_shown_exactly_when_the_stream_is_opened():
     a connection deliberately never attempted, reported as one that failed.
     """
     import re
+    from pathlib import Path
 
-    html = _read("templates", "index.html")
-    match = re.search(r'id="stream-status"[^>]*data-perm="([^"]+)"', html)
-    assert match, "the stream indicator must be gated by the stream's own permissions"
-    shown_for = set(match.group(1).split("|"))
+    # Searched across every template rather than in one named file. The
+    # indicator moved into a partial once, and a test that hardcodes where it
+    # lives reports that move as a failure while quietly covering nothing after
+    # someone "fixes" it by pointing at the new path.
+    templates = Path(__file__).parent.parent / "app" / "templates"
+    matches = [
+        m
+        for path in sorted(templates.rglob("*.html"))
+        for m in re.finditer(r'id="stream-status"[^>]*data-perm="([^"]+)"',
+                             path.read_text(encoding="utf-8"))
+    ]
+    assert len(matches) == 1, (
+        "expected exactly one stream indicator, gated by the stream's own "
+        f"permissions; found {len(matches)}"
+    )
+    shown_for = set(matches[0].group(1).split("|"))
 
     # The endpoint's requirement.
     router = _read("routers", "progress.py")
@@ -114,3 +151,37 @@ def test_the_stream_indicator_is_shown_exactly_when_the_stream_is_opened():
     guard = re.search(r"if \(([^{\n]*)\)\s*\{\s*connectGlobalStream\(\);", app_js)
     assert guard, "connectGlobalStream must stay behind a permission check"
     assert set(re.findall(r"can\('(\w+)'\)", guard.group(1))) == required
+
+
+# ── The phase vocabulary, server and client ────────────────────────────────────
+
+def test_every_phase_the_server_emits_has_a_client_entry():
+    """Four lookup tables in app.js turn a phase into a label, a badge, a bar
+    colour and a border. "video" - the first phase of every download - was in
+    none of them, so a card rebuilt mid-download (switching page and back)
+    fell through to the grey fallback and lost its colour, border and label.
+
+    Live updates hid it: the progress handler only sets the bar's width, so
+    the card kept the colour it was created with until something rebuilt it.
+    """
+    import re
+
+    from app.jobs import JobManager
+
+    # Audio phases are per-language (audio_ita, audio_eng, ...) and the client
+    # resolves them with a startsWith fallback, so only the fixed names have
+    # to be present by name.
+    phases = [p for p in JobManager._compute_phases(["ita"]) if not p.startswith("audio_")]
+    assert "video" in phases, "the phase this test exists for has been renamed"
+
+    scripts = _all_panel_js()
+    missing = []
+    for table in ("PHASE_LABELS", "PHASE_BADGE", "PHASE_BAR", "PHASE_BORDER_MAP"):
+        match = re.search(rf"const {table} = \{{(.*?)\n\}};", scripts, re.S)
+        assert match, f"{table} is not defined in any script under app/static/"
+        body = match.group(1)
+        for phase in phases:
+            if not re.search(rf"\b{re.escape(phase)}\s*:", body):
+                missing.append(f"{table}.{phase}")
+
+    assert not missing, "phases the client cannot render: " + ", ".join(missing)

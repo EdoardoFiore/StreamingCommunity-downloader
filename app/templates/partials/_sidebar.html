@@ -1,0 +1,91 @@
+  <!-- ── Sidebar ─────────────────────────────────────────────────── -->
+  <aside class="navbar navbar-vertical navbar-expand-lg">
+    <div class="container-fluid">
+      <a class="sc-brand" href="#">
+        <img class="brand-icon" src="{{ asset('logo.png') }}" alt="" width="36" height="36">
+        <span class="brand-text">SC Panel</span>
+      </a>
+      <!-- Mobile-only controls: settings icon + hamburger -->
+      <div class="d-flex align-items-center gap-2 d-lg-none">
+        <button class="btn-icon-mobile" data-action="settings:open" title="Impostazioni">
+          <i class="ti ti-settings" style="font-size:19px"></i>
+        </button>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+      </div>
+      <div class="collapse navbar-collapse" id="sidebar-menu">
+        <ul class="navbar-nav pt-lg-3">
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
+            <a class="nav-link active" href="#" data-page="search" data-action="nav">
+              <span class="nav-link-icon"><i class="ti ti-search"></i></span>
+              <span class="nav-link-title">Cerca</span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="DOWNLOAD|MANAGE_REQUESTS">
+            <a class="nav-link" href="#" data-page="downloads" data-action="nav">
+              <span class="nav-link-icon"><i class="ti ti-download"></i></span>
+              <span class="nav-link-title">Download</span>
+              <span class="badge bg-red ms-auto" id="active-jobs-badge" style="display:none"></span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="MANAGE_REQUESTS">
+            <a class="nav-link" href="#" data-page="requests" data-action="nav">
+              <span class="nav-link-icon"><i class="ti ti-inbox"></i></span>
+              <span class="nav-link-title">Richieste</span>
+              <span class="badge bg-yellow ms-auto" id="queue-pending-count" style="display:none"></span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD" data-hide-perm="DOWNLOAD" data-requires-auth="1">
+            <a class="nav-link" href="#" data-page="my-requests" data-action="nav">
+              <span class="nav-link-icon"><i class="ti ti-send"></i></span>
+              <span class="nav-link-title">Le mie richieste</span>
+            </a>
+          </li>
+          <!-- No data-requires-auth: a followed series works without Jellyfin
+               too, it just belongs to the panel instead of to a user. -->
+          <li class="nav-item" data-perm="REQUEST|DOWNLOAD">
+            <a class="nav-link" href="#" data-page="watches" data-action="nav">
+              <span class="nav-link-icon"><i class="ti ti-bell-ringing"></i></span>
+              <span class="nav-link-title">Serie seguite</span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="VIEW_LIBRARY">
+            <a class="nav-link" href="#" data-page="files" data-action="nav">
+              <span class="nav-link-icon"><i class="ti ti-folder-filled"></i></span>
+              <span class="nav-link-title">File</span>
+            </a>
+          </li>
+          <li class="nav-item" data-perm="MANAGE_USERS">
+            <a class="nav-link" href="#" data-page="users" data-action="nav">
+              <span class="nav-link-icon"><i class="ti ti-users"></i></span>
+              <span class="nav-link-title">Utenti</span>
+            </a>
+          </li>
+        </ul>
+        <div class="sidebar-footer">
+          <!-- Same permissions the stream itself requires (progress.py). Without
+               them app.js never opens the EventSource, so the indicator sat on
+               its initial "Connessione..." for good — reporting a connection
+               that was deliberately never attempted as one that never
+               succeeded. -->
+          <div id="stream-status" data-perm="DOWNLOAD|MANAGE_REQUESTS">
+            <span class="stream-dot"></span>
+            <span id="stream-label">Connessione...</span>
+          </div>
+          <span id="domain-badge" class="badge bg-secondary">caricamento...</span>
+          <!-- How full the library volume is. Hidden until it is known, and
+               for anyone who cannot see the library anyway. -->
+          <div id="sidebar-disk" class="sb-disk" data-perm="VIEW_LIBRARY" hidden>
+            <div class="sb-disk-bar"><span id="sb-disk-fill"></span></div>
+            <div class="sb-disk-text" id="sb-disk-text"></div>
+          </div>
+          <button class="btn-sidebar-settings" data-perm="MANAGE_SETTINGS" data-action="settings:open">
+            <i class="ti ti-settings" style="font-size:15px;flex-shrink:0"></i>
+            Impostazioni
+          </button>
+          <span id="app-version" class="sidebar-version" title="Versione del pannello"></span>
+        </div>
+      </div>
+    </div>
+  </aside>

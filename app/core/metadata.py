@@ -56,13 +56,31 @@ EMPTY: dict = {
     "logo": None,
     "trailer_url": None,
     "tmdb_id": None,
+    "name": None,
+    "poster": None,
+    "type": None,
+    "seasons_count": None,
+    "cast": [],
+    "directors": [],
+    "original_name": None,
+    "original_language": None,
+    "status": None,
+    "quality": None,
+    "age": None,
 }
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
 
 def _cache_key(media_type: str, title_id) -> tuple:
-    return (media_type, str(title_id))
+    """Keyed on the host as well as the title.
+
+    Artwork URLs and the plot itself come from whichever domain served them, so
+    an entry outlives the domain it was fetched from only by accident. Without
+    the host here, a rotation kept serving the old domain's images for six
+    hours — long after every one of them had stopped resolving.
+    """
+    return (configured_domain(), media_type, str(title_id))
 
 
 def _cached(key: tuple) -> dict | None:
@@ -116,6 +134,21 @@ def _source_image(images: list | None, kind: str) -> str | None:
     return None
 
 
+# Enough to fill a cast row without turning the payload into a crew list. The
+# source sends eight for a film; a long-running series can send many more.
+_MAX_PEOPLE = 20
+
+
+def _people(entries: list | None) -> list[str]:
+    """Names out of the source's person records, in the order it sent them."""
+    names = []
+    for entry in entries or []:
+        name = (entry or {}).get("name")
+        if name and name not in names:
+            names.append(name)
+    return names[:_MAX_PEOPLE]
+
+
 def _from_props(props: dict) -> dict:
     """Everything the title page carries — which is nearly everything."""
     score = props.get("score")
@@ -134,6 +167,28 @@ def _from_props(props: dict) -> dict:
             f"https://www.youtube.com/watch?v={youtube_id}" if youtube_id else None
         ),
         "tmdb_id": props.get("tmdb_id"),
+        # Measured against a real title before being added, as the rule above
+        # requires: the page carries main_actors and main_directors as person
+        # records, plus the original title, the release status, a quality
+        # label and an age rating. All of it rides in the payload already
+        # fetched for tmdb_id, so none of it costs a request.
+        # The title's own identity. The detail view is a page with an
+        # address now, so opening it from a pasted URL has no search result to
+        # borrow a name and a poster from - it has to be able to rebuild
+        # itself from the id alone.
+        "name": props.get("name") or None,
+        "poster": _source_image(props.get("images"), "poster"),
+        "type": props.get("type") or None,
+        "seasons_count": props.get("seasons_count"),
+        "cast": _people(props.get("main_actors")),
+        "directors": _people(props.get("main_directors")),
+        "original_name": props.get("original_name") or None,
+        "original_language": props.get("original_language") or None,
+        "status": props.get("status") or None,
+        # Only on the title page. The search payload has no quality field, so
+        # this cannot be put on a grid card without a request per poster.
+        "quality": props.get("quality") or None,
+        "age": props.get("age"),
     }
 
 

@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import time
 
 import requests
 from bs4 import BeautifulSoup
@@ -13,7 +14,31 @@ logger = logging.getLogger(__name__)
 ANIMEUNITY_HOST = os.getenv("ANIMEUNITY_HOST", "www.animeunity.so")
 BATCH_SIZE = 120
 
+# What /archivio/get-animes answers per call. Not ours to choose — it is the
+# source's page size, and what one "Carica altri" is worth.
+ARCHIVE_PAGE = 30
+
+# A ceiling on what one call may normalise, for the day the source answers with
+# more than a page.
+MAX_RESULTS = 60
+
+# The panel's word for a kind, and the source's own. The wire vocabulary is
+# lower case so there is one canonical form; AnimeUnity capitalises its own.
+TYPES = {
+    "movie": "Movie", "tv": "TV", "ova": "OVA", "ona": "ONA", "special": "Special",
+}
+
+# The CSRF token stays good for a while and costs a page load to get, so it is
+# not refetched per search.
+_CSRF_TTL = 10 * 60
+
 _scraper = None
+_csrf: tuple[float, str] | None = None
+
+
+def _now() -> float:
+    """Indirected so a test can move the clock without sleeping."""
+    return time.time()
 
 
 def _get_scraper():
@@ -30,67 +55,38 @@ def _get_scraper():
     return _scraper
 
 
-def _normalize_titles(titles: list) -> list[dict]:
-    """Convert raw AnimeUnity title dicts to the normalized format used by the frontend."""
-    results = []
-    seen_ids = set()
-    for t in titles:
-        # Handle both old format (title/name) and new livesearch format (title_eng)
-        title_str = (
-            t.get("title_eng") or t.get("title") or t.get("name") or ""
-        ).strip()
-        slug = t.get("slug", "")
-        id_num = t.get("id", "")
-        anime_id = f"{id_num}-{slug}" if slug else str(id_num)
-        if not title_str or anime_id in seen_ids:
-            continue
-        seen_ids.add(anime_id)
-        poster = (
-            t.get("imageurl") or t.get("cover") or
-            t.get("poster") or t.get("image") or ""
-        )
-        results.append({
-            "id": anime_id,
-            "name": title_str,
-            "type": "anime",
-            "slug": slug,
-            "poster": poster,
-            "episodes_count": t.get("episodes_count", 0),
-            "score": t.get("score") or t.get("vote"),
-            "release_date": t.get("date") or t.get("release_date") or "",
-        })
-        if len(results) >= 21:
-            break
-    return results
+def fetch_home_html() -> str:
+    """The AnimeUnity home page, refreshing the cached CSRF token on the way.
 
-
-def search(query: str) -> list[dict]:
+    Shared with the start page, which reads its shelves out of this same HTML.
     """
-    Search for anime on AnimeUnity using the /livesearch endpoint.
-    Handles CSRF token requirements for Laravel protection.
-    """
-    scraper = _get_scraper()
-    host = ANIMEUNITY_HOST
-
-    # Initial GET to establish session and get CSRF token
-    r_home = scraper.get(f"https://{host}/", timeout=15)
-    
-    # Extract CSRF token from meta tag if present
-    csrf_token = None
+    global _csrf
+    r = _get_scraper().get(f"https://{ANIMEUNITY_HOST}/", timeout=15)
+    r.raise_for_status()
     try:
-        soup = BeautifulSoup(r_home.text, "lxml")
-        csrf_meta = soup.find("meta", {"name": "csrf-token"})
-        if csrf_meta:
-            csrf_token = csrf_meta.get("content", "")
-            logger.debug("CSRF token found: %s", csrf_token[:20] if csrf_token else "None")
+        meta = BeautifulSoup(r.text, "lxml").find("meta", {"name": "csrf-token"})
+        if meta and meta.get("content"):
+            _csrf = (_now() + _CSRF_TTL, meta["content"])
     except Exception as e:
         logger.debug("Error extracting CSRF token: %s", e)
+    return r.text
 
-    # Standard AJAX headers with browser mimicry
-    headers_ajax = {
+
+def _csrf_token() -> str | None:
+    """The cached token, fetching the home page when there is none or it is old."""
+    global _csrf
+    if _csrf and _csrf[0] > _now():
+        return _csrf[1]
+    _csrf = None
+    fetch_home_html()
+    return _csrf[1] if _csrf else None
+
+
+def _ajax_headers(token: str | None) -> dict:
+    headers = {
         "Accept": "application/json, text/plain, */*",
         "X-Requested-With": "XMLHttpRequest",
-        "Referer": f"https://{host}/archivio",
+        "Referer": f"https://{ANIMEUNITY_HOST}/archivio",
         "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
@@ -101,36 +97,150 @@ def search(query: str) -> list[dict]:
             "Chrome/120.0.0.0 Safari/537.36"
         ),
     }
-    
-    # Add CSRF token if available
-    if csrf_token:
-        headers_ajax["X-CSRF-TOKEN"] = csrf_token
+    if token:
+        headers["X-CSRF-TOKEN"] = token
+    return headers
 
-    # Use the /livesearch endpoint (POST with {title: query})
-    r = scraper.post(
-        f"https://{host}/livesearch",
-        json={"title": query},
-        headers=headers_ajax,
-        timeout=15,
-    )
 
+def _genres(value) -> list[str]:
+    """Genre names, whichever shape Laravel cast them into this time.
+
+    Rows arrive as dicts with pivot tables, sometimes as plain strings, and
+    occasionally as a JSON string. The panel wants names, and the alternative to
+    tolerating all three is a TypeError raised in the middle of a search.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            return []
+    names = []
+    for g in (value or []):
+        name = g.get("name") if isinstance(g, dict) else g
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return names
+
+
+def normalize_title(t: dict) -> dict | None:
+    """One raw record into the shape the panel renders, or None if unusable."""
+    title_str = (t.get("title_eng") or t.get("title") or t.get("name") or "").strip()
+    id_num = t.get("id")
+    if not title_str or id_num is None:
+        return None
+    slug = t.get("slug", "") or ""
+    return {
+        "id": f"{id_num}-{slug}" if slug else str(id_num),
+        "name": title_str,
+        "type": "anime",
+        # The source's own classification — Movie, TV, OVA, ONA, Special. Kept
+        # beside `type` rather than in it: `type` is "anime" for every record and
+        # the whole anime flow keys off that, from the detail modal to the
+        # episodes endpoint to the job kind. Without this the card had nothing to
+        # go on, so it labelled every film a TV series.
+        "media_type": t.get("type") or "",
+        "slug": slug,
+        # An absolute URL, unlike StreamingCommunity's bare filename: the
+        # frontend branches on that and sends only the latter through /api/image.
+        "poster": (t.get("imageurl") or t.get("cover") or
+                   t.get("poster") or t.get("image") or ""),
+        "episodes_count": t.get("episodes_count", 0),
+        # The archive endpoint sends these with the search, so the detail panel
+        # costs no request of its own.
+        "plot": t.get("plot") or "",
+        "genres": _genres(t.get("genres")),
+        # AnimeUnity keeps an Italian dub as a record of its own: same show,
+        # separate id and slug, "(ITA)" in the title.
+        "dubbed": bool(t.get("dub")),
+        "score": t.get("score") or t.get("vote"),
+        "release_date": t.get("date") or t.get("release_date") or "",
+        # The archive record carries thirty-four fields and the panel was
+        # keeping eleven. These cost nothing - the search already paid for
+        # them - and they are what let an anime's page look like a film's
+        # instead of a bare list of episodes.
+        #
+        # imageurl is the poster; imageurl_cover is the wide banner, which is
+        # what the detail hero wants behind the title. Both are absolute
+        # AniList URLs, so neither goes through /api/image.
+        "backdrop": t.get("imageurl_cover") or "",
+        "studio": t.get("studio") or "",
+        "status": t.get("status") or "",
+        "season": t.get("season") or "",
+        # The romaji or Japanese title, when it differs from the one shown.
+        "original_name": (t.get("title") or "") if (t.get("title") or "") != title_str else "",
+    }
+
+
+def _normalize_titles(titles: list) -> list[dict]:
+    """Convert raw AnimeUnity records to the normalized format the frontend renders."""
+    results, seen = [], set()
+    for t in titles:
+        item = normalize_title(t)
+        if item is None or item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        results.append(item)
+        if len(results) >= MAX_RESULTS:
+            break
+    return results
+
+
+def _post_archive(body: dict):
+    """POST the archive query, renewing the CSRF token once if it has gone stale.
+
+    A 419 is Laravel saying the token expired. Fetching a new one and sending the
+    request again is **re-authentication, not a retry** — a different request
+    carrying a new credential — which is why it does not go through
+    ``_shared.with_retry`` and must not be folded into it.
+    """
+    global _csrf
+    scraper = _get_scraper()
+    url = f"https://{ANIMEUNITY_HOST}/archivio/get-animes"
+
+    r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()), timeout=20)
+    if r.status_code in (403, 419):
+        logger.info("AnimeUnity refused the CSRF token (HTTP %d), renewing it",
+                    r.status_code)
+        _csrf = None
+        r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()), timeout=20)
+    return r
+
+
+def search(query: str, *, page: int = 1, media_type: str | None = None,
+           dubbed: bool = False) -> list[dict]:
+    """Search AnimeUnity through ``/archivio/get-animes``.
+
+    Not ``/livesearch``, which this used to call: the source caps that at
+    **eight records** for every query, with no way to ask for more and no
+    filters — measured, not guessed. The archive endpoint answers thirty at a
+    time, takes a row offset, and applies both filters itself.
+
+    Both filters go to the source rather than to what comes back: filtering here
+    could only ever narrow one page, and would answer "no Italian dub" for a show
+    whose dub sat on page two. ``page`` is 1-based and becomes the row offset.
+    """
+    body = {"title": query, "offset": (max(page, 1) - 1) * ARCHIVE_PAGE}
+    if dubbed:
+        body["dubbed"] = 1
+    if media_type:
+        body["type"] = TYPES.get(media_type.lower(), media_type)
+
+    r = _post_archive(body)
     if not r.ok:
-        logger.error("Livesearch failed with status %d. CSRF token was: %s", 
-                    r.status_code, "present" if csrf_token else "missing")
+        logger.error("Archive search failed with status %d", r.status_code)
         raise RuntimeError(f"AnimeUnity search failed: HTTP {r.status_code}")
 
     try:
-        data = r.json()
-        records = data.get("records", [])
-        if records:
-            result = _normalize_titles(records)
-            if result:
-                return result
+        payload = r.json()
     except Exception as e:
-        logger.error("Error parsing livesearch response: %s", e)
+        logger.error("Error parsing archive response: %s", e)
         raise
+    records = payload if isinstance(payload, list) else payload.get("records", [])
 
-    raise RuntimeError(f"AnimeUnity search: no results found for '{query}'")
+    # No rows is an answer, not a failure — the same one StreamingCommunity
+    # gives. This used to raise, which reached the panel as a red error box
+    # saying the search had broken when the query simply matched nothing.
+    return _normalize_titles(records)
 
 
 def get_episodes(anime_id: str) -> list[dict]:

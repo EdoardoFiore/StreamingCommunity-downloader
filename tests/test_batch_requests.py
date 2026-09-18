@@ -1,10 +1,12 @@
 """Batch approve/deny/cancel, the /counts badge endpoint, and the card status
 no longer showing closed requests as if they blocked a new one."""
 
+import os
+
 import pytest
 
 from app.auth.permissions import ALL_PERMISSIONS, Permission
-from app.requests import models, notify
+from app.requests import models, notify, resolver
 from tests.conftest import do_setup, make_user, session_for
 from tests.test_requests import EPISODE_BODY, FILM_BODY, _create, _login, _user
 
@@ -301,3 +303,91 @@ def test_cancelled_and_failed_are_also_hidden_from_card_status(
         headers={"X-CSRF-Token": csrf},
     ).json()
     assert status == {}
+
+
+# ── Card status summarises a whole series, and checks the disk ─────────────────
+#
+# One card, many rows. The ribbon used to take the first row it met, so a single
+# finished episode painted "available" over an entire series, and it trusted the
+# row rather than the filesystem, so it kept saying so long after the file left.
+
+
+def _land(request_id, status=models.AVAILABLE):
+    """Put a request's file where it says it is, and mark it so."""
+    request = models.get(request_id)
+    path = resolver.destination_path(request)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(b"video")
+    return models.transition(request_id, status, output_path=path)
+
+
+def _card(client, csrf, external_id="77"):
+    return client.post(
+        "/api/requests/status",
+        json={"source": "streamingcommunity", "external_ids": [external_id]},
+        headers={"X-CSRF-Token": csrf},
+    ).json().get(external_id)
+
+
+def test_a_finished_request_whose_file_is_gone_makes_no_claim(
+    client, approver, source, stub_jobs
+):
+    """The row outlives the file — a deleted download must not still read as
+    "in libreria", or the card sends you looking for something that is not
+    there and refuses to let you ask for it again."""
+    csrf = _login(client, approver)
+    request_id = _episode(client, csrf, episode="1")
+    _land(request_id)
+    os.remove(models.get(request_id).output_path)
+
+    assert _card(client, csrf) is None
+
+
+def test_a_finished_request_whose_file_is_there_reads_as_one_episode(
+    client, approver, source, stub_jobs
+):
+    csrf = _login(client, approver)
+    _land(_episode(client, csrf, episode="1"))
+
+    card = _card(client, csrf)
+    assert card["status"] == "available"
+    assert card["library_count"] == 1
+
+
+def test_the_card_counts_episodes_not_rows(client, approver, source, stub_jobs):
+    """Two people asking for one episode in different audio make two requests
+    and one file; the shelf has one episode on it, not two."""
+    csrf = _login(client, approver)
+    _land(_episode(client, csrf, episode="1"))
+    _land(_episode(client, csrf, episode="2"))
+    both = {**EPISODE_BODY, "episode_number": "2", "audio_languages": ["eng"]}
+    _land(_create(client, csrf, both).json()["request"]["id"])
+
+    assert _card(client, csrf)["library_count"] == 2
+
+
+def test_an_episode_in_flight_leads_without_hiding_the_ones_on_disk(
+    client, approver, source, stub_jobs
+):
+    csrf = _login(client, approver)
+    _land(_episode(client, csrf, episode="1"))
+    _episode(client, csrf, episode="2")
+
+    card = _card(client, csrf)
+    assert card["status"] == "pending"
+    assert card["library_count"] == 1
+
+
+def test_a_parked_episode_outranks_one_merely_downloading(
+    client, approver, source, stub_jobs
+):
+    """NEEDS_ATTENTION is the only state waiting on a person: a download in
+    flight finishes by itself, a parked request never does."""
+    csrf = _login(client, approver)
+    downloading = _episode(client, csrf, episode="1")
+    models.transition(downloading, models.APPROVED)
+    models.transition(downloading, models.DOWNLOADING)
+    models.transition(_episode(client, csrf, episode="2"), models.NEEDS_ATTENTION)
+
+    assert _card(client, csrf)["status"] == "needs_attention"

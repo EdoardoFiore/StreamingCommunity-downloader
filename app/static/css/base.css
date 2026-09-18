@@ -1,0 +1,34 @@
+    /* ── Base ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+
+    /* The panel is dark, and until now nothing said so to the browser.
+       Two things follow from that omission. Native widgets — select
+       dropdowns, date pickers, the scrollbar gutter, autofill — were
+       being painted light on a near-black page, which is why a
+       `color-scheme: dark` had to be pasted onto one <select> by hand.
+       And Tabler resolves several of its own colours through
+       light-dark(): with no scheme declared that picks the LIGHT branch,
+       so <code> was being handed #4b5563 — 2.1:1 on this ground, all but
+       invisible — and on a browser without light-dark() the declaration
+       is invalid instead and the colour simply inherits, which is the
+       near-white it was actually showing as. */
+    :root { color-scheme: dark; }
+
+    html { scroll-behavior: smooth; }
+
+    body, body.antialiased {
+      background: var(--bg-base) !important;
+      color: var(--text) !important;
+      font-family: var(--font-ui) !important;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .wrapper { display: flex; min-height: 100vh; }
+
+    /* ── Scrollbars ───────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.18); }

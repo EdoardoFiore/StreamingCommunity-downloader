@@ -587,3 +587,81 @@ def test_requester_still_cannot_withdraw_a_terminal_request(
 
     assert response.status_code == 409
     assert models.get(request_id).status == models.DENIED
+
+
+# ── A whole season, for someone who cannot download ───────────────────────────
+
+SEASON_BODY = {
+    "external_id": "77",
+    "slug": "test-series",
+    "title": "Test Series",
+    "year": "2019",
+    "season": 1,
+    "audio_languages": ["ita"],
+    "subtitle_languages": [],
+}
+
+
+def _season(client, csrf, body=None):
+    return client.post("/api/requests/season", json=body or SEASON_BODY,
+                       headers={"X-CSRF-Token": csrf})
+
+
+def test_a_requester_can_ask_for_a_whole_season(client, admin_credentials, source, stub_jobs):
+    """The download side has had batches since they existed. Without this a
+    user with only REQUEST had to ask for a twenty-episode season one episode
+    at a time."""
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+
+    response = _season(client, csrf)
+
+    assert response.status_code == 201
+    assert response.json() == {"season": 1, "total": 3, "created": 3, "joined": 0}
+    mine = client.get("/api/requests/mine").json()
+    assert sorted(r["episode_number"] for r in mine) == ["1", "2", "3"]
+    assert {r["status"] for r in mine} == {models.PENDING}
+    assert stub_jobs == []          # nothing downloads before approval
+
+
+def test_asking_twice_joins_instead_of_duplicating(client, admin_credentials, source, stub_jobs):
+    """Each episode goes through service.create_request, so the season path
+    inherits the same deduplication a single request gets."""
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    _season(client, csrf)
+
+    again = _season(client, csrf)
+
+    assert again.json() == {"season": 1, "total": 3, "created": 0, "joined": 3}
+    assert len(client.get("/api/requests/mine").json()) == 3
+
+
+def test_one_episode_already_asked_for_is_joined_and_the_rest_created(
+    client, admin_credentials, source, stub_jobs
+):
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    _create(client, csrf, {**EPISODE_BODY, "episode_number": "2",
+                           "subtitle_languages": []})
+
+    response = _season(client, csrf)
+
+    assert response.json()["created"] == 2
+    assert response.json()["joined"] == 1
+
+
+def test_a_season_with_no_episodes_is_not_a_silent_success(
+    client, admin_credentials, source, stub_jobs, monkeypatch
+):
+    do_setup(client, admin_credentials)
+    bob = _user(client, "bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+    source.episodes = []
+
+    response = _season(client, csrf)
+
+    assert response.status_code == 404

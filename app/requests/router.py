@@ -7,6 +7,7 @@ actually offers — both arrive from a POST body otherwise.
 
 import asyncio
 import logging
+import os
 import re
 import sqlite3
 
@@ -204,6 +205,147 @@ async def create_request(body: CreateRequest, http_request: HttpRequest):
     return {"request": _public(request), "created": created}
 
 
+# A season is one decision for the person making it, so it is one call. The
+# cap matches the download side's: past a few hundred episodes this stopped
+# being a request and became a mistake.
+MAX_SEASON_REQUESTS = 500
+
+
+class CreateSeasonRequests(BaseModel):
+    """Every episode of one season, asked for in one go.
+
+    StreamingCommunity only: AnimeUnity has no seasons, and a film has no
+    episodes to enumerate.
+    """
+
+    source: str = Field(default="streamingcommunity", pattern="^streamingcommunity$")
+    external_id: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=300)
+    slug: str = Field(min_length=1, max_length=300)
+    season: int = Field(ge=0, le=200)
+    year: str | None = Field(default=None, max_length=10)
+    poster: str | None = Field(default=None, max_length=500)
+    audio_languages: list[str] = Field(default_factory=lambda: ["ita"])
+    subtitle_languages: list[str] = Field(default_factory=list)
+
+    @field_validator("audio_languages", "subtitle_languages")
+    @classmethod
+    def _languages(cls, value):
+        return CreateRequest._languages(value)
+
+
+def _enumerate_season(external_id: str, slug: str, season: int):
+    """The episodes of one season, read from the source."""
+    from app.config import configured_domain
+    from app.core.page import get_domain_version
+    from app.core.tv import get_info_season, get_token
+
+    domain = configured_domain()
+    if not domain:
+        raise HTTPException(status_code=409, detail="Nessun dominio configurato")
+    version = get_domain_version(domain) or ""
+    token = get_token(int(external_id), domain)
+    return get_info_season(int(external_id), slug, domain, version, token, season) or []
+
+
+@router.post("/season", status_code=201, dependencies=CAN_REQUEST)
+async def create_season_requests(body: CreateSeasonRequests, http_request: HttpRequest):
+    """Request every episode of a season.
+
+    The download side has had this since batches existed; the request side had
+    not, so a user without DOWNLOAD had to ask for a twenty-episode season one
+    episode at a time.
+
+    Each episode still becomes an ordinary request through
+    ``service.create_request``, so deduplication, the library check and the
+    notifications behave exactly as they do for a single one - an episode
+    somebody already asked for is joined, not duplicated.
+    """
+    user = current_user(http_request)
+
+    try:
+        episodes = await asyncio.to_thread(
+            _enumerate_season, body.external_id, body.slug, body.season
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Could not enumerate season %s of %s: %s",
+                       body.season, body.external_id, exc)
+        raise HTTPException(status_code=502, detail=f"Fonte non raggiungibile: {exc}")
+
+    if not episodes:
+        raise HTTPException(status_code=404, detail="Nessun episodio in questa stagione")
+    if len(episodes) > MAX_SEASON_REQUESTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Troppi episodi ({len(episodes)}); il massimo è {MAX_SEASON_REQUESTS}",
+        )
+
+    def _draft(episode_number: str) -> models.Request:
+        return models.Request(
+            id=0, content_key="", source=body.source, media_type="episode",
+            external_id=body.external_id, slug=body.slug, title=body.title,
+            year=body.year, poster=body.poster, season=body.season,
+            episode_number=episode_number, anime_type=None,
+            audio_languages=body.audio_languages,
+            subtitle_languages=body.subtitle_languages, available_snapshot=None,
+            status=models.PENDING, problem=None, denial_reason=None,
+            requested_by=user.id, decided_by=None, decided_at=None, job_id=None,
+            output_path=None, created_at="", updated_at="",
+        )
+
+    # Resolved once, on the first episode, rather than once per episode: a
+    # twenty-episode season would otherwise be twenty round trips to the
+    # stream host before a single request existed. The panel already treats
+    # one episode as representative of a season's tracks - that is what
+    # /api/tv/{id}/languages samples.
+    try:
+        available = await asyncio.to_thread(
+            resolver.available_tracks, _draft(str(episodes[0]["n"]))
+        )
+    except resolver.ResolutionError as exc:
+        raise HTTPException(status_code=502, detail=exc.message)
+    except Exception as exc:
+        logger.warning("Could not resolve tracks for a season request: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Fonte non raggiungibile: {exc}")
+
+    offered = {str(c).lower() for c in (available.get("audio") or [])}
+    if offered:
+        unavailable = [l for l in body.audio_languages if l.lower() not in offered]
+        if unavailable:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Audio non disponibile: {', '.join(unavailable)}. "
+                       f"Disponibili: {', '.join(sorted(offered))}",
+            )
+
+    created, joined = 0, 0
+    for episode in episodes:
+        _, was_created = await asyncio.to_thread(
+            service.create_request,
+            requested_by=user.id,
+            source=body.source,
+            media_type="episode",
+            external_id=body.external_id,
+            title=body.title,
+            slug=body.slug,
+            year=body.year,
+            poster=body.poster,
+            season=body.season,
+            episode_number=str(episode["n"]),
+            anime_type=None,
+            audio_languages=body.audio_languages,
+            subtitle_languages=body.subtitle_languages,
+            available_snapshot=available,
+        )
+        created += was_created
+        joined += not was_created
+
+    return {"season": body.season, "total": len(episodes),
+            "created": created, "joined": joined}
+
+
 # ── Reading ────────────────────────────────────────────────────────────────────
 
 @router.get("", dependencies=CAN_MANAGE)
@@ -224,6 +366,79 @@ def list_my_requests(http_request: HttpRequest):
 # card should not look blocked either.
 VISIBLE_ON_CARD = models.OPEN_STATUSES + (models.AVAILABLE, models.COMPLETED)
 
+IN_LIBRARY = (models.COMPLETED, models.AVAILABLE)
+
+# Which open state a card shows when several episodes of one series disagree.
+# NEEDS_ATTENTION leads because it is the only one waiting on a person: a
+# download in flight finishes by itself, a parked request never does, and the
+# search card is the one place it would otherwise go unnoticed.
+OPEN_PRIORITY = (
+    models.NEEDS_ATTENTION,
+    models.DOWNLOADING,
+    models.APPROVED,
+    models.PENDING,
+)
+
+
+def _still_on_disk(request: models.Request) -> bool:
+    """Whether the file a finished request claims is still there.
+
+    The status of a finished request is a claim about the filesystem, and the
+    filesystem is free to disagree: files get deleted, a library gets repointed
+    somewhere else, a database outlives the downloads it describes. Trusting
+    the row alone told people a title was in their library long after it left.
+    """
+    if request.output_path and os.path.exists(request.output_path):
+        return True
+    # Rows written before output_path was recorded carry none, and a file can
+    # have been remuxed to .mkv or renamed by a template change since. The
+    # resolver already knows every name the file could be under.
+    try:
+        return resolver.existing_file(request) is not None
+    except Exception:
+        # A library that cannot be probed at all must not blank every badge on
+        # the page: "nothing you own is downloaded" is a worse lie than the
+        # stale row this check exists to catch.
+        logger.exception("Library probe failed for request %s", request.id)
+        return True
+
+
+def _summarise_card(requests: list[models.Request]) -> dict | None:
+    """One card's worth of state, out of every request row behind it.
+
+    A series is requested an episode at a time, so the ribbon summarises rows
+    rather than reading one. It deliberately does not try to say whether the
+    series is *complete*: that needs the source's episode count, and this
+    endpoint decorates a whole page of cards in a single call — it cannot go
+    and ask. What it can say honestly is how many episodes are on disk.
+    """
+    # Counted before the status is picked: nine episodes on the shelf and a
+    # tenth downloading should still be able to report the nine.
+    in_library = [r for r in requests if r.status in IN_LIBRARY and _still_on_disk(r)]
+    # Distinct episodes, not rows — the same episode asked for in two audio
+    # tracks is two requests and one file.
+    episodes = {(r.season, r.episode_number) for r in in_library}
+
+    open_rows = [r for r in requests if r.status in models.OPEN_STATUSES]
+    if open_rows:
+        lead = min(open_rows, key=lambda r: OPEN_PRIORITY.index(r.status))
+    elif in_library:
+        lead = in_library[0]
+    else:
+        # Every finished row named a file that is gone. A plain card is the
+        # honest answer, and it leaves the title free to be asked for again.
+        return None
+
+    return {
+        "id": lead.id,
+        "status": lead.status,
+        "media_type": lead.media_type,
+        "season": lead.season,
+        "episode_number": lead.episode_number,
+        "library_count": len(episodes),
+        "open_count": len(open_rows),
+    }
+
 
 @router.post("/status", dependencies=CAN_SEE_OWN)
 def request_status(body: StatusQuery, http_request: HttpRequest):
@@ -232,7 +447,7 @@ def request_status(body: StatusQuery, http_request: HttpRequest):
     can_see_all = user.has(Permission.MANAGE_REQUESTS)
     wanted = set(body.external_ids)
 
-    result: dict[str, dict] = {}
+    by_title: dict[str, list[models.Request]] = {}
     for request in models.list_all():
         if request.source != body.source or request.external_id not in wanted:
             continue
@@ -240,16 +455,13 @@ def request_status(body: StatusQuery, http_request: HttpRequest):
             continue
         if not can_see_all and user.id not in models.subscribers(request.id):
             continue
-        # An open or completed state beats an older closed one on the same card.
-        current = result.get(request.external_id)
-        if current is None or request.status in models.OPEN_STATUSES:
-            result[request.external_id] = {
-                "id": request.id,
-                "status": request.status,
-                "media_type": request.media_type,
-                "season": request.season,
-                "episode_number": request.episode_number,
-            }
+        by_title.setdefault(request.external_id, []).append(request)
+
+    result: dict[str, dict] = {}
+    for external_id, requests in by_title.items():
+        card = _summarise_card(requests)
+        if card is not None:
+            result[external_id] = card
     return result
 
 

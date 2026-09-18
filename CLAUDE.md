@@ -43,7 +43,12 @@ request before any route runs.
 ### Layout
 
 **`app/core/`** — source interaction and the download engine
-- `page.py` — domain check, search
+- `page.py` — domain check, and the StreamingCommunity search. `_data_page()` /
+  `fetch_page_props()` read the Inertia payload out of the server-rendered page's
+  `data-page` attribute — no XHR headers, no session — and `normalize_title()` is the
+  one place a raw title becomes a result. `home.py` uses all three.
+- `home.py` — the shelves each source publishes on its own front page, behind a TTL
+  cache keyed on `(source, host)`, so a rotation cannot reach the old domain's entry
 - `domain_recovery.py` — finds the source domain again when it rotates: scrapes a
   third-party page, guards the candidate, verifies it, and *proposes* it
 - `metadata.py` — plot/genres/rating/artwork/trailer, all from the title page's own props,
@@ -51,12 +56,14 @@ request before any route runs.
 - `naming.py` — the file/folder naming templates and their validation
 - `film.py` — movie resolve + download; also owns `_collect_audio_tracks` / `_collect_subtitle_tracks`, which `tv.py` and `animeunity.py` import
 - `tv.py` — seasons, episodes, per-episode languages, episode download
-- `animeunity.py` — AnimeUnity search, episodes, download
+- `animeunity.py` — AnimeUnity search (`/archivio/get-animes`, paged 30 at a time,
+  with the source's own `type` and `dubbed` filters), episodes, download
 - `m3u8.py` — `M3U8_Parser`, `M3U8_Segments`, `M3U8_Downloader`, `Decryption`, `download_m3u8()`
 - `paths.py` — destination paths (`film_path`, `episode_path`, `anime_path`). The request system's library check goes through these, so a change here changes both. Names come from `naming.py`; the optional `templates=` argument is what lets the library check ask for the *legacy* layout.
 - `headers.py` — user-agent rotation, `sanitize_filename`
-- `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`, and stream
-  resolution (`resolve_stream`, `fetch_key_from_playlist`, `_FALLBACK_PROVIDERS`)
+- `_shared.py` — embed parsing, M3U8 URL/key, `MissingAudioTrackError`, `with_retry`,
+  and stream resolution (`resolve_stream`, `fetch_key_from_playlist`,
+  `_FALLBACK_PROVIDERS`)
 
 **`app/auth/`** — Jellyfin SSO, permissions, users
 - `jellyfin.py` — HTTP client (MediaBrowser header, stable DeviceId, X-Forwarded-For with retry)
@@ -115,6 +122,29 @@ anything under a mounted static directory is readable by unauthenticated visitor
   `require(...)` dependency. `tests/test_permissions.py` fails otherwise.
 - **No ADMIN super-permission.** Flags are independent, so an administrator can exist who never sees
   the request queue.
+- **Two caches are keyed on the source host, and both are also cleared explicitly.**
+  `home` and `metadata` put the domain in the cache key, and `clear_cache()` is called
+  at the only two places the domain is written — `domain_recovery.apply_candidate()`
+  and `PUT /api/domain`. The key is the half that stays correct when a third write
+  site is added and forgets the call; without it the panel served the old domain's
+  artwork, and its now-dead image URLs, for six hours after a rotation. Not inside
+  `config.update_data()`: that would make `app.config` import `app.core`.
+- **StreamingCommunity's kind filter is applied per page, and the panel is built
+  around that.** The source has no filter of its own and groups results by kind —
+  measured, "the" answers sixty series and not one film on page 1, with the films
+  further in. So a filtered page coming back empty means "none of that kind here",
+  never "no more results", and the frontend keeps offering the next page while a
+  filter is on. AnimeUnity filters at the source, where the offset walks the filtered
+  catalogue, so there an empty page really is the end.
+- **`type` is not `media_type`.** Every AnimeUnity record has `type == "anime"` and the
+  whole anime flow keys off that, from the detail modal to the episodes endpoint to
+  the job kind. The source's own word (Movie/TV/OVA/ONA/Special, and a long tail like
+  "TV Short") rides beside it in `media_type`. Folding one into the other is what made
+  every anime, films included, render as a TV series.
+- **A page payload is unescaped exactly once.** BeautifulSoup decodes HTML entities in
+  attribute values itself — the `data-page` on StreamingCommunity, `items-json` and
+  `animes` on AnimeUnity — so there is no `html.unescape()` on top, and adding one
+  would turn a plot's `&amp;amp;` into `&`.
 - **Never substitute an audio track.** `strict_audio=True` on the request path turns a missing
   language into an error and parks the request for a human.
 - **`max_segment_workers` is a process-wide ceiling, not a per-download target.**

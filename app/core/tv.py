@@ -82,11 +82,40 @@ def get_info_season(tv_id: int, tv_name: str, domain: str, version: str, token: 
         timeout=15,
     )
     if req.ok:
-        return [
-            {"id": ep["id"], "n": ep["number"], "name": ep["name"]}
-            for ep in req.json()["props"]["loadedSeason"]["episodes"]
-        ]
+        return [_episode(ep) for ep in req.json()["props"]["loadedSeason"]["episodes"]]
     raise RuntimeError(f"Cannot fetch season info: HTTP {req.status_code}")
+
+
+def _episode_image(images: list | None) -> str | None:
+    """The episode still, routed through the image proxy like every other
+    artwork: the CDN host is resolved server-side, never by the browser."""
+    for kind in ("cover", "still", "background"):
+        for image in images or []:
+            if image.get("type") == kind and image.get("filename"):
+                return f"/api/image/{image['filename']}"
+    return None
+
+
+def _episode(ep: dict) -> dict:
+    """One episode, in the shape the panel renders.
+
+    This used to keep ``{id, n, name}`` and discard the rest of a payload that
+    had already been paid for. The episode list shows a duration, a synopsis
+    and a still, and all three ride in the same response.
+
+    Everything past ``id`` and ``n`` is read with ``.get()``: these are a third
+    party's field names, and one renamed key must not take a whole season down
+    with it. ``id`` and ``n`` stay required — an episode without them cannot be
+    downloaded, so there is nothing to render.
+    """
+    return {
+        "id": ep["id"],
+        "n": ep["number"],
+        "name": ep.get("name"),
+        "plot": ep.get("plot") or None,
+        "duration": ep.get("duration"),
+        "still": _episode_image(ep.get("images")),
+    }
 
 
 def _get_iframe(tv_id, ep_id, domain, token):

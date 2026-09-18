@@ -1,0 +1,116 @@
+<!-- ── Deny Request Modal ───────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="deny-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="ti ti-circle-x me-2 text-danger"></i>Rifiuta richiesta</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2" id="deny-title" style="font-weight:600"></p>
+        <label class="form-label">Motivo (opzionale, visibile al richiedente)</label>
+        <textarea class="form-control" id="deny-reason" rows="3"
+                  placeholder="Es. contenuto già presente in libreria"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Annulla</button>
+        <button class="btn btn-danger" data-action="queue:confirmDeny">Rifiuta</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Fix Request Modal ────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="fix-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="ti ti-tool me-2 text-warning"></i>Correggi richiesta</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-1" id="fix-title" style="font-weight:600"></p>
+        <div class="req-problem mb-3" id="fix-problem"></div>
+
+        <label class="form-label">Tracce audio disponibili all'ultimo tentativo</label>
+        <div id="fix-audio" class="mb-3"></div>
+
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">ID sulla fonte</label>
+            <input class="form-control" id="fix-external-id">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Slug</label>
+            <input class="form-control" id="fix-slug">
+          </div>
+        </div>
+        <div class="row g-2 mt-1" id="fix-season-row">
+          <div class="col-6">
+            <label class="form-label">Stagione</label>
+            <input class="form-control" id="fix-season" type="number" min="0">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Episodio</label>
+            <input class="form-control" id="fix-episode">
+          </div>
+        </div>
+        <p class="text-muted mt-3 mb-0" style="font-size:11px">
+          Dopo la correzione, approva di nuovo la richiesta per riprovare.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Annulla</button>
+        <button class="btn btn-warning" data-action="queue:confirmFix">Salva correzione</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Player Modal ──────────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="player-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content player-shell">
+      <div class="modal-header border-0">
+        <h5 class="modal-title" id="player-modal-title" style="color:rgba(255,255,255,.6)"></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <video id="video-player" controls preload="metadata"
+               class="player-video"></video>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Confirm Modal ──────────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="sc-confirm-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:400px">
+    <div class="modal-content">
+      <div class="modal-body text-center" style="padding:28px 24px 16px">
+        <i class="ti ti-alert-triangle" style="font-size:2.4rem;color:var(--yellow);display:block;margin-bottom:14px"></i>
+        <p id="sc-confirm-msg" style="font-size:14px;margin:0;color:var(--text);line-height:1.5"></p>
+      </div>
+      <div class="modal-footer justify-content-center border-0" style="padding:12px 24px 22px;gap:10px">
+        <button type="button" class="btn btn-secondary" id="sc-confirm-cancel">Annulla</button>
+        <button type="button" class="btn btn-primary" id="sc-confirm-ok">Conferma</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Prompt Modal ───────────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="sc-prompt-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:420px">
+    <div class="modal-content">
+      <div class="modal-body" style="padding:24px 24px 16px">
+        <p id="sc-prompt-msg" style="font-size:14px;margin-bottom:14px;color:var(--text);line-height:1.5"></p>
+        <input type="text" id="sc-prompt-input" class="form-control">
+      </div>
+      <div class="modal-footer justify-content-end border-0" style="padding:12px 24px 22px;gap:10px">
+        <button type="button" class="btn btn-secondary" id="sc-prompt-cancel">Annulla</button>
+        <button type="button" class="btn btn-primary" id="sc-prompt-ok">OK</button>
+      </div>
+    </div>
+  </div>
+</div>

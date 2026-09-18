@@ -97,33 +97,48 @@ def destination_path(request: models.Request, templates: dict | None = None) -> 
     )
 
 
-def _candidate_paths(request: models.Request) -> list[str]:
-    """Every path this request's file could be sitting at.
+def candidate_paths(*bases: str) -> list[str]:
+    """Every path a file could be sitting at, given where it would land.
 
     Two axes. The extension, because the downloader remuxes to .mkv as soon as
     there is more than one audio track. And the naming template, because
     changing it must not make files already in the library invisible: they would
     be re-downloaded to the new name, leaving a duplicate of something that was
-    already there.
+    already there — so callers pass the current template's path *and* the
+    legacy one, current first, since a library that has been renamed should win
+    over a legacy file left behind.
 
     With the default configuration both templates render the same path and the
     deduplication collapses this back to the two stats it has always been.
+
+    Takes rendered paths rather than a Request so the episode list can ask the
+    same question without one. The rule lives here once; see existing_file()
+    and the library check in app/routers/tv.py.
     """
-    bases = dict.fromkeys([
-        # Current first: a library that has been renamed should win over a
-        # legacy file left behind.
-        destination_path(request),
-        destination_path(request, templates=naming.LEGACY_TEMPLATES),
-    ])
     candidates = []
-    for base in bases:
+    for base in dict.fromkeys(bases):
         candidates.extend([base, os.path.splitext(base)[0] + ".mkv"])
     return list(dict.fromkeys(candidates))
 
 
+def first_existing(*bases: str) -> str | None:
+    """The file already occupying any of these destinations, if any."""
+    return next((p for p in candidate_paths(*bases) if os.path.exists(p)), None)
+
+
+def _candidate_paths(request: models.Request) -> list[str]:
+    return candidate_paths(
+        destination_path(request),
+        destination_path(request, templates=naming.LEGACY_TEMPLATES),
+    )
+
+
 def existing_file(request: models.Request) -> str | None:
     """The file already occupying this request's destination, if any."""
-    return next((p for p in _candidate_paths(request) if os.path.exists(p)), None)
+    return first_existing(
+        destination_path(request),
+        destination_path(request, templates=naming.LEGACY_TEMPLATES),
+    )
 
 
 def library_gap(request: models.Request) -> dict | None:

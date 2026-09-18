@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>SC Panel</title>
+  <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}"/>
+  <link rel="stylesheet" href="{{ asset('vendor/fonts/fonts.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('vendor/tabler-1.4.0/tabler.min.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('vendor/tabler-icons-3.19.0/tabler-icons.min.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/tokens.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/base.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/layout.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/components.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/pages.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/responsive.css') }}"/>
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="antialiased">
+<div class="wrapper">
+
+{% include 'partials/_sidebar.html' %}
+
+  <!-- ── Main ────────────────────────────────────────────────────── -->
+  <div class="page-wrapper">
+{% include 'partials/_header.html' %}
+
+    <div class="page-body">
+      <div class="container-xl">
+{% block content %}{% endblock %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% include 'partials/_modals.html' %}
+
+<script src="{{ asset('vendor/tabler-1.4.0/tabler.min.js') }}"></script>
+<!-- Shared primitives, and the fetch wrapper that adds the CSRF token.
+     Must load before any page script: reversing this strips CSRF from
+     every call, silently. -->
+<script src="{{ asset('core.js') }}"></script>
+<script src="{{ asset('api.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

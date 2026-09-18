@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>{% block title %}SC Panel{% endblock %}</title>
+  <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}"/>
+  <link rel="stylesheet" href="{{ asset('vendor/fonts/fonts.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('vendor/tabler-1.4.0/tabler.min.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('vendor/tabler-icons-3.19.0/tabler-icons.min.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/tokens.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/base.css') }}"/>
+  <link rel="stylesheet" href="{{ asset('css/components.css') }}"/>
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="antialiased">
+{% block content %}{% endblock %}
+
+<!-- core.js, but no shell: no sidebar, no header, no initAuth. The fetch
+     wrapper is harmless here and worth having — every call this page makes is
+     to /api/auth/*, which the wrapper exempts from both the CSRF header (there
+     is no session yet to have a token) and the redirect-to-login on 401 (which
+     would otherwise be a loop). -->
+<script src="{{ asset('core.js') }}"></script>
+<script src="{{ asset('api.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
