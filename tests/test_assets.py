@@ -62,10 +62,10 @@ def test_unversioned_request_must_be_revalidated(client):
     assert response.headers["cache-control"] == "no-cache"
 
 
-def test_rendered_page_references_versioned_assets(client, monkeypatch):
-    from app.auth import deps
+def test_rendered_page_references_versioned_assets(client):
+    from tests.conftest import enable_open_mode
 
-    monkeypatch.setattr(deps, "AUTH_ENABLED", False)
+    enable_open_mode()  # so the shell is served without a session
     body = client.get("/").text
 
     assert f'/static/app.js?v={_asset_version("app.js")}' in body

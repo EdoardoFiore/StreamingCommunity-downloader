@@ -21,7 +21,7 @@ from app.auth.jellyfin import (
     normalize_base_url,
 )
 from app.auth.permissions import ALL_PERMISSIONS, Permission
-from app.config import AUTH_ENABLED, COOKIE_SAMESITE, COOKIE_SECURE
+from app.config import COOKIE_SAMESITE, COOKIE_SECURE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -77,7 +77,7 @@ def _session_payload(user: models.User, csrf_token: str) -> dict:
     return {
         "user": user.to_public(),
         "csrf_token": csrf_token,
-        "auth_enabled": AUTH_ENABLED and not models.runtime_open_mode(),
+        "auth_enabled": not models.runtime_open_mode(),
         # Shown in the UI so a bug report can name the build it came from. Here
         # rather than in the public /status: it is only useful to someone
         # already inside.
@@ -164,7 +164,7 @@ async def _authenticate_as_jellyfin_admin(
 @router.get("/status")
 def auth_status():
     """Public: tells the login page whether the panel still needs setting up."""
-    if not AUTH_ENABLED or models.runtime_open_mode():
+    if models.runtime_open_mode():
         return {"setup_done": True, "jellyfin_url": None, "auth_enabled": False}
     url, _ = models.jellyfin_config()
     return {"setup_done": models.setup_done(), "jellyfin_url": url, "auth_enabled": True}
@@ -177,8 +177,6 @@ async def setup(body: SetupRequest, request: Request, response: Response):
     Restricted to a user who is an administrator *on Jellyfin*, which is what
     removes the need for hardcoded credentials or a setup file.
     """
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=404, detail="Autenticazione disabilitata su questa installazione")
     if models.setup_done():
         raise HTTPException(status_code=403, detail="Il pannello è già configurato")
 
@@ -227,15 +225,11 @@ async def setup(body: SetupRequest, request: Request, response: Response):
 async def skip_setup():
     """First-run alternative to /setup: run the panel without Jellyfin at all.
 
-    Interactive equivalent of deploying with AUTH_ENABLED=0, chosen from the
-    setup wizard instead of an environment variable — no restart needed, and
-    reachable again later from Settings via /jellyfin-connect. Reverting a
-    "jellyfin" mode back to "open" is intentionally not supported.
+    The panel then runs with no login at all, which is the mode it had before
+    Jellyfin SSO existed. Reachable again later from Settings via
+    /jellyfin-connect; reverting a "jellyfin" mode back to "open" is
+    intentionally not supported.
     """
-    if not AUTH_ENABLED:
-        raise HTTPException(
-            status_code=404, detail="Autenticazione disabilitata su questa installazione"
-        )
     if models.setup_done():
         raise HTTPException(status_code=403, detail="Il pannello è già configurato")
 
@@ -275,11 +269,6 @@ async def connect_jellyfin(
     anymore — this is inherent to the feature, not silently reconciled, and
     must be called out in the Settings UI copy.
     """
-    if not AUTH_ENABLED:
-        raise HTTPException(
-            status_code=404, detail="Autenticazione disabilitata su questa installazione"
-        )
-
     already_connected = models.get_setting(models.SETTING_AUTH_MODE) == "jellyfin"
     if already_connected and not user.has(Permission.MANAGE_USERS):
         raise HTTPException(status_code=403, detail="Permesso negato")
@@ -332,8 +321,6 @@ async def connect_jellyfin(
 
 @router.post("/jellyfin")
 async def login(body: LoginRequest, request: Request, response: Response):
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=404, detail="Autenticazione disabilitata su questa installazione")
     base_url, _ = models.jellyfin_config()
     if not base_url or not models.setup_done():
         raise HTTPException(status_code=409, detail="Pannello non ancora configurato")
@@ -411,8 +398,6 @@ async def login_with_token(body: TokenLoginRequest, request: Request, response: 
     opaque Jellyfin token is not guessable, so this is not a credential
     brute-force surface the way a username/password pair is.
     """
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=404, detail="Autenticazione disabilitata su questa installazione")
     base_url, _ = models.jellyfin_config()
     if not base_url or not models.setup_done():
         raise HTTPException(status_code=409, detail="Pannello non ancora configurato")

@@ -7,18 +7,15 @@ to approve it, which is how it treats every other download.
 
 import pytest
 
-from app import main as main_module
-from app.auth import deps
-from app.auth import router as auth_router
 from app.requests import models as request_models
 from app.watches import models as watch_models, poller
+from tests.conftest import enable_open_mode
 
 
 @pytest.fixture
 def open_panel(client, source, stub_jobs, monkeypatch):
     """A panel with no Jellyfin connection; the source has 3 episodes/1 season."""
-    for module in (deps, auth_router, main_module):
-        monkeypatch.setattr(module, "AUTH_ENABLED", False)
+    enable_open_mode()
     from app.core import tv
 
     monkeypatch.setattr(tv, "get_info_tv", lambda *a, **k: 1)

@@ -10,7 +10,7 @@
 
 let _me = null;           // { user, csrf_token, auth_enabled }
 let _csrf = '';
-let _authEnabled = true;  // false when the panel runs without Jellyfin (AUTH_ENABLED=0)
+let _authEnabled = true;  // false when the panel runs without Jellyfin (auth_mode=open)
 
 function can(permission) {
   return !!_me && _me.user.permission_names.includes(permission);

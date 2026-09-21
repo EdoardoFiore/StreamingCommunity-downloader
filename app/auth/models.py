@@ -25,10 +25,10 @@ SETTING_JELLYFIN_SERVER_ID = "jellyfin_server_id"
 SETTING_ALLOW_NEW_LOGIN = "allow_new_jellyfin_login"
 SETTING_DEFAULT_PERMISSIONS = "default_permissions"
 
-# Explicit auth mode chosen at setup time. Unset = wizard still pending, "open"
-# = admin chose to skip Jellyfin (no login, same surface as AUTH_ENABLED=0 but
-# a runtime choice instead of a deploy-time one), "jellyfin" = connected.
-# Reverting "jellyfin" -> "open" is intentionally not supported.
+# Explicit auth mode chosen at setup time, and the only thing that decides
+# whether the panel asks for a login. Unset = wizard still pending, "open" =
+# admin chose to skip Jellyfin, "jellyfin" = connected. Reverting
+# "jellyfin" -> "open" is intentionally not supported.
 SETTING_AUTH_MODE = "auth_mode"
 
 _SETTING_DEFAULTS = {

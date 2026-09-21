@@ -23,8 +23,7 @@ Senza queste informazioni è quasi impossibile capire quale codice stia girando.
 - Immagine e tag (es. `ghcr.io/edoardofiore/streamingcommunity-downloader:latest`, `:1.0.0`), oppure
   commit se avviato da sorgente:
 - Come è avviato: Docker Compose / Docker / da sorgente:
-- `AUTH_ENABLED`: `1` / `0` / non impostato:
-- Se `AUTH_ENABLED=1`: Jellyfin collegato oppure "Continua senza Jellyfin":
+- Modalità di accesso: Jellyfin collegato / "Continua senza Jellyfin" / setup mai completato:
 - Dietro un reverse proxy? Se sì, quale, e `TRUST_PROXY_HEADERS`:
 
 **Log**

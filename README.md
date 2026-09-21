@@ -192,13 +192,14 @@ pytest -q
 ### Upgrading from v1
 
 v1 is the panel before the Jellyfin login existed. **Pulling the new image changes nothing by
-default**: `AUTH_ENABLED` is off unless you set it, so the panel stays as open as it was. You will
-see the redesigned interface, and you have to set the source domain once (see above).
+default**: a panel that was running without a login keeps running without one. You will see the
+redesigned interface, and you have to set the source domain once (see above).
 
 To turn the login on, copy the `/app/config` volume and the `DB_FILE` / `DATA_FILE` /
-`SCHEDULE_FILE` variables from `docker-compose.template.yml`, then set `AUTH_ENABLED=1`. That volume
-is not optional: users, sessions and requests live in `panel.db`, which without it sits inside the
-container and is lost on every pull.
+`SCHEDULE_FILE` variables from `docker-compose.template.yml`, then connect Jellyfin from
+**Impostazioni → Accesso e utenti**. That volume is not optional: users, sessions and requests live
+in `panel.db`, which without it sits inside the container and is lost on every pull — including the
+answer to the setup question, which would then be asked again on every restart.
 
 To stay on v1, pin the tag instead of following `latest`:
 
@@ -214,8 +215,9 @@ and the `/app/config` volume are the same, so `panel.db` and your users carry ov
 
 ## Users, roles and requests
 
-With `AUTH_ENABLED=1`, the first sign-in configures the panel and creates its administrator; only a
-Jellyfin administrator can do it. After that, Jellyfin accounts **do not** get access automatically —
+On first run the panel asks once, on its setup screen, whether to use Jellyfin. Choosing **Collega a
+Jellyfin** configures the panel and creates its administrator from that sign-in; only a Jellyfin
+administrator can do it. After that, Jellyfin accounts **do not** get access automatically —
 an administrator imports them from **Utenti** and assigns permissions. Opening the panel to every
 Jellyfin account is a switch on that page, off by default.
 
@@ -249,10 +251,14 @@ its name.
 
 ### Running without Jellyfin
 
-Leave `AUTH_ENABLED` unset (or `0`) and the panel runs with no login at all: every visitor gets
-direct download, settings and the file manager. With `AUTH_ENABLED=1` you get the same result by
-pressing **Continua senza Jellyfin** on the setup screen, and can connect Jellyfin later from
-**Impostazioni → Accesso e utenti** without a restart.
+Press **Continua senza Jellyfin** on the setup screen and the panel runs with no login at all: every
+visitor gets direct download, settings and the file manager. You can connect Jellyfin later from
+**Impostazioni → Accesso e utenti**, without a restart.
+
+There is no environment variable for this. It used to be `AUTH_ENABLED`, which is gone: set to `0`
+it did not just default to open mode, it hid the setup screen altogether, so the choice the panel
+offers could not be made. An existing deployment that was running without it keeps open mode across
+the upgrade — the panel writes that answer into `panel.db` the first time it starts.
 
 Going back — from a connected Jellyfin to no login — is deliberately not offered in the UI: the
 imported users and their permissions would be left in an ambiguous state.
@@ -323,7 +329,6 @@ failed and why.
 | `TMP_DIR` | `tmp` | HLS segments while a job runs, cleaned up afterwards |
 | `FFMPEG_PATH` | — | full path to `ffmpeg`, when it is not on `PATH` |
 | `FFPROBE_PATH` | — | full path to `ffprobe`; see the note below |
-| `AUTH_ENABLED` | `0` | `1` enables Jellyfin login, requests and users |
 | `DOMAIN_SOURCE_URL` | a public page | where replacement domains are read from |
 | `DOMAIN_NAME_PATTERN` | `streaming(community\|unity)…` | which names may be adopted automatically |
 | `COOKIE_SECURE` | `0` | set to `1` when serving over HTTPS |

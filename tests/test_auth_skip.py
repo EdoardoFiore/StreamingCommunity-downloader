@@ -5,7 +5,6 @@ Settings (POST /api/auth/jellyfin-connect).
 
 from app import db
 from app.auth import models
-from app.auth import router as auth_router
 from app.auth.permissions import Permission
 from tests.conftest import ALL, do_setup, make_user, session_for
 
@@ -25,9 +24,9 @@ def test_skip_marks_status_done_with_no_jellyfin(client):
 
 
 def test_skip_matches_the_open_mode_permission_surface(client):
-    """Skipping from the wizard must land on exactly the same implicit
-    permission set as AUTH_ENABLED=0 (tests/test_open_mode.py), so the two
-    entry points into open mode never drift apart."""
+    """Skipping from the wizard must land on exactly the implicit permission
+    set tests/test_open_mode.py pins down — that file asserts the surface,
+    this one asserts the endpoint that opens it."""
     _skip(client)
     response = client.get("/api/auth/me")
     assert response.status_code == 200
@@ -58,11 +57,6 @@ def test_skip_refused_once_already_skipped(client):
     response = client.post("/api/auth/skip")
     assert response.status_code == 403
 
-
-def test_skip_returns_404_when_auth_is_force_disabled(client, monkeypatch):
-    monkeypatch.setattr(auth_router, "AUTH_ENABLED", False)
-    response = client.post("/api/auth/skip")
-    assert response.status_code == 404
 
 
 def test_setup_done_is_unaffected_by_missing_auth_mode_key(client, admin_credentials):

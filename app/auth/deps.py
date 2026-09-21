@@ -16,14 +16,13 @@ from starlette.responses import JSONResponse, RedirectResponse
 from app.auth import models
 from app.auth import session as sessions
 from app.auth.permissions import Permission
-from app.config import AUTH_ENABLED, TRUST_PROXY_HEADERS
+from app.config import TRUST_PROXY_HEADERS
 
 logger = logging.getLogger(__name__)
 
-# Granted to every request when AUTH_ENABLED is False: the surface the panel
-# exposed before Jellyfin SSO existed. REQUEST/MANAGE_REQUESTS/MANAGE_USERS
-# are deliberately excluded — a queue and a user list have no meaning without
-# accounts.
+# Granted to every request in open mode: the surface the panel exposed before
+# Jellyfin SSO existed. REQUEST/MANAGE_REQUESTS/MANAGE_USERS are deliberately
+# excluded — a queue and a user list have no meaning without accounts.
 OPEN_MODE_PERMISSIONS = int(
     Permission.DOWNLOAD
     | Permission.MANAGE_SETTINGS
@@ -108,12 +107,12 @@ class AuthMiddleware:
 
         scope["state"] = scope.get("state", {})
 
-        if not AUTH_ENABLED or models.runtime_open_mode():
-            # No Jellyfin server configured (deploy-time env var, or an admin
-            # explicitly skipped it in the setup wizard): every request is the
-            # same implicit user. No cookie is ever set, so there is no
-            # session to ride — the CSRF check below exists to protect that
-            # cookie and does not apply here.
+        if models.runtime_open_mode():
+            # No Jellyfin server: an admin chose "Continua senza Jellyfin" in
+            # the setup wizard, so every request is the same implicit user. No
+            # cookie is ever set, so there is no session to ride — the CSRF
+            # check below exists to protect that cookie and does not apply
+            # here.
             scope["state"]["user"] = OPEN_MODE_USER
             scope["state"]["csrf_token"] = None
             await self.app(scope, receive, send)
