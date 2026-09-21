@@ -9,9 +9,9 @@ StreamingCommunity and AnimeUnity into a Jellyfin library. It handles M3U8 parsi
 decryption, parallel downloading and FFmpeg merging.
 
 Access can be authenticated against a Jellyfin server; there is no local password store.
-Authentication is **opt-in**: `AUTH_ENABLED` defaults to `0`, which runs the panel open (no login),
-so pulling a newer image never locks out a deployment whose compose file predates the variable.
-The shipped compose sets `AUTH_ENABLED=1`.
+Authentication is **opt-in, and the choice is made once in the setup wizard**, not by an
+environment variable: "Collega a Jellyfin" or "Continua senza Jellyfin", stored as the `auth_mode`
+setting in `panel.db`. Until it is answered the panel serves nothing but the wizard.
 
 ## Running the Project
 
@@ -93,8 +93,12 @@ for downloads that skipped the queue, one summary per season/series), `downloads
 ### Persistence
 
 - `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications, notification
-  channels, download hooks, followed series. Migrations are the ordered `MIGRATIONS` list in `app/db.py`, applied
-  against `PRAGMA user_version`. Never edit an applied migration; append a new one.
+  channels, download hooks, followed series, and the `auth_mode` answer. Migrations are the ordered
+  `MIGRATIONS` list in `app/db.py`, applied against `PRAGMA user_version`. Never edit an applied
+  migration; append a new one. An entry is a list of SQL statements, or a `(conn, fresh)` callable
+  when the decision depends on whether the database already existed — `fresh` is the only way to
+  tell an upgrade from a first run, since a brand-new file reaches the last migration in the same
+  pass as the first.
 - `data.json` — source domain, library paths, performance settings, domain-recovery switches,
   naming templates. Anything carrying a secret goes in `panel.db` instead. Written only through
   `config.update_data()`, which holds the file lock: a background thread writes `domain`. Runtime state, not committed:
@@ -113,11 +117,13 @@ anything under a mounted static directory is readable by unauthenticated visitor
 
 - **The source domain never comes from the client.** Use `app.config.configured_domain()`. Same for
   the requester's identity, which comes from the session, never from a request body.
-- **`AUTH_ENABLED` is read as an import-time constant** in `app/auth/deps.py`, `app/auth/router.py`
-  and `app/main.py`. Patching `app.config` alone does not reach those bindings — all three must be
-  patched (see the `_auth_enabled` fixture in `tests/conftest.py`). Open mode is also reachable at
-  runtime via `models.runtime_open_mode()` (the `auth_mode` setting), so both paths must be checked
-  wherever one is.
+- **Open mode has exactly one source of truth: `models.runtime_open_mode()`**, reading the
+  `auth_mode` setting. It replaced an `AUTH_ENABLED` env var that was read as an import-time
+  constant in three modules — so every test needed three patches, and the two switches could
+  disagree: `AUTH_ENABLED=0` did not merely default to open, it made the wizard answer 404, leaving
+  Settings offering a "Collega a Jellyfin" button that could not work. Do not reintroduce a
+  deploy-time override. Databases predating the removal are carried over by migration v8 in
+  `app/db.py`, the only place that still reads the variable.
 - **Every `/api` route needs a decision**: public allowlist, `SESSION_ONLY_PATHS`, or a
   `require(...)` dependency. `tests/test_permissions.py` fails otherwise.
 - **No ADMIN super-permission.** Flags are independent, so an administrator can exist who never sees
@@ -170,7 +176,8 @@ anything under a mounted static directory is readable by unauthenticated visitor
   and the follow is rolled back.
 - **Anything user-owned is unavailable in open mode.** The implicit user has no `jf_user` row, so a
   foreign key would fail. Check the user the middleware resolved (`is OPEN_MODE_USER`) rather than
-  binding `AUTH_ENABLED` in yet another module.
+  asking the `auth_mode` setting again: the sentinel cannot disagree with the middleware, and it
+  costs no query.
 - **A batch's expected total is fixed before its first job is submitted**, and every job created
   must reach a terminal listener exactly once — otherwise the batch never closes and its summary
   never fires. That is why `jobs.py` notifies listeners on *every* path out of `_run_download`,

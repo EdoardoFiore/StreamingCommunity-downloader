@@ -17,28 +17,6 @@ from app.auth import models, permissions, ratelimit, session as sessions
 
 
 @pytest.fixture(autouse=True)
-def _auth_enabled(monkeypatch):
-    """Force AUTH_ENABLED on for the suite.
-
-    The shipped default is off (open mode) so that pulling a newer image never
-    locks an existing deployment out — see app/config.py. Almost every test
-    here exercises the authenticated panel, so the default is flipped once,
-    centrally, instead of in each test.
-
-    Patched on the three modules that read it as an import-time constant rather
-    than on app.config, since rebinding the source module would not reach the
-    names already bound. Tests that want open mode override these afterwards
-    with their own monkeypatch call, which wins (see tests/test_open_mode.py).
-    """
-    from app import main as main_module
-    from app.auth import deps, router as auth_router
-
-    for module in (deps, auth_router, main_module):
-        monkeypatch.setattr(module, "AUTH_ENABLED", True)
-    yield
-
-
-@pytest.fixture(autouse=True)
 def _configured_domain(tmp_path, monkeypatch):
     """Give every test a configured source domain, in a throwaway file.
 
@@ -363,6 +341,16 @@ def do_setup(client, credentials) -> dict:
     response = client.post("/api/auth/setup", json=credentials)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def enable_open_mode():
+    """Put the panel in open mode, the way the wizard's "Continua senza
+    Jellyfin" button does.
+
+    The setting is the entire switch: there is no environment variable to
+    unset and no import-time constant to rebind in three modules.
+    """
+    models.set_setting(models.SETTING_AUTH_MODE, "open")
 
 
 def do_login(client, username: str, password: str):

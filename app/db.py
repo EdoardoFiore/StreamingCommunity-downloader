@@ -8,11 +8,16 @@ transitions, work claiming).
 
 Schema versioning uses ``PRAGMA user_version`` and the ordered ``MIGRATIONS``
 list below — every migration runs exactly once, in order, inside a transaction.
+An entry is normally a list of SQL statements; it may also be a callable, for
+the rare migration whose decision cannot be expressed in SQL because it depends
+on whether the database already existed.
 """
 
 import logging
+import os
 import sqlite3
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -415,7 +420,47 @@ _V7_DOWNLOAD_HOOK = [
 ]
 
 
-MIGRATIONS: list[list[str]] = [
+def _v8_carry_over_open_mode(conn: sqlite3.Connection, fresh: bool):
+    """Give an existing deployment the auth mode it was already running in.
+
+    Which mode the panel runs in used to be decided at deploy time by the
+    ``AUTH_ENABLED`` environment variable, and is now decided once, by a human,
+    in the setup wizard, and stored in the ``auth_mode`` setting. A database
+    that predates this migration holds no such answer, so an installation that
+    was running open — no variable in its compose file — would come back after
+    an upgrade asking a question nobody asked for, on a panel that until that
+    moment needed no login.
+
+    So the variable is read one final time, here and nowhere else, and only for
+    a database that already existed: a fresh install always goes to the wizard,
+    whatever the environment says. This is the last release in which the
+    variable means anything; it is documented as removed.
+
+    The backfill is skipped whenever the panel shows any sign of having been
+    set up (a user, a Jellyfin URL, an explicit mode) — those installations
+    already have their answer and ``setup_done()`` finds it.
+    """
+    if fresh:
+        return
+    if conn.execute("SELECT COUNT(*) AS n FROM jf_user").fetchone()["n"]:
+        return
+    configured = conn.execute(
+        "SELECT 1 FROM jf_setting WHERE key IN ('auth_mode', 'jellyfin_url') LIMIT 1"
+    ).fetchone()
+    if configured is not None:
+        return
+    if os.getenv("AUTH_ENABLED", "0") == "1":
+        # Deployed asking for Jellyfin but never configured: the wizard is
+        # still the answer, and turning it open here would be a downgrade
+        # nobody chose.
+        return
+    conn.execute("INSERT INTO jf_setting(key, value) VALUES('auth_mode', 'open')")
+    logger.info("Carried an existing AUTH_ENABLED=0 deployment over to auth_mode=open")
+
+
+Migration = list[str] | Callable[[sqlite3.Connection, bool], None]
+
+MIGRATIONS: list[Migration] = [
     _V1_AUTH,
     _V2_REQUESTS,
     _V3_NOTIFICATION_CHANNELS,
@@ -423,6 +468,7 @@ MIGRATIONS: list[list[str]] = [
     _V5_WATCHES_WITHOUT_ACCOUNTS,
     _V6_PANEL_NOTIFICATIONS,
     _V7_DOWNLOAD_HOOK,
+    _v8_carry_over_open_mode,
 ]
 
 
@@ -431,12 +477,19 @@ def run_migrations():
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version >= len(MIGRATIONS):
         return
+    # Told to the migrations that need it: at this point nothing has been
+    # applied yet, so version 0 means the file is being created right now.
+    fresh = version == 0
     for index in range(version, len(MIGRATIONS)):
+        migration = MIGRATIONS[index]
         logger.info("Applying database migration %d", index + 1)
         conn.execute("BEGIN IMMEDIATE")
         try:
-            for statement in MIGRATIONS[index]:
-                conn.execute(statement)
+            if callable(migration):
+                migration(conn, fresh)
+            else:
+                for statement in migration:
+                    conn.execute(statement)
             # PRAGMA cannot be parameterised.
             conn.execute(f"PRAGMA user_version = {index + 1}")
         except Exception:

@@ -16,10 +16,10 @@ router = APIRouter(prefix="/api/watches", tags=["watches"])
 def acting_user_id(http_request: HttpRequest) -> int | None:
     """Who owns the watch, or None when the panel runs without accounts.
 
-    The check is on the user the middleware resolved rather than on
-    ``AUTH_ENABLED``: that constant is read at import time, and binding it in a
-    fourth module would be a fourth place to patch. Both routes into open mode
-    end at this same sentinel user, which has no row in ``jf_user``.
+    The check is on the user the middleware resolved rather than on the
+    ``auth_mode`` setting: open mode ends at this same sentinel user, which has
+    no row in ``jf_user``, so asking the middleware's answer cannot disagree
+    with it — and it costs no second query.
     """
     user = current_user(http_request)
     return None if user is OPEN_MODE_USER else user.id

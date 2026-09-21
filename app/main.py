@@ -22,7 +22,7 @@ from app.jobs import job_manager
 from app.requests import router as requests_router, service as requests_service
 from app.watches import poller as watch_poller, router as watches_router
 from app.schedule import ScheduleStore
-from app.config import AUTH_ENABLED, SCHEDULE_FILE
+from app.config import SCHEDULE_FILE
 from app.routers import (
     domain, search, home, tv, downloads, progress, files, images, anime, notification_channels,
     metadata as metadata_router, download_hooks,
@@ -155,7 +155,7 @@ def index(request: Request):
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     """Login and first-run setup. Public; redirects away once signed in."""
-    if not AUTH_ENABLED or (
+    if auth_models.runtime_open_mode() or (
         getattr(request.state, "user", None) is not None and auth_models.setup_done()
     ):
         return RedirectResponse("/", status_code=302)

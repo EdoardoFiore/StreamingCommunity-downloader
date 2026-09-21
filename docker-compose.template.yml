@@ -2,12 +2,13 @@
 #
 #   docker compose -f docker-compose.template.yml up -d
 #
-# Then open http://localhost:8000. With AUTH_ENABLED=1 below, the panel asks for
-# the Jellyfin server URL and the credentials of a Jellyfin administrator, who
-# becomes the panel administrator — no API key to paste, no credentials in this
-# file. If you have no Jellyfin server, press "Continua senza Jellyfin" on that
-# screen: the panel runs with no login and you can connect Jellyfin later from
-# Settings.
+# Then open http://localhost:8000. On first run the panel asks once whether to
+# use Jellyfin: "Collega a Jellyfin" wants the server URL and the credentials of
+# a Jellyfin administrator, who becomes the panel administrator — no API key to
+# paste, no credentials in this file. If you have no Jellyfin server, press
+# "Continua senza Jellyfin" on that screen: the panel runs with no login, and
+# you can connect Jellyfin later from Settings. The answer lives in panel.db, on
+# the volume below, so it is asked once and not on every restart.
 #
 # Upgrading from v1 (the pre-authentication panel)? See the "Upgrading" section
 # in the README first — in particular the /app/config volume below, which your
@@ -31,13 +32,6 @@ services:
       - SCHEDULE_FILE=/app/config/schedule.json
       - HOST=0.0.0.0
       - PORT=8000
-      # 1 enables Jellyfin login, the request queue and user management.
-      # Removing this line (or setting 0) runs the panel open: no login, every
-      # visitor gets direct download, settings and the file manager — what the
-      # panel did before SSO existed. Decide at deploy time: flipping a live
-      # deployment from 1 to 0 stops enforcing the permissions of users who
-      # already exist.
-      - AUTH_ENABLED=1
       # Set to 1 when the panel is served over HTTPS, so the session cookie is
       # only ever sent over TLS.
       - COOKIE_SECURE=0

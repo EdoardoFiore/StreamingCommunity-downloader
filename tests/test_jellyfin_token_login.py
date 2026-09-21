@@ -73,9 +73,11 @@ def test_token_exchange_requires_setup_done(client):
     assert response.status_code == 409
 
 
-def test_token_exchange_disabled_when_auth_disabled(client, monkeypatch):
-    from app.auth import router as auth_router
+def test_token_exchange_has_no_server_to_ask_in_open_mode(client):
+    """Open mode has no Jellyfin at all, so there is nothing to check the
+    token against — the same 409 as a panel that has not been set up."""
+    from tests.conftest import enable_open_mode
 
-    monkeypatch.setattr(auth_router, "AUTH_ENABLED", False)
+    enable_open_mode()
     response = client.post("/api/auth/jellyfin-token", json={"token": "whatever"})
-    assert response.status_code == 404
+    assert response.status_code == 409

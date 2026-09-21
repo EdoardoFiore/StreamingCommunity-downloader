@@ -64,27 +64,20 @@ COOKIE_SAMESITE = _resolve_samesite(os.getenv("COOKIE_SAMESITE", "lax"), COOKIE_
 # attacker-controlled and would poison the IP reported to Jellyfin.
 TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "0") == "1"
 
-# Jellyfin authentication is opt-in: set AUTH_ENABLED=1 to get the login screen,
-# the setup wizard, the request queue and user management. Left unset, the panel
-# runs open — no login, every request gets the same implicit permissions
-# (download, settings, file manager, library) — which is what the panel did
-# before SSO existed.
+# Whether the panel asks for a Jellyfin login is not configured here, and there
+# is no environment variable for it. It is chosen once, by a human, in the setup
+# wizard — "Collega a Jellyfin" (POST /api/auth/setup) or "Continua senza
+# Jellyfin" (POST /api/auth/skip) — and stored in the database as the
+# ``auth_mode`` setting. Open mode can be left later from Settings
+# (POST /api/auth/jellyfin-connect), without a restart. See
+# app.auth.models.SETTING_AUTH_MODE / runtime_open_mode().
 #
-# The default is 0 deliberately, and it is the upgrade path: an existing
-# deployment's compose file predates this variable, so pulling a newer image
-# keeps behaving exactly as before instead of suddenly demanding a Jellyfin
-# server. Nothing here can distinguish an upgrade from a fresh install — there
-# is no persistent state that says so — hence a safe default rather than a
-# guess. The shipped compose file sets AUTH_ENABLED=1 explicitly, so new
-# deployments do get authentication.
-#
-# There is also a runtime, DB-backed equivalent, used when AUTH_ENABLED=1: an
-# admin can choose "Continua senza Jellyfin" in the setup wizard
-# (POST /api/auth/skip), reaching the same open mode without an env var or a
-# restart, and can connect Jellyfin later from Settings
-# (POST /api/auth/jellyfin-connect). See app.auth.models.SETTING_AUTH_MODE /
-# runtime_open_mode().
-AUTH_ENABLED = os.getenv("AUTH_ENABLED", "0") == "1"
+# ``AUTH_ENABLED`` used to decide this at deploy time. It was removed because
+# it could not be reconciled with the wizard: set to 0 it did not merely
+# default to open mode, it made the wizard unreachable, so the GUI choice the
+# panel advertised did not exist and Settings offered a "Collega a Jellyfin"
+# button that answered 404. Databases predating the removal are carried over
+# by migration v8 in app/db.py, which is the only place that still reads it.
 
 SETTINGS_DEFAULTS = {
     "max_concurrent_downloads": 3,
