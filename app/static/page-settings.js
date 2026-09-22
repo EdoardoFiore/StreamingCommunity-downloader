@@ -13,6 +13,7 @@ const _SETTINGS_FEEDBACK_IDS = [
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
   'domain-recovery-feedback',
   'jf-refresh-feedback', 'hooks-feedback', 'naming-feedback',
+  'output-feedback',
 ];
 
 function _feedback(id, message = '', kind = 'muted') {
@@ -32,7 +33,9 @@ const _SETTINGS_TAB_LOADERS = {
   // at all, for data only this tab reads.
   librerie: () => loadLibraries().then(renderLibrariesList),
   nomi: () => loadNamingTemplates(),
-  download: () => loadPerfSettings(),
+  // Both read the same endpoint, and _loadAppSettings() shares the promise, so
+  // this is still one fetch.
+  download: () => Promise.all([loadPerfSettings(), loadOutputSettings()]),
   accesso: () => loadJellyfinSettings(),
   notifiche: () => loadNotificationChannels(),
   hook: () => Promise.all([loadJellyfinRefresh(), loadHooks()]),
@@ -398,6 +401,39 @@ async function loadPerfSettings() {
   document.getElementById('setting-max-workers').value = data.max_segment_workers ?? 16;
   document.getElementById('setting-watch-interval').value =
     data.series_watch_interval_minutes ?? 240;
+}
+
+// ── Output format ─────────────────────────────────────────────
+//
+// The defaults are spelled in the markup's <option> values rather than fetched:
+// there are two of each and the server rejects anything else outright, so a
+// round trip would buy nothing. Unlike the naming templates, where the default
+// is a string the server owns and the placeholder has to be synced from it.
+
+async function loadOutputSettings() {
+  const data = await _loadAppSettings();
+  if (!data) return;
+  document.getElementById('setting-output-container').value = data.output_container || 'mkv';
+  document.getElementById('setting-subtitle-mode').value = data.subtitle_mode || 'embed';
+}
+
+async function saveOutputSettings() {
+  const btn = document.getElementById('save-output-btn');
+  const outputContainer = document.getElementById('setting-output-container').value;
+  const subtitleMode = document.getElementById('setting-subtitle-mode').value;
+  btn.disabled = true;
+  _feedback('output-feedback', 'Salvataggio...');
+  try {
+    // Only the two keys this section owns: set_app_settings merges over what is
+    // stored, so it cannot clobber a change made seconds ago in another pane.
+    await api.put('/api/domain/settings', {
+      output_container: outputContainer,
+      subtitle_mode: subtitleMode,
+    });
+    _feedback('output-feedback', 'Salvato.', 'success');
+    showToast('Formato di uscita salvato', 'success');
+  } catch (e) { _feedback('output-feedback', errText(e, 'Errore salvataggio.'), 'danger'); }
+  finally { btn.disabled = false; }
 }
 
 async function loadDomainRecoverySettings() {
@@ -842,6 +878,7 @@ registerActions({
   'cfg:saveNaming':       () => saveNamingTemplates(),
   'cfg:resetNaming':      () => resetNamingTemplates(),
   'cfg:savePerf':         () => savePerfSettings(),
+  'cfg:saveOutput':       () => saveOutputSettings(),
   'cfg:jfConnect':        d => connectJellyfin(d.reconfigure === '1'),
   'cfg:jfReconfigure':    () => toggleJellyfinReconfigure(),
   'cfg:saveJfRefresh':    () => saveJellyfinRefresh(),

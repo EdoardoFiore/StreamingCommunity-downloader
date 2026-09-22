@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
 from app.config import get_settings
+from app.core import container
 from app.core.ffmpeg_path import ffmpeg_file_arg, get_ffmpeg_exe
 from app.core.headers import get_headers
 from app.core.paths import windows_path_problem
@@ -813,11 +814,16 @@ class M3U8_Segments:
         if self.emit_join_phase and hasattr(self, '_bar') and hasattr(self._bar, 'emit_status'):
             self._bar.emit_status("joining")
         os.makedirs(os.path.dirname(os.path.abspath(output_filename)), exist_ok=True)
+        # Keyed on the extension of the file actually being written, not on a
+        # parameter: this is called both for the destination (whatever container
+        # is configured) and for the temp audio tracks (genuinely mp4), and a
+        # parameter is a third thing every call site could get wrong.
+        # movflags is mov/mp4-private — handing it to the matroska muxer is not
+        # ignored, it is fatal, and it would fail after every byte is fetched.
         try:
             ffmpeg.input(combined_ts, fflags="+genpts", avoid_negative_ts="make_zero").output(
                 ffmpeg_file_arg(output_filename),
-                **{"c:v": "copy", "c:a": "aac", "b:a": "192k",
-                   "af": "aresample=async=1000", "movflags": "+faststart"}
+                **container.join_options(output_filename),
             ).overwrite_output().run(cmd=get_ffmpeg_exe(), capture_stdout=True, capture_stderr=True)
         except ffmpeg.Error as e:
             stderr = e.stderr.decode(errors="replace") if e.stderr else "(no stderr)"
@@ -892,29 +898,24 @@ class M3U8_Downloader:
         # tracks had been downloaded, which left a film whose audio is already
         # muxed — remuxed all the same, to embed its subtitles — going straight
         # from "joining" to finished with the step never lighting up.
-        if self.audio_paths or self.subtitle_track_urls or self.subtitle_languages:
+        # It is now also *not* emitted when the only extra content is subtitles
+        # and they are configured to stay outside the container: there is no
+        # merge to announce then, only a move.
+        from app.core.format import remux
+
+        subtitle_mode = container.subtitle_mode()
+        subtitle_tracks = self._downloaded_subtitles()
+        embedded = subtitle_tracks if subtitle_mode == container.EMBED else []
+
+        if self.audio_paths or embedded:
             if bar and hasattr(bar, "emit_status"):
                 bar.emit_status("merging")
-            from app.core.format import remux_to_mkv, LANG_MAP
-            video_stem = os.path.splitext(os.path.basename(self.video_path))[0]
-            subtitle_tracks = []
-            # Embed whatever subtitle vtts were actually downloaded to temp_dir by
-            # download_m3u8 (keyed on subtitle_languages), NOT subtitle_track_urls —
-            # the latter is collected via a 403-prone path and can be empty even when
-            # the vtts downloaded fine, silently dropping subs from the output.
-            seen_paths = set()
-            for lang_code in self.subtitle_languages:
-                lang_short = LANG_MAP.get(lang_code, lang_code)
-                sub_path = os.path.join(self.temp_dir, f"{video_stem}.{lang_short}.vtt")
-                if sub_path not in seen_paths and os.path.exists(sub_path):
-                    seen_paths.add(sub_path)
-                    subtitle_tracks.append({"path": sub_path, "language": lang_code})
-            self.video_path = remux_to_mkv(
+            self.video_path = remux(
                 self.video_path,
                 audio_tracks=self.audio_paths,
-                subtitle_tracks=subtitle_tracks,
+                subtitle_tracks=embedded,
             )
-            for sub in subtitle_tracks:
+            for sub in embedded:
                 try:
                     os.remove(sub["path"])
                     logger.info("Cleaned up subtitle: %s", sub["path"])
@@ -941,11 +942,80 @@ class M3U8_Downloader:
                 bar.emit_status("merging")
             self.join_audio()
 
-        # remux_to_mkv may have changed the extension to .mkv — return the real path
+        if subtitle_mode == container.EXTERNAL:
+            self._place_subtitles_beside_video(subtitle_tracks)
+
+        self._remove_superseded_sibling()
         return self.video_path
 
+    def _remove_superseded_sibling(self):
+        """Delete the same title in the other container, if one is sitting there.
+
+        Changing the setting and re-downloading a title otherwise leaves
+        Film.mkv and Film.mp4 side by side, which Jellyfin reports as two
+        versions of one film. Only the exact sibling of the file just written
+        is touched, and only once that file is complete — the same delete the
+        remux has always done to the .mp4 it superseded, now that which
+        extension supersedes which is a setting rather than a fixed rule.
+        """
+        stem, ext = os.path.splitext(self.video_path)
+        if ext not in container.KNOWN_EXTENSIONS:
+            return
+        for other in container.KNOWN_EXTENSIONS:
+            superseded = stem + other
+            if other == ext or not os.path.exists(superseded):
+                continue
+            try:
+                os.remove(superseded)
+                logger.info("Removed the superseded copy: %s", superseded)
+            except OSError as exc:
+                logger.warning("Could not remove the superseded %s: %s", superseded, exc)
+
+    def _downloaded_subtitles(self) -> list[dict]:
+        """The subtitle files download_m3u8 actually wrote into temp_dir.
+
+        Keyed on subtitle_languages, NOT subtitle_track_urls — the latter is
+        collected via a 403-prone path and can be empty even when the vtts
+        downloaded fine, which silently dropped subs from the output.
+        """
+        from app.core.format import LANG_MAP
+
+        video_stem = os.path.splitext(os.path.basename(self.video_path))[0]
+        found, seen = [], set()
+        for lang_code in self.subtitle_languages:
+            lang_short = LANG_MAP.get(lang_code, lang_code)
+            sub_path = os.path.join(self.temp_dir, f"{video_stem}.{lang_short}.vtt")
+            if sub_path not in seen and os.path.exists(sub_path):
+                seen.add(sub_path)
+                found.append({"path": sub_path, "language": lang_code})
+        return found
+
+    def _place_subtitles_beside_video(self, subtitle_tracks: list[dict]):
+        """Move the vtts next to the finished video, Jellyfin's own convention.
+
+        Moved at the end rather than downloaded straight there: written into
+        the library up front they would sit beside a video that does not exist
+        yet, and a Jellyfin scan running mid-download would index a title whose
+        only content is subtitles. shutil.move rather than os.replace, because
+        the temp directory is routinely a different volume.
+        """
+        video_dir = os.path.dirname(self.video_path) or "."
+        for sub in subtitle_tracks:
+            target = os.path.join(video_dir, os.path.basename(sub["path"]))
+            try:
+                if os.path.exists(target):
+                    os.remove(target)
+                shutil.move(sub["path"], target)
+                logger.info("Subtitle placed beside the video: %s", target)
+            except OSError as exc:
+                logger.warning("Could not place subtitle %s: %s", target, exc)
+
     def join_audio(self):
-        merged_path = self.video_path.replace(".mp4", "_merged.mp4")
+        # splitext rather than a substring replace: the destination is not
+        # necessarily .mp4 any more, and replace() would have returned the path
+        # unchanged, handing FFmpeg the same file as both input and output.
+        stem, ext = os.path.splitext(self.video_path)
+        merged_path = stem + "_merged" + ext
         audio_path = os.path.join(self.temp_dir, "_audio_tmp.mp4")
         try:
             (
@@ -1112,6 +1182,8 @@ def _download_m3u8(
 
     os.makedirs(os.path.dirname(output_filename) or ".", exist_ok=True)
 
+    from app.core import format as format_module
+
     try:
         return M3U8_Downloader(
             m3u8_index,
@@ -1128,16 +1200,26 @@ def _download_m3u8(
             subtitle_track_urls=subtitle_track_urls,
         ).start()
     except (DownloadCancelledError, Exception) as exc:
-        # Remove subtitle files already written to the output dir
+        # Remove subtitle files already written, wherever they got to: they are
+        # downloaded into temp, but the external mode moves them beside the
+        # video, and a failure can land on either side of that move.
         for path in created_subtitle_files:
-            try:
-                os.remove(path)
-                logger.info("Removed partial subtitle: %s", path)
-            except OSError:
-                pass
-        # Remove partial video / remuxed MKV if they exist
+            for candidate in (path, os.path.join(video_dir, os.path.basename(path))):
+                try:
+                    os.remove(candidate)
+                    logger.info("Removed partial subtitle: %s", candidate)
+                except OSError:
+                    pass
+        # Remove a partial output in any container it could have been written
+        # in — the setting can have changed between the attempt that failed and
+        # this one — plus the staging file a remux killed mid-write leaves.
         stem = os.path.splitext(output_filename)[0]
-        for candidate in (output_filename, stem + ".mkv"):
+        leftovers = dict.fromkeys([
+            output_filename,
+            *(stem + ext for ext in container.KNOWN_EXTENSIONS),
+            *(format_module.staging_path(stem + ext) for ext in container.KNOWN_EXTENSIONS),
+        ])
+        for candidate in leftovers:
             try:
                 os.remove(candidate)
                 logger.info("Removed partial output: %s", candidate)

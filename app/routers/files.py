@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import VIDEOS_DIR, DATA_FILE
+from app.core import container
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -218,9 +219,12 @@ async def list_library_tree():
 @router.get("/stream/{file_path:path}", dependencies=CAN_VIEW)
 def stream_file(file_path: str):
     target = _safe_path(file_path)
+    # Derived from the extension: everything used to be announced as video/mp4,
+    # which was already wrong for the MKVs the downloader produced and would be
+    # wrong half the time now that the container is a setting.
     return FileResponse(
         path=str(target),
-        media_type="video/mp4",
+        media_type=container.mime_for(target),
         headers={"Content-Disposition": "inline"},
     )
 
@@ -230,7 +234,7 @@ def download_file(file_path: str):
     target = _safe_path(file_path)
     return FileResponse(
         path=str(target),
-        media_type="video/mp4",
+        media_type=container.mime_for(target),
         filename=target.name,
         headers={"Content-Disposition": f'attachment; filename="{target.name}"'},
     )

@@ -77,7 +77,12 @@ def create_request(*, requested_by: int, **fields) -> tuple[models.Request, bool
 
     if already_there:
         request = models.transition(
-            request.id, models.AVAILABLE, output_path=resolver.destination_path(request)
+            request.id, models.AVAILABLE,
+            # The file that is actually there, not where one would be written:
+            # the container is a setting, so an existing copy can carry the
+            # other extension and pointing at the unwritten path would hand the
+            # requester a link to nothing.
+            output_path=resolver.existing_file(request) or resolver.destination_path(request),
         ) or request
         notify.notify_subscribers(
             notify.REQUEST_AVAILABLE,
@@ -161,7 +166,8 @@ def _execute_inner(request_id: int):
 
     if resolver.is_in_library(request):
         finished = models.transition(
-            request_id, models.COMPLETED, output_path=resolver.destination_path(request)
+            request_id, models.COMPLETED,
+            output_path=resolver.existing_file(request) or resolver.destination_path(request),
         )
         if finished:
             notify.notify_subscribers(

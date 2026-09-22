@@ -153,8 +153,9 @@
           I valori suggeriti nei campi sono quelli predefiniti e seguono la struttura
           raccomandata dalla <a href="https://jellyfin.org/docs/general/server/media/movies/"
           target="_blank" rel="noopener noreferrer">documentazione ufficiale di Jellyfin</a>:
-          <code>Film (2020)/Film (2020).mkv</code> e
-          <code>Serie (2019)/Season 01/Serie S01E01.mkv</code>. Cambiali solo se la tua libreria
+          <code>Film (2020)/Film (2020)</code> e
+          <code>Serie (2019)/Season 01/Serie S01E01</code>, con l&rsquo;estensione decisa dal
+          formato di uscita. Cambiali solo se la tua libreria
           segue una convenzione diversa: Jellyfin riconosce quella sopra senza configurazione.
         </p>
         <p class="settings-section-hint settings-warn">
@@ -266,6 +267,56 @@
             Salva performance
           </button>
           <div id="perf-settings-feedback" class="form-text"></div>
+        </div>
+      </div>
+
+      <!-- ── Formato di uscita ─────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Formato di uscita</p>
+        <p class="settings-section-hint">
+          In quale contenitore finiscono i file scaricati, e dove finiscono i sottotitoli.
+          Il video non viene mai ricodificato: la sorgente &egrave; gi&agrave; H.264 con audio AAC,
+          che entrambi i contenitori reggono cos&igrave; come sono, quindi cambiare questa
+          impostazione non allunga di un secondo i download.
+        </p>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label class="form-label" for="setting-output-container">Contenitore</label>
+            <select id="setting-output-container" class="form-select">
+              <option value="mkv">MKV</option>
+              <option value="mp4">MP4</option>
+            </select>
+            <div class="form-text">
+              MKV regge qualsiasi traccia ed &egrave; il predefinito. Scegli MP4 se guardi su
+              dispositivi che non aprono gli MKV: parecchie smart TV non recenti, Chromecast
+              e console.
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label" for="setting-subtitle-mode">Sottotitoli</label>
+            <select id="setting-subtitle-mode" class="form-select">
+              <option value="embed">Integrati nel file</option>
+              <option value="external">File .vtt separati</option>
+            </select>
+            <div class="form-text">
+              Integrati in un MP4 significa convertiti in <code>mov_text</code>, che perde
+              colori, grassetti e posizionamento. I file separati evitano la conversione:
+              Jellyfin li riconosce lo stesso, perch&eacute; prendono il nome del video.
+            </div>
+          </div>
+        </div>
+        <p class="settings-section-hint settings-warn">
+          <i class="ti ti-alert-triangle me-1"></i>
+          I file gi&agrave; scaricati non vengono convertiti: restano nel contenitore con cui
+          sono stati creati, e continuano a contare come presenti, quindi non verranno
+          riscaricati da soli. Se invece riscarichi un titolo di proposito, la copia nel
+          vecchio contenitore viene sostituita, non affiancata.
+        </p>
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveOutput" id="save-output-btn">
+            Salva formato
+          </button>
+          <div id="output-feedback" class="form-text"></div>
         </div>
       </div>
       </div>

@@ -5,6 +5,17 @@
 
 // ── File Manager ───────────────────────────────────────────────────────────────
 
+// Both containers the downloader writes. Gating the play button on .mp4 alone
+// hid it on almost everything the panel produces, because a second audio track
+// or an embedded subtitle has always made the output an MKV — and Chromium
+// plays H.264 + AAC in Matroska, which is exactly what lands here.
+const PLAYABLE_EXTENSIONS = ['.mp4', '.mkv'];
+
+function isPlayable(name) {
+  const lower = (name || '').toLowerCase();
+  return PLAYABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 let _expandedFolders = new Set();
 let _cachedTree = null;
 let _selectedPaths = new Set();
@@ -235,15 +246,15 @@ function renderSearchResults(results, query) {
         </div>`;
     } else {
       const size = formatSize(item.size);
-      const isMp4 = item.name.toLowerCase().endsWith('.mp4');
+      const playable = isPlayable(item.name);
       row.innerHTML = `
         <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
-        <i class="ti ${isMp4 ? 'ti-file-type-mp4 text-red' : 'ti-file text-muted'}" style="flex-shrink:0"></i>
+        <i class="ti ${playable ? 'ti-movie text-red' : 'ti-file text-muted'}" style="flex-shrink:0"></i>
         <span class="fm-name">${escapeHtml(item.name)}</span>
         ${pathMeta}
         <span class="fm-meta">${size}</span>
         <div class="fm-actions">
-          ${isMp4 ? `<button class="btn btn-sm btn-outline-primary" data-play-path="${escapeHtml(item.path)}" data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>` : ''}
+          ${playable ? `<button class="btn btn-sm btn-outline-primary" data-play-path="${escapeHtml(item.path)}" data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>` : ''}
           <button class="btn btn-sm btn-outline-secondary" data-rename-path="${escapeHtml(item.path)}" data-rename-name="${escapeHtml(item.name)}"><i class="ti ti-pencil"></i></button>
           <a class="btn btn-sm btn-outline-secondary" href="/api/files/download/${encodeURI(item.path)}"><i class="ti ti-download"></i></a>
           <button class="btn btn-sm btn-outline-danger" data-delete-path="${escapeHtml(item.path)}" data-delete-name="${escapeHtml(item.name)}"><i class="ti ti-trash"></i></button>
@@ -358,15 +369,15 @@ function renderTreeItems(items, container, depth) {
       }
     } else {
       const size = formatSize(item.size);
-      const isMp4 = item.name.toLowerCase().endsWith('.mp4');
+      const playable = isPlayable(item.name);
       row.innerHTML=`
         <input type="checkbox" class="fm-check" data-select-path="${escapeHtml(item.path)}" ${checked}>
         <span style="min-width:14px;flex-shrink:0"></span>
-        <i class="ti ${isMp4?'ti-file-type-mp4 text-red':'ti-file text-muted'}" style="flex-shrink:0"></i>
+        <i class="ti ${playable?'ti-movie text-red':'ti-file text-muted'}" style="flex-shrink:0"></i>
         <span class="fm-name">${escapeHtml(item.name)}</span>
         <span class="fm-meta">${size}</span>
         <div class="fm-actions">
-          ${isMp4?`<button class="btn btn-sm btn-outline-primary" data-play-path="${escapeHtml(item.path)}" data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>`:''}
+          ${playable?`<button class="btn btn-sm btn-outline-primary" data-play-path="${escapeHtml(item.path)}" data-play-name="${escapeHtml(item.name)}"><i class="ti ti-player-play"></i></button>`:''}
           <button class="btn btn-sm btn-outline-secondary" data-rename-path="${escapeHtml(item.path)}" data-rename-name="${escapeHtml(item.name)}"><i class="ti ti-pencil"></i></button>
           <a class="btn btn-sm btn-outline-secondary" href="/api/files/download/${encodeURI(item.path)}"><i class="ti ti-download"></i></a>
           <button class="btn btn-sm btn-outline-danger" data-delete-path="${escapeHtml(item.path)}" data-delete-name="${escapeHtml(item.name)}"><i class="ti ti-trash"></i></button>

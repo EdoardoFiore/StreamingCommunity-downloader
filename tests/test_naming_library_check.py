@@ -26,6 +26,11 @@ from tests.conftest import do_setup, make_user, session_for
 # These strings are the layout as it shipped. They are written out literally
 # rather than computed, so that a change to the engine has to come here and
 # argue with a human instead of quietly agreeing with itself.
+#
+# container="mp4" is passed explicitly rather than left to the setting. The
+# extension is a setting now, and what these anchor is the folder and the stem
+# — the parts the templates own. Which container the default picks is asserted
+# once, on its own, by test_the_default_container_decides_the_extension.
 
 @pytest.mark.parametrize(
     "kwargs, expected",
@@ -39,7 +44,8 @@ from tests.conftest import do_setup, make_user, session_for
     ],
 )
 def test_film_paths_are_unchanged(kwargs, expected):
-    assert paths.film_path("/lib", **kwargs) == os.path.join("/lib", *expected.split("/"))
+    assert paths.film_path("/lib", **kwargs, container="mp4") == os.path.join(
+        "/lib", *expected.split("/"))
 
 
 @pytest.mark.parametrize(
@@ -58,7 +64,8 @@ def test_film_paths_are_unchanged(kwargs, expected):
     ],
 )
 def test_episode_paths_are_unchanged(kwargs, expected):
-    assert paths.episode_path("/lib", **kwargs) == os.path.join("/lib", *expected.split("/"))
+    assert paths.episode_path("/lib", **kwargs, container="mp4") == os.path.join(
+        "/lib", *expected.split("/"))
 
 
 @pytest.mark.parametrize(
@@ -71,7 +78,15 @@ def test_episode_paths_are_unchanged(kwargs, expected):
     ],
 )
 def test_anime_paths_are_unchanged(kwargs, expected):
-    assert paths.anime_path("/lib", **kwargs) == os.path.join("/lib", *expected.split("/"))
+    assert paths.anime_path("/lib", **kwargs, container="mp4") == os.path.join(
+        "/lib", *expected.split("/"))
+
+
+def test_the_default_container_decides_the_extension():
+    """The one thing the anchors above deliberately stop asserting."""
+    assert paths.film_path("/lib", "Blade Runner", "1982").endswith(".mkv")
+    assert paths.episode_path("/lib", "Dark", 1, "7", "2017").endswith(".mkv")
+    assert paths.anime_path("/lib", "Naruto", "12", year="2002").endswith(".mkv")
 
 
 def test_the_legacy_templates_produce_the_same_paths_as_the_defaults():
@@ -95,7 +110,8 @@ CUSTOM = {**naming.DEFAULT_TEMPLATES,
 
 
 def test_a_custom_template_changes_the_path():
-    result = paths.episode_path("/lib", "Dark", 1, "7", "2017", templates=CUSTOM)
+    result = paths.episode_path("/lib", "Dark", 1, "7", "2017", templates=CUSTOM,
+                                container="mp4")
     assert result == os.path.join("/lib", "Dark (2017)", "Stagione 1", "Dark 1x07.mp4")
 
 
@@ -171,9 +187,23 @@ def test_the_current_template_wins_over_a_legacy_leftover(library):
 
 
 def test_the_mkv_sibling_is_found(library):
-    """Almost every download ends as .mkv: the path is built as .mp4 regardless."""
+    """A file in the other container still counts as present.
+
+    The container is a setting, so anything downloaded before it was changed
+    carries the other extension. Missing it would re-download a title that is
+    already there and leave two copies side by side.
+    """
     mkv = _write(str(library / "Dark (2017)" / "Season 01" / "Dark S01E07.mkv"))
     assert resolver.existing_file(_request()) == mkv
+
+
+def test_the_other_container_is_found_too(library, monkeypatch):
+    """The same, from the other side: configured mp4, an old mkv on disk."""
+    from app import config
+    config.save_settings({**config.get_settings(), "output_container": "mp4"})
+
+    mp4 = _write(str(library / "Dark (2017)" / "Season 01" / "Dark S01E07.mp4"))
+    assert resolver.existing_file(_request()) == mp4
 
 
 def test_nothing_on_disk_is_nothing(library):
@@ -181,7 +211,13 @@ def test_nothing_on_disk_is_nothing(library):
 
 
 def test_the_default_configuration_costs_no_extra_stats(library, monkeypatch):
-    """The dedup must collapse the cross product back to what it always was."""
+    """The dedup must collapse the cross product back to what it always was.
+
+    Two axes, one stat each: the naming template (current and legacy, identical
+    under the defaults) and the container (one per known container). A third
+    container, or a third extension probed per container, has to come here and
+    argue with a human before it multiplies the stats on every library check.
+    """
     checked = []
     real_exists = os.path.exists
     monkeypatch.setattr(

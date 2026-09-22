@@ -187,12 +187,12 @@ def download_film(id_film: int, title_name: str, domain: str,
     )
     subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_referer, subtitle_languages)
 
-    mp4_path = film_path(output_dir, title_name, year)
+    dest_path = film_path(output_dir, title_name, year)
 
     final_path = download_m3u8(
         m3u8_index=m3u8_url,
         key=m3u8_key,
-        output_filename=mp4_path,
+        output_filename=dest_path,
         temp_dir=temp_dir,
         progress_factory=progress_factory,
         referer=embed_referer,
@@ -203,5 +203,6 @@ def download_film(id_film: int, title_name: str, domain: str,
         subtitle_track_urls=subtitle_track_urls,
     )
 
-    # download_m3u8 returns the real output path (e.g. .mkv after remux)
-    return final_path or mp4_path
+    # download_m3u8 returns the real output path: the destination is built in
+    # whatever container is configured, and the remux keeps it.
+    return final_path or dest_path

@@ -58,15 +58,20 @@ def _mark_in_library(episodes: list[dict], title: str, season: int, year: str) -
     "\\", control characters and leading dots are stripped, so a crafted title
     cannot walk out of the library directory. This only ever stats.
     """
-    from app.core import naming, paths
+    from app.core import container, naming, paths
     from app.requests.resolver import EPISODE, first_existing, library_dir
 
     output_dir = library_dir(EPISODE)
+    # Resolved once above the loop rather than per path: each episode builds two
+    # of them, and every build would otherwise re-read data.json.
+    cont = container.configured()
     for episode in episodes:
         try:
-            current = paths.episode_path(output_dir, title, season, episode["n"], year or None)
+            current = paths.episode_path(output_dir, title, season, episode["n"],
+                                         year or None, container=cont)
             legacy = paths.episode_path(output_dir, title, season, episode["n"],
-                                        year or None, naming.LEGACY_TEMPLATES)
+                                        year or None, naming.LEGACY_TEMPLATES,
+                                        container=cont)
             episode["in_library"] = first_existing(current, legacy) is not None
         except Exception:
             # A library check is a convenience. It must never be the reason an

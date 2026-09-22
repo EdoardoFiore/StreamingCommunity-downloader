@@ -94,6 +94,12 @@ SETTINGS_DEFAULTS = {
     # Ask Jellyfin to scan when a download lands, instead of waiting for its
     # own schedule. Inert unless Jellyfin is connected.
     "jellyfin_refresh_on_download": False,
+    # The container every download is written into, and whether subtitles are
+    # muxed in or left beside the video as .vtt. The vocabulary and the
+    # fallbacks live in app.core.container, which is the only thing that reads
+    # these — app.config must not import app.core.
+    "output_container": "mkv",
+    "subtitle_mode": "embed",
 }
 
 
