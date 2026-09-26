@@ -67,6 +67,7 @@ EMPTY: dict = {
     "status": None,
     "quality": None,
     "age": None,
+    "year": None,
 }
 
 
@@ -149,6 +150,24 @@ def _people(entries: list | None) -> list[str]:
     return names[:_MAX_PEOPLE]
 
 
+def _year(props: dict) -> str | None:
+    """The year a title first came out, or None.
+
+    ``release_date`` on the title page is the premiere: measured against 59
+    series, it was present on every one and matched the first season. The
+    search payload has no ``release_date`` at all, only ``last_air_date`` -
+    the latest season's date - and that is what named 21 of those 59 folders
+    after the wrong year (issue #21). So for a series there is no fallback:
+    a folder with no year still matches in Jellyfin, one with the wrong year
+    matches the wrong show. A film's two dates are the same day.
+    """
+    date = props.get("release_date")
+    if not date and props.get("type") == "movie":
+        date = props.get("last_air_date")
+    date = str(date or "")[:4]
+    return date if len(date) == 4 and date.isdigit() else None
+
+
 def _from_props(props: dict) -> dict:
     """Everything the title page carries — which is nearly everything."""
     score = props.get("score")
@@ -189,6 +208,7 @@ def _from_props(props: dict) -> dict:
         # this cannot be put on a grid card without a request per poster.
         "quality": props.get("quality") or None,
         "age": props.get("age"),
+        "year": _year(props),
     }
 
 
