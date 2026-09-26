@@ -100,7 +100,7 @@ for downloads that skipped the queue, one summary per season/series), `downloads
   tell an upgrade from a first run, since a brand-new file reaches the last migration in the same
   pass as the first.
 - `data.json` — source domain, library paths, performance settings, domain-recovery switches,
-  naming templates. Anything carrying a secret goes in `panel.db` instead. Written only through
+  naming templates, output container. Anything carrying a secret goes in `panel.db` instead. Written only through
   `config.update_data()`, which holds the file lock: a background thread writes `domain`. Runtime state, not committed:
   a baked-in source domain ships stale, since the domain rotates. Tests get one from the
   `_configured_domain` autouse fixture in `tests/conftest.py`.
@@ -248,6 +248,24 @@ anything under a mounted static directory is readable by unauthenticated visitor
   so everything it would paper over is refused by `naming.validate()` at save time. Never
   `str.format` a user template: `{title.__class__}` leaks attributes and a stray `{` raises
   mid-download.
+- **The container is one setting read in one place, and nothing is ever re-encoded.**
+  `container.configured()` is the only source; `paths.*_path()` take `container=` the way they take
+  `templates=`, and everything downstream infers the container from the extension of the file it is
+  handed rather than from a second lookup — which is what makes the temp audio tracks (genuinely
+  `.mp4`) mux correctly while the destination is Matroska. Three consequences worth knowing.
+  `movflags` is mov/mp4-private: handed to the matroska muxer FFmpeg refuses the whole command, at
+  the end of the download, after every byte is fetched. The remux now reads and writes the *same*
+  extension, so it stages a dot-prefixed sibling in the library folder and `os.replace()`s it —
+  dot-prefixed because a Jellyfin scan running meanwhile would otherwise index the half-written
+  file as a second copy, and a sibling rather than something under `tmp/` because `os.replace`
+  cannot cross a filesystem. And `resolver.candidate_paths()` probes one extension per known
+  container, configured first: two axes, one stat each, which is what
+  `tests/test_naming_library_check.py` pins at exactly two. A finished download deletes the same
+  stem in the *other* container, because Jellyfin reads `Film.mkv` and `Film.mp4` in one folder as
+  two versions of one film — the exact sibling only, and only once the new file is complete. Video and audio are always stream-copied
+  — the source is H.264 + AAC, native to both — so the only conversion is WebVTT to `mov_text`, and
+  only when subtitles are embedded into MP4. A transcoding option does not belong here: it would
+  turn a four-minute download into an hours-long CPU job under a stall watchdog built for neither.
 - Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
   are the exception by design: every caller of `notify()` is already off the loop.
 
@@ -255,12 +273,13 @@ anything under a mounted static directory is readable by unauthenticated visitor
 
 ```
 <library>/
-├── Movie (2020)/Movie (2020).mp4
-└── Series (2019)/Season 01/Series S01E01.mp4
+├── Movie (2020)/Movie (2020).mkv
+└── Series (2019)/Season 01/Series S01E01.mkv
 ```
 
-Subtitles land beside the video as `{stem}.{lang}.vtt` (Jellyfin convention). Temp segments go to
-`tmp/<job_id>/` and are cleaned up afterwards.
+The extension is the `output_container` setting (`mkv` or `mp4`), not a property of the download.
+Subtitles are muxed in, or land beside the video as `{stem}.{lang}.vtt` (Jellyfin convention),
+according to `subtitle_mode`. Temp segments go to `tmp/<job_id>/` and are cleaned up afterwards.
 
 ### Quality and languages
 

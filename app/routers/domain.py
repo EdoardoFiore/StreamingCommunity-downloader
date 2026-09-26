@@ -170,6 +170,15 @@ class SettingsUpdate(BaseModel):
     domain_auto_check_enabled: bool | None = None
     domain_auto_apply: bool | None = None
     domain_check_interval_minutes: int | None = None
+    # Literal rather than str + a validator: pydantic answers 422 for anything
+    # off the list on its own. tests/test_output_container.py pins these two
+    # against app.core.container, so the table and the API cannot drift.
+    output_container: Literal["mkv", "mp4"] | None = None
+    subtitle_mode: Literal["embed", "external"] | None = None
+    # Declared late. It was in SETTINGS_DEFAULTS, read by downloads_hooks and
+    # PUT by the settings page, but missing here — and pydantic ignores unknown
+    # fields, so the switch reported "Salvato." and saved nothing.
+    jellyfin_refresh_on_download: bool | None = None
 
     @field_validator("naming_templates")
     @classmethod

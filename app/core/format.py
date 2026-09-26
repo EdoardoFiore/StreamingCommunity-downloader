@@ -5,6 +5,7 @@ import subprocess
 import requests
 import ffmpeg
 
+from app.core import container
 from app.core.ffmpeg_path import ffmpeg_file_arg, get_ffmpeg_exe
 from app.core.m3u8 import M3U8_Parser
 
@@ -40,24 +41,39 @@ def _normalize_lang(raw: str) -> tuple[str, bool]:
     return code or "und", forced
 
 
-def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_tracks: list[dict] = None) -> str:
-    if audio_tracks is None:
-        audio_tracks = []
-    if subtitle_tracks is None:
-        subtitle_tracks = []
+# What FFmpeg writes into while the remux runs. The remux reads and writes the
+# same container now — the join already produced the configured one — and
+# FFmpeg cannot have one file as both input and output. It has to be a sibling
+# in the library folder rather than something under tmp/: os.replace() cannot
+# cross a filesystem, and the temp directory is routinely a different volume.
+#
+# The leading dot is what keeps a Jellyfin scan that runs mid-remux from
+# indexing the half-written file as a second copy of the title.
+STAGING_PREFIX = "."
+STAGING_SUFFIX = ".remuxing"
 
-    if not audio_tracks and not subtitle_tracks:
-        return video_path
 
-    output_path = os.path.splitext(video_path)[0] + ".mkv"
+def staging_path(video_path: str) -> str:
+    directory, name = os.path.split(video_path)
+    stem, ext = os.path.splitext(name)
+    return os.path.join(directory, STAGING_PREFIX + stem + STAGING_SUFFIX + ext)
 
-    # Build the ffmpeg command by hand: per-stream -map/-metadata/-disposition are
-    # OUTPUT options and MUST come after all -i inputs but before the output file.
-    # (ffmpeg-python's .global_args put them after the output filename, where ffmpeg
-    # silently ignores them — hence subtitle language tags never applied.)
-    # file: on the library-side paths only. The temp inputs below are ours and
-    # cannot carry a colon, but video_path and output_path are built from a
-    # configured library root, where a stray colon would be read as a protocol.
+
+def _remux_cmd(video_path: str, output_path: str,
+               audio_tracks: list[dict], subtitle_tracks: list[dict]) -> list[str]:
+    """The FFmpeg argv for the remux.
+
+    Built by hand rather than through ffmpeg-python, and separated from the
+    running of it so a test can read the command without a binary: per-stream
+    -map/-metadata/-disposition are OUTPUT options and MUST come after all -i
+    inputs but before the output file. (ffmpeg-python's .global_args put them
+    after the output filename, where ffmpeg silently ignores them — hence
+    subtitle language tags never applied.)
+
+    file: on the library-side paths only. The temp inputs below are ours and
+    cannot carry a colon, but video_path and output_path are built from a
+    configured library root, where a stray colon would be read as a protocol.
+    """
     cmd = [get_ffmpeg_exe(), "-y", "-i", ffmpeg_file_arg(video_path)]
     for track in audio_tracks:
         cmd += ["-i", track["path"]]
@@ -74,8 +90,15 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
     for i in range(len(subtitle_tracks)):
         cmd += ["-map", f"{len(audio_tracks) + 1 + i}:0"]
 
-    # Codecs (copy everything; mkv natively holds webvtt)
-    cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "copy"]
+    # Video and audio are always copied: the source is H.264 + AAC, native to
+    # either container. Subtitles are the one thing that cannot be, because MP4
+    # has no WebVTT track type — container.subtitle_codec picks "copy" for
+    # Matroska and "mov_text" for MP4.
+    cmd += ["-c:v", "copy", "-c:a", "copy"]
+    if subtitle_tracks:
+        cmd += ["-c:s", container.subtitle_codec(output_path)]
+    for option, value in container.mux_options(output_path).items():
+        cmd += [f"-{option}", value]
 
     # Per-stream metadata (output options, correctly positioned)
     for i, track in enumerate(audio_tracks):
@@ -92,24 +115,49 @@ def remux_to_mkv(video_path: str, audio_tracks: list[dict] = None, subtitle_trac
         cmd += [f"-disposition:s:{i}", "forced" if forced else "0"]
 
     cmd += [ffmpeg_file_arg(output_path)]
+    return cmd
 
-    logger.info("Remuxing to MKV: video + %d audio + %d subtitle tracks",
-                len(audio_tracks), len(subtitle_tracks))
+
+def remux(video_path: str, audio_tracks: list[dict] = None,
+          subtitle_tracks: list[dict] = None) -> str:
+    """Mux the extra tracks into *video_path*, in the container it already names.
+
+    The container is decided once, by the join that wrote *video_path*, and
+    this keeps it: it used to be the other way round, with the destination
+    always written as .mp4 and this function deciding — by renaming to .mkv —
+    that anything with a second audio track or a subtitle was Matroska.
+
+    Returns the path, which is now always the one it was given.
+    """
+    if audio_tracks is None:
+        audio_tracks = []
+    if subtitle_tracks is None:
+        subtitle_tracks = []
+
+    if not audio_tracks and not subtitle_tracks:
+        return video_path
+
+    staged = staging_path(video_path)
+    cmd = _remux_cmd(video_path, staged, audio_tracks, subtitle_tracks)
+
+    logger.info("Remuxing into %s: video + %d audio + %d subtitle tracks",
+                os.path.splitext(video_path)[1] or "?", len(audio_tracks), len(subtitle_tracks))
     proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode != 0:
+        # Never leave the half-written sibling behind: it sits in the library
+        # folder, where Jellyfin would index it as a second copy of the title.
+        try:
+            os.remove(staged)
+        except OSError:
+            pass
         stderr = proc.stderr.decode(errors="replace") if proc.stderr else "(no stderr)"
         if len(stderr) > 500:
             stderr = f"...{stderr[-300:]}"
-        raise RuntimeError(f"FFmpeg MKV remux error: {stderr}")
+        raise RuntimeError(f"FFmpeg remux error: {stderr}")
 
-    if os.path.exists(output_path) and video_path != output_path:
-        try:
-            os.remove(video_path)
-        except OSError:
-            pass
-
-    logger.info("MKV remux complete: %s", output_path)
-    return output_path
+    os.replace(staged, video_path)
+    logger.info("Remux complete: %s", video_path)
+    return video_path
 
 
 def download_subtitle_tracks(parser, allowed_languages: list[str], output_dir: str, video_stem: str, temp_dir: str = None) -> list[dict]:

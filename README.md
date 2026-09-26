@@ -477,9 +477,18 @@ videos/
         └── Series S01E02.mkv
 ```
 
-The extension is `.mp4` for a single audio track and `.mkv` once there is more than one, which is
-what carrying several languages in one file requires. Subtitles are embedded and also written beside
-the video as `{name}.{lang}.vtt`, the layout Jellyfin expects.
+The container is yours to pick, in **Settings -> Download -> Output format**: `.mkv` (the default,
+which holds any combination of tracks) or `.mp4`, for devices that cannot play Matroska — plenty of
+older smart TVs, Chromecast and consoles. Nothing is re-encoded either way, so the choice costs no
+download time: the source is already H.264 with AAC audio, which both containers take as they are.
+
+Subtitles follow a second setting: muxed into the file, or written beside it as
+`{name}.{lang}.vtt`, the layout Jellyfin expects. Inside an MP4 they have to be converted to
+`mov_text`, which drops colours, bold and positioning — keeping them as separate files avoids that
+entirely.
+
+Changing either setting leaves what is already downloaded alone. Both extensions keep counting as
+present, so nothing is re-downloaded because of it.
 
 ---
 
