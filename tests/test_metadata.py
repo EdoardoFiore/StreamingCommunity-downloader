@@ -338,3 +338,43 @@ def test_a_miss_still_answers_with_every_key(client, admin, monkeypatch):
     data = client.get("/api/metadata/movie/1?slug=x&version=v1").json()
 
     assert set(data) == set(metadata.EMPTY)
+
+
+# ── The year (issue #21) ──────────────────────────────────────────────────────
+
+def test_a_series_is_named_after_its_premiere_not_its_latest_season():
+    """Shape read off Grey's Anatomy's real title page: release_date is the
+    premiere, last_air_date the season still airing. The search payload
+    carries only the second, and the folder used to be named after it."""
+    props = {"type": "tv", "release_date": "2005-03-27", "last_air_date": "2025-10-09"}
+
+    assert metadata._from_props(props)["year"] == "2005"
+
+
+def test_a_series_with_no_premiere_gets_no_year_rather_than_a_wrong_one():
+    """A folder without a year still matches in Jellyfin; one with the latest
+    season's year matches the wrong show, or none."""
+    props = {"type": "tv", "release_date": None, "last_air_date": "2025-10-09"}
+
+    assert metadata._from_props(props)["year"] is None
+
+
+def test_a_film_falls_back_to_its_only_other_date():
+    props = {"type": "movie", "release_date": None, "last_air_date": "2010-07-15"}
+
+    assert metadata._from_props(props)["year"] == "2010"
+
+
+@pytest.mark.parametrize("date", ["", "n/a", "20", None])
+def test_a_malformed_date_is_no_year(date):
+    assert metadata._from_props({"type": "tv", "release_date": date})["year"] is None
+
+
+def test_the_endpoint_carries_the_year(client, admin, monkeypatch):
+    monkeypatch.setattr(tv, "get_title_props", lambda *a, **k: {
+        **PROPS, "type": "tv", "release_date": "2016-01-01", "last_air_date": "2025-12-25",
+    })
+
+    data = client.get("/api/metadata/tv/1?slug=test-series&version=v1").json()
+
+    assert data["year"] == "2016"

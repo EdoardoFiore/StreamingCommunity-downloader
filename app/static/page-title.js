@@ -39,7 +39,11 @@ async function loadTitlePage(route) {
   _tp = {
     ...route,
     name: seed?.name || '',
-    year: seed ? itemYear(seed) : null,
+    // Not for a series: its search record has no release_date, and the
+    // last_air_date itemYear() falls back to is the latest season's - the
+    // folder was named after it (issue #21). The title page's own year
+    // arrives with the metadata.
+    year: seed && route.type !== 'tv' ? itemYear(seed) : null,
     poster: seed?.poster || null,
     score: seed?.score ? parseFloat(seed.score).toFixed(1) : null,
     age: seed?.age || null,
@@ -83,11 +87,12 @@ async function loadTitlePage(route) {
   showPage('detail');
   _tpRender();
 
+  let metaReady = Promise.resolve();
   if (route.type !== 'anime') {
     const q = { slug: route.slug, version: currentVersion || '' };
     // Metadata and the track list are independent: one reads the title page,
     // the other reaches the stream host. Neither waits on the other.
-    api.get(`/api/metadata/${route.type}/${route.id}`, q)
+    metaReady = api.get(`/api/metadata/${route.type}/${route.id}`, q)
       .then(meta => { if (token === _tpToken) { _tpApplyMeta(meta); _tpRender(); } })
       .catch(() => {});
 
@@ -113,7 +118,13 @@ async function loadTitlePage(route) {
       });
   }
 
-  if (route.type === 'tv') await tpLoadSeason(1, token);
+  if (route.type === 'tv') {
+    // The episode list waits for the year: the in-library marks and every
+    // download built from _epCtx are named after it.
+    await metaReady;
+    if (token !== _tpToken) return;
+    await tpLoadSeason(1, token);
+  }
   else if (route.type === 'anime') await _tpLoadAnime(token);
 }
 
@@ -126,6 +137,9 @@ function _tpApplyMeta(meta) {
   _tp.score = _tp.score || (meta.rating ? String(meta.rating) : null);
   _tp.poster = _tp.poster || meta.poster;
   _tp.age = _tp.age ?? meta.age;
+  // Authoritative over the search card's guess. A series with no year keeps
+  // none rather than the card's, which is the wrong one (issue #21).
+  if (meta.year || _tp.type === 'tv') _tp.year = meta.year || null;
   if (!_tp.seasonsCount && meta.seasons_count) _tp.seasonsCount = meta.seasons_count;
 }
 
