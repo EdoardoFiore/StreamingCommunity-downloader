@@ -21,6 +21,12 @@ def _get_library_path(type_: str) -> str:
             return lib["path"]
     return str(VIDEOS_DIR)
 
+def _schedule_external_id(params: dict) -> Optional[str]:
+    """The source id a scheduled entry's params carry, whatever its type."""
+    value = params.get("id") or params.get("tv_id") or params.get("anime_id")
+    return str(value) if value not in (None, "") else None
+
+
 logger = logging.getLogger(__name__)
 
 SCHEDULER_INTERVAL = 30  # seconds
@@ -68,6 +74,10 @@ class DownloadJob:
     year: Optional[str] = None
     season: Optional[int] = None
     episode_number: Optional[str] = None
+    # The title's id at its source (film id, series id, AnimeUnity id). What
+    # the library registry files the finished download under, so the title can
+    # be found again whatever its folder ends up being called.
+    external_id: Optional[str] = None
 
     # What was handed to the executor, minus the arguments bound to this job
     # object (_JOB_BOUND_KWARGS). Kept so a failed job can be run again without
@@ -415,6 +425,7 @@ class JobManager:
             old.title, old.type, phases=list(old.phases),
             user_id=old.user_id, media_label=old.media_label, year=old.year,
             season=old.season, episode_number=old.episode_number,
+            external_id=old.external_id,
         )
         fn, args, kwargs = old.call
         return self._submit_job(
@@ -539,7 +550,8 @@ class JobManager:
 
         job = self._make_job(title, "film", schedule_id=schedule_id,
                              phases=self._compute_phases(audio_languages or ["ita"]),
-                             user_id=user_id, media_label=title, year=year)
+                             user_id=user_id, media_label=title, year=year,
+                             external_id=str(id_film))
         return self._submit_job(
             job, download_film,
             id_film, title, domain,
@@ -571,7 +583,8 @@ class JobManager:
                              phases=self._compute_phases(audio_languages or ["ita"]),
                              user_id=user_id, batch_id=batch_id, batch_kind=batch_kind,
                              batch_label=batch_label, media_label=tv_name, year=year,
-                             season=season, episode_number=str(ep["n"]))
+                             season=season, episode_number=str(ep["n"]),
+                             external_id=str(tv_id))
         return self._submit_job(
             job, download_episode,
             tv_id, eps, ep_index, domain, token, tv_name, season,
@@ -605,7 +618,7 @@ class JobManager:
                              phases=self._compute_phases(audio_languages or ["ita"]),
                              user_id=user_id, batch_id=batch_id, batch_kind=batch_kind,
                              batch_label=batch_label, media_label=anime_name, year=year,
-                             episode_number=str(ep_num))
+                             episode_number=str(ep_num), external_id=str(anime_id))
         return self._submit_job(
             job, download_anime_episode,
             anime_id, episode, anime_name, anime_type,
@@ -691,6 +704,7 @@ class JobManager:
         # survives until the download actually runs. It does not survive a
         # restart (load_scheduled_from_store rebuilds from the JSON params), and
         # neither does the in-memory batch it would belong to.
+        meta.setdefault("external_id", _schedule_external_id(params))
         job = self._make_job(title, type_, scheduled_at=scheduled_at, schedule_id=schedule_id,
                              phases=self._compute_phases(params.get("audio_languages") or ["ita"]),
                              **meta)
@@ -713,8 +727,12 @@ class JobManager:
             sa_raw = datetime.fromisoformat(entry["scheduled_at"])
             scheduled_at = sa_raw if sa_raw.tzinfo else sa_raw.replace(tzinfo=timezone.utc)
             title = params.get("title") or params.get("tv_name") or params.get("anime_name", "?")
+            # What the registry needs to file the download survives in the
+            # params; the rest of the notification metadata does not.
             job = self._make_job(title, type_, scheduled_at=scheduled_at, schedule_id=sid,
-                                 phases=self._compute_phases(params.get("audio_languages") or ["ita"]))
+                                 phases=self._compute_phases(params.get("audio_languages") or ["ita"]),
+                                 media_label=title, year=params.get("year"),
+                                 external_id=_schedule_external_id(params))
             with self._lock:
                 self._jobs[job.job_id] = job
             self._schedule_store.set_job_id(sid, job.job_id)

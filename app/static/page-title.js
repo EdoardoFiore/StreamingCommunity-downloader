@@ -86,6 +86,8 @@ async function loadTitlePage(route) {
 
   showPage('detail');
   _tpRender();
+  // Which library folder holds this title - for whoever manages the library.
+  libRenderTitleCard(route, _tp.name);
 
   let metaReady = Promise.resolve();
   if (route.type !== 'anime') {
@@ -445,8 +447,14 @@ function _tpRenderFacts() {
   if (m.season) rows.push(['Stagione di uscita', m.season]);
   if (m.quality) rows.push(['Qualità', m.quality]);
   if (_tp.genres?.length) rows.push(['Genere', _tp.genres.join(', ')]);
+  // Last and quiet: the id is what an association in Settings is keyed on,
+  // and the only place to read it from.
+  if (_tp.id) {
+    const key = libKeyForRoute(_tp.type, _tp.id);
+    rows.push(['ID', libIdLabel(key.source, key.external_id), 'th-fact-id']);
+  }
   document.getElementById('th-facts').innerHTML = rows
-    .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join('')
+    .map(([k, v, cls]) => `<dt>${escapeHtml(k)}</dt><dd${cls ? ` class="${cls}"` : ''}>${escapeHtml(String(v))}</dd>`).join('')
     || `<dd style="grid-column:1/-1;text-align:left" class="th-empty">—</dd>`;
 }
 

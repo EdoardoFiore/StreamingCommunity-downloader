@@ -242,7 +242,13 @@ def download_episode(
     )
     subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_referer, subtitle_languages)
 
-    dest_path = episode_path(output_dir, tv_name, season, ep["n"], year)
+    # A folder a person associated with this series wins, placed at the
+    # season and episode its offsets say (app/library.py).
+    from app.library import destination
+
+    dest_path = (destination("episode", tv_id, root=output_dir, season=season,
+                             episode=ep["n"], year=year)
+                 or episode_path(output_dir, tv_name, season, ep["n"], year))
 
     final_path = download_m3u8(
         m3u8_index=m3u8_url,

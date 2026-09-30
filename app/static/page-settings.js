@@ -32,6 +32,7 @@ const _SETTINGS_TAB_LOADERS = {
   // prefetch the whole application waited on before it could show any page
   // at all, for data only this tab reads.
   librerie: () => loadLibraries().then(renderLibrariesList),
+  associazioni: () => loadLibraryAssociations(),
   nomi: () => loadNamingTemplates(),
   // Both read the same endpoint, and _loadAppSettings() shares the promise, so
   // this is still one fetch.
@@ -54,7 +55,7 @@ function _loadAppSettings() {
 
 // Tabs whose panes only talk to MANAGE_SETTINGS endpoints: without it they would
 // render as empty panes fed by 403s.
-const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'nomi', 'download', 'notifiche', 'hook'];
+const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'associazioni', 'nomi', 'download', 'notifiche', 'hook'];
 
 let _settingsTab = 'sorgente';
 const _settingsLoaded = new Set();

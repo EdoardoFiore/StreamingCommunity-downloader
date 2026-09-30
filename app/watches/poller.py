@@ -8,6 +8,7 @@ whether that request is approved on the spot or waits for a human.
 
 import asyncio
 import logging
+from dataclasses import replace
 
 from app.auth.permissions import Permission
 from app.config import get_settings
@@ -272,11 +273,45 @@ def process_episode(watch: models.Watch, key: str, episode: dict) -> str:
     return outcome
 
 
+def refresh_year(watch: models.Watch) -> models.Watch:
+    """The watch with its series' premiere year, corrected if it was stored wrong.
+
+    The year is taken from the client when a series is followed, and before
+    issue #21 the client sent the latest season's year: a follow from then keeps
+    naming every new episode's folder after a year that is simply wrong, and a
+    different wrong year from any download started by hand (#24). The title
+    page's props carry the premiere, so the stored value is brought in line.
+
+    Only for StreamingCommunity series — AnimeUnity's year never had the
+    problem — and only a year that was actually read replaces the stored one:
+    a failed lookup must not erase it. Best effort: the metadata is cached, and
+    a miss leaves the watch exactly as it was.
+    """
+    if watch.media_type != models.TV:
+        return watch
+    try:
+        from app.core import metadata
+
+        year = metadata.title_metadata("tv", watch.external_id, watch.slug or "", "").get("year")
+    except Exception:
+        logger.info("Cannot read the year of watch %s; keeping %s", watch.id, watch.year)
+        return watch
+    if not year or str(year) == str(watch.year or ""):
+        return watch
+    logger.info("Watch %s (%s): year %s -> %s", watch.id, watch.title, watch.year, year)
+    models.set_year(watch.id, str(year))
+    return replace(watch, year=str(year))
+
+
 def poll_watch(watch: models.Watch) -> dict:
     """Check one series. Returns a small summary, mostly for tests and logs."""
     episodes = current_episodes(watch)
     seen = models.seen_keys(watch.id)
     fresh = [(key, ep) for key, ep in episodes if key not in seen]
+    # Only when something new is about to land: the year decides where it
+    # goes, and a quiet cycle has no use for the lookup.
+    if fresh:
+        watch = refresh_year(watch)
 
     outcomes: dict[str, int] = {}
     for key, episode in fresh:
@@ -298,6 +333,15 @@ def run_poll_cycle() -> dict:
     """One pass over every active watch. Never raises: one bad series must not
     stop the others, and the loop above must keep running."""
     summary = {"watches": 0, "new": 0}
+    # First, so a folder renamed outside the panel is followed before this
+    # cycle asks whether a new episode is already there. Riding on this loop
+    # because it is the panel's one periodic pass over the library.
+    try:
+        from app import library
+
+        library.reconcile()
+    except Exception:
+        logger.exception("Library reconciliation failed")
     for watch in models.list_all():
         summary["watches"] += 1
         try:

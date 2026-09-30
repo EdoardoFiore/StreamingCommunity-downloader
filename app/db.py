@@ -469,6 +469,44 @@ _V9_FOLLOWER_LANGUAGES = [
 ]
 
 
+_V10_LIBRARY_FOLDERS = [
+    # Which folder in a library holds which title, filed under the title's id
+    # at its source. The library check used to find a title only by rebuilding
+    # its folder name from title and year, so anything that changed either —
+    # a year corrected (#21), a title renamed at the source, a template edited
+    # twice — made a folder full of episodes invisible and queued them again.
+    #
+    # `folder` is the folder's name under the library root, not a path: moving
+    # the library, or remounting its volume somewhere else, must not orphan the
+    # whole registry. `origin` says who decided (see app/library.py):
+    # "download" and "matched" are the panel's, "manual" and "rejected" are a
+    # person's, and the panel never overrides a person. The offsets place a
+    # title's episodes inside a folder it shares — an anime split into parts
+    # at the source, gathered into one series. `anchor_size` is the size of a
+    # file known to be in the folder, which is how a folder renamed outside
+    # the panel is found again; `missing_since` is how long it has not been.
+    """
+    CREATE TABLE library_folder (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        title TEXT,
+        folder TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        season_offset INTEGER NOT NULL DEFAULT 0,
+        episode_offset INTEGER NOT NULL DEFAULT 0,
+        anchor_size INTEGER,
+        missing_since TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(source, media_type, external_id, folder)
+    )
+    """,
+    "CREATE INDEX idx_library_folder_title ON library_folder(source, media_type, external_id)",
+]
+
+
 Migration = list[str] | Callable[[sqlite3.Connection, bool], None]
 
 MIGRATIONS: list[Migration] = [
@@ -481,6 +519,7 @@ MIGRATIONS: list[Migration] = [
     _V7_DOWNLOAD_HOOK,
     _v8_carry_over_open_mode,
     _V9_FOLLOWER_LANGUAGES,
+    _V10_LIBRARY_FOLDERS,
 ]
 
 

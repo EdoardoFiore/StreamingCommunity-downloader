@@ -116,6 +116,11 @@
       }
       .source-selector::-webkit-scrollbar { display: none; }
 
+      /* An association row stacks: the origin badge moves under the text. */
+      .lib-row { flex-wrap: wrap; }
+      .lib-row-main { flex-basis: 100%; }
+      .lib-origin { margin-right: auto; }
+
       /* Always show file manager actions on mobile */
       .fm-actions { opacity: 1 !important; }
 

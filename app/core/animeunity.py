@@ -373,7 +373,15 @@ def download_anime_episode(
     )
     subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_url, subtitle_languages)
 
-    dest_path = anime_path(output_dir, anime_name, episode_number, anime_type, year)
+    # A folder a person associated with this anime wins — which is how the
+    # parts of one series, separate titles at the source, land in one folder
+    # at the season and episode their offsets say (app/library.py).
+    from app.core.paths import is_anime_series
+    from app.library import destination
+
+    dest_path = (destination("anime", anime_id, root=output_dir, episode=episode_number,
+                             year=year, single_file=not is_anime_series(anime_type))
+                 or anime_path(output_dir, anime_name, episode_number, anime_type, year))
 
     final_path = download_m3u8(
         m3u8_index=m3u8_url,

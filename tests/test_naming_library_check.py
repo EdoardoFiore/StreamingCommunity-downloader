@@ -210,6 +210,92 @@ def test_nothing_on_disk_is_nothing(library):
     assert resolver.existing_file(_request()) is None
 
 
+# ── One series, several year folders (#24) ──────────────────────────────────
+#
+# Before #21 a series' folder was named after its latest season's year, and
+# before that after no year at all, so one series can sit in three folders.
+
+def _simpsons(library, folder, episode):
+    return _write(str(library / folder / "Season 10" / f"I Simpson S10E{episode:02d}.mkv"))
+
+
+def _simpsons_request(**overrides):
+    return _request(**{"title": "I Simpson", "year": "1989", "season": 10, **overrides})
+
+
+def test_an_episode_in_a_later_years_folder_counts(library):
+    stray = _simpsons(library, "I Simpson (2025)", 4)
+    assert resolver.existing_file(_simpsons_request(episode_number="4")) == stray
+
+
+def test_an_episode_in_the_yearless_folder_counts(library):
+    stray = _simpsons(library, "I Simpson", 1)
+    assert resolver.existing_file(_simpsons_request(episode_number="1")) == stray
+
+
+def test_the_canonical_folder_wins_over_a_stray_one(library):
+    _simpsons(library, "I Simpson (2026)", 2)
+    canonical = _simpsons(library, "I Simpson (1989)", 2)
+    assert resolver.existing_file(_simpsons_request(episode_number="2")) == canonical
+
+
+def test_a_new_download_still_goes_to_the_canonical_folder(library):
+    """Only the check looks wider; the library converges instead of growing."""
+    _simpsons(library, "I Simpson (2025)", 1)
+    assert "I Simpson (1989)" in resolver.destination_path(_simpsons_request(episode_number="5"))
+
+
+def test_an_earlier_year_is_a_different_series(library):
+    """A wrong year was always a later season's. An earlier one is a remake's
+    original, and it must not satisfy the remake."""
+    _write(str(library / "Shogun (1980)" / "Season 01" / "Shogun S01E01.mkv"))
+    request = _request(title="Shogun", year="2024", season=1, episode_number="1")
+    assert resolver.existing_file(request) is None
+
+
+def test_a_longer_title_is_a_different_series(library):
+    _write(str(library / "I Simpson Show (2025)" / "Season 10" / "I Simpson S10E01.mkv"))
+    assert resolver.existing_file(_simpsons_request(episode_number="1")) is None
+
+
+def test_with_no_year_known_every_year_folder_counts(library):
+    stray = _simpsons(library, "I Simpson (2025)", 3)
+    assert resolver.existing_file(_simpsons_request(year=None, episode_number="3")) == stray
+
+
+def test_a_custom_folder_template_is_matched_by_rendering_it(library):
+    from app import config
+    config.save_settings({**config.get_settings(), "naming_templates": {
+        "series_folder": "{title}[ - {year}]",
+    }})
+    stray = _simpsons(library, "I Simpson - 2025", 6)
+    assert resolver.existing_file(_simpsons_request(episode_number="6")) == stray
+
+
+def test_the_episode_list_sees_the_union_of_the_folders(library):
+    """The issue's own example: seasons split across folders, all present."""
+    from app.routers.tv import _mark_in_library
+
+    for n in (1, 2, 3):
+        _simpsons(library, "I Simpson", n)
+    for n in (4, 5):
+        _simpsons(library, "I Simpson (2025)", n)
+    (library / "I Simpson (2026)").mkdir()
+    episodes = [{"n": str(n)} for n in range(1, 7)]
+
+    _mark_in_library(episodes, "I Simpson", 10, "1989")
+
+    assert [e["in_library"] for e in episodes] == [True] * 5 + [False]
+
+
+def test_an_unlistable_library_degrades_to_the_canonical_folder(library, monkeypatch):
+    def refuse(path):
+        raise PermissionError(path)
+    monkeypatch.setattr(os, "scandir", refuse)
+
+    assert resolver.series_years(str(library), "I Simpson", "1989") == ["1989"]
+
+
 def test_the_default_configuration_costs_no_extra_stats(library, monkeypatch):
     """The dedup must collapse the cross product back to what it always was.
 
