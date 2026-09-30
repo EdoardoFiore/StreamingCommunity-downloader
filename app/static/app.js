@@ -156,15 +156,30 @@ registerActions({
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
 
+// Through Bootstrap's Collapse, not by pulling `.show` off the menu: the
+// toggler draws its bars/X from its own `aria-expanded`, which only the
+// Collapse updates — stripping the class by hand closed the menu and left the
+// X on screen (#25). The fallback keeps the two in step if the bundle is absent.
+function closeMobileMenu() {
+  const menu = document.getElementById('sidebar-menu');
+  if (!menu || !menu.classList.contains('show')) return;
+  const Collapse = window.tabler?.Collapse;
+  if (Collapse) {
+    Collapse.getOrCreateInstance(menu, { toggle: false }).hide();
+    return;
+  }
+  menu.classList.remove('show');
+  document.querySelectorAll('[data-bs-target="#sidebar-menu"]').forEach(t => {
+    t.classList.add('collapsed');
+    t.setAttribute('aria-expanded', 'false');
+  });
+}
+
 // `params` arrives from the address. It is applied before the loaders run, so
 // a page restored from a link renders its own state once rather than rendering
 // the default and then correcting itself.
 function showPage(page, params = null) {
-  // Close mobile menu if open
-  const mobileMenu = document.getElementById('sidebar-menu');
-  if (mobileMenu && mobileMenu.classList.contains('show')) {
-    mobileMenu.classList.remove('show');
-  }
+  closeMobileMenu();
   if (params) PAGE_HASH[page]?.apply?.(params);
   ['search','downloads','files','requests','my-requests','watches','users','detail','settings'].forEach(p => {
     const el = document.getElementById(`page-${p}`);

@@ -63,10 +63,17 @@
         gap: 2px;
       }
 
-      /* Bootstrap .collapse:not(.show) handles hide. Force flex when shown. */
-      aside.navbar .collapse.show {
+      /* Bootstrap .collapse:not(.show) handles hide. Force flex when shown,
+         and while animating in or out, so the menu has one layout throughout.
+         align-items must be stretch: Tabler gives .navbar-collapse
+         align-items:center, which in a column shrinks the list and the footer
+         to their content — the menu opened full width while .collapsing was
+         display:block, then narrowed the moment .show made it flex. */
+      aside.navbar .collapse.show,
+      aside.navbar .collapsing {
         display: flex !important;
         flex-direction: column;
+        align-items: stretch;
       }
 
       aside.navbar .nav-link {
