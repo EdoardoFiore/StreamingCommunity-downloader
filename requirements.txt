@@ -14,3 +14,4 @@ uvicorn[standard]
 jinja2
 cloudscraper
 apprise
+mcp>=2.3,<3

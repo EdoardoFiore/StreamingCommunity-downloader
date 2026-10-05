@@ -23,9 +23,10 @@ from app.requests import router as requests_router, service as requests_service
 from app.watches import poller as watch_poller, router as watches_router
 from app.schedule import ScheduleStore
 from app.config import SCHEDULE_FILE
+from app.mcp import server as mcp_http
 from app.routers import (
     domain, search, home, tv, downloads, progress, files, images, anime, notification_channels,
-    metadata as metadata_router, download_hooks,
+    metadata as metadata_router, download_hooks, mcp as mcp_router,
 )
 
 logging.basicConfig(
@@ -112,7 +113,10 @@ async def lifespan(app: FastAPI):
     # never does network I/O.
     domain_task = asyncio.create_task(domain_recovery.domain_watch_loop())
     try:
-        yield
+        # Always running, whatever the switch says: the endpoint reads the
+        # switch per request, so turning MCP on or off needs no restart.
+        async with mcp_http.running():
+            yield
     finally:
         poller_task.cancel()
         domain_task.cancel()
@@ -136,6 +140,9 @@ app.include_router(domain.router)
 app.include_router(metadata_router.router)
 app.include_router(notification_channels.router)
 app.include_router(download_hooks.router)
+app.include_router(mcp_router.router)
+# Raw ASGI, outside FastAPI's routing: the MCP transport speaks JSON-RPC itself.
+app.add_route(mcp_http.PATH, mcp_http.endpoint, include_in_schema=False)
 app.include_router(watches_router.router)
 app.include_router(search.router)
 app.include_router(home.router)

@@ -100,6 +100,8 @@ SETTINGS_DEFAULTS = {
     # these — app.config must not import app.core.
     "output_container": "mkv",
     "subtitle_mode": "embed",
+    # The MCP endpoint at /mcp. Off by default: it lets an agent act as a user.
+    "mcp_enabled": False,
 }
 
 
