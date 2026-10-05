@@ -433,6 +433,8 @@
     /* A count worth looking at colours its own figure, never the whole
        chip: a page of coloured blocks says everything is urgent. */
     .pg-stat-live b   { color: var(--blue); }
+    .pg-stat-wait b   { color: var(--text-sub); }
+    .pg-stat-sched b  { color: var(--yellow); }
     .pg-stat-warn b   { color: var(--yellow); }
     .pg-stat-error b  { color: var(--danger); }
     .pg-stat-ok b     { color: var(--green); }

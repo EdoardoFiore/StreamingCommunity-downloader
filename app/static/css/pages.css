@@ -350,6 +350,8 @@
     .jg-summary { margin-left: auto; display: flex; gap: 9px; flex-shrink: 0; }
     .jg-n { font-size: 11px; font-variant-numeric: tabular-nums; }
     .jg-live { color: var(--blue); }
+    .jg-wait { color: var(--text-sub); }
+    .jg-sched { color: var(--yellow); }
     .jg-ok   { color: var(--green); }
     .jg-err  { color: var(--danger); }
     /* The cards inside lose their own frame: the group is the frame now. */

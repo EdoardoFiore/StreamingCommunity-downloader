@@ -91,7 +91,7 @@ request before any route runs.
 - `auth.py` — the single token: stored hashed, owned by whoever generated it
 - `tools.py` — the tools, each a thin call into an existing route handler
 
-**`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `downloads_notify.py` (notifications
+**`app/`** — `jobs.py` (thread pool, `DownloadSlots`, SSE broadcast), `downloads_notify.py` (notifications
 for downloads that skipped the queue, one summary per season/series), `downloads_hooks.py`
 (post-download webhooks and the Jellyfin library refresh), `library.py` (the registry of which
 folder holds which title; endpoints in `routers/library.py`, UI in `static/library.js`), `schedule.py`, `db.py`,
@@ -190,6 +190,12 @@ anything under a mounted static directory is readable by unauthenticated visitor
   never fires. That is why `jobs.py` notifies listeners on *every* path out of `_run_download`,
   including the job cancelled before it started, and why `cancel()` notifies for a job still
   `scheduled` that the executor never saw.
+- **Download slots are granted in arrival order, and the limit changes in place.**
+  `jobs.DownloadSlots` replaced a `BoundedSemaphore`, which promised no wake-up order — so the
+  downloads page could not say what starts next — and which `update_max_concurrent()` *replaced*,
+  leaving jobs already waiting under the old limit beside new ones under the new (3 → 5 could run
+  8). A waiting job carries a `queue_seq` ticket, broadcast as `job_queued`; the page numbers the
+  "In attesa" list by it, so a new way into a slot that skips the line breaks a promise on screen.
 - **An automatic retry is not a way out of a job.** `_run_download` loops on `_attempt()` up to
   `AUTO_RETRIES` times, `AUTO_RETRY_DELAY` apart, outside the semaphore; the job keeps its id and
   stays `queued` meanwhile, so listeners still fire once, with the final outcome. A manual retry

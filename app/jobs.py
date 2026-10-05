@@ -4,6 +4,7 @@ import os
 import shutil
 import threading
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -90,6 +91,9 @@ class DownloadJob:
     # listeners hear about it once, when it is finally done or failed.
     retries: int = 0
     retry_at: Optional[datetime] = None
+    # Its ticket while it waits for a download slot (None otherwise): the
+    # waiting jobs start in ticket order, so the frontend can number the line.
+    queue_seq: Optional[int] = None
 
 
 # Rebuilt for every attempt: each belongs to one job id.
@@ -103,14 +107,73 @@ def _worth_retrying(exc: Exception) -> bool:
     return not isinstance(exc, MissingAudioTrackError)
 
 
+class DownloadSlots:
+    """At most ``limit`` downloads at once, granted strictly in arrival order.
+
+    Replaces a ``threading.BoundedSemaphore``, which promises nothing about
+    which waiter goes next — so the "In attesa" list could not honestly say
+    what starts next (#26). It also fixes what changing the limit did: the
+    semaphore was *replaced*, leaving every job already waiting on the old one
+    under the old limit while new jobs used the new, so going from 3 to 5 could
+    run 8 at once. Here the limit changes in place, for everyone.
+
+    A waiter leaves the line as soon as its job is cancelled instead of
+    holding its place until a slot frees up.
+    """
+
+    def __init__(self, limit: int):
+        self._cond = threading.Condition()
+        self._limit = limit
+        self._busy = 0
+        self._line: deque = deque()
+        self._tickets = 0
+
+    def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
+        """Wait for a slot. False when the job was cancelled while waiting."""
+        with self._cond:
+            self._tickets += 1
+            job.queue_seq = self._tickets
+            self._line.append(job)
+        if on_queued is not None:
+            on_queued(job)
+        with self._cond:
+            try:
+                while not (self._line[0] is job and self._busy < self._limit):
+                    if job.cancel_event.is_set():
+                        return False
+                    self._cond.wait()
+                if job.cancel_event.is_set():
+                    return False
+                self._busy += 1
+                return True
+            finally:
+                self._line.remove(job)
+                job.queue_seq = None
+                # The next in line may now be at the head with a slot free.
+                self._cond.notify_all()
+
+    def release(self) -> None:
+        with self._cond:
+            self._busy -= 1
+            self._cond.notify_all()
+
+    def resize(self, limit: int) -> None:
+        with self._cond:
+            self._limit = limit
+            self._cond.notify_all()
+
+    def wake(self) -> None:
+        """Let waiters re-check: a cancelled one leaves the line."""
+        with self._cond:
+            self._cond.notify_all()
+
+
 class JobManager:
     def __init__(self):
         self._jobs: dict[str, DownloadJob] = {}
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=64)
-        n = get_settings().get("max_concurrent_downloads", 3)
-        self._semaphore = threading.BoundedSemaphore(n)
-        self._semaphore_value = n
+        self._slots = DownloadSlots(get_settings().get("max_concurrent_downloads", 3))
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._subscribers: list[asyncio.Queue] = []
         self._schedule_store = None  # set via set_schedule_store()
@@ -123,12 +186,9 @@ class JobManager:
         return steps
 
     def update_max_concurrent(self, n: int):
-        old = self._semaphore_value
-        if n == old:
-            return
-        # Replace semaphore — existing running downloads are unaffected
-        self._semaphore = threading.BoundedSemaphore(n)
-        self._semaphore_value = n
+        # In place: running downloads keep their slot, waiting ones get the new
+        # limit too (see DownloadSlots).
+        self._slots.resize(n)
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -173,6 +233,7 @@ class JobManager:
             "episode_number": job.episode_number,
             "year": job.year,
             "retries": job.retries,
+            "queue_seq": job.queue_seq,
             "max_retries": AUTO_RETRIES,
             "retry_at": job.retry_at.isoformat() if job.retry_at else None,
         }
@@ -385,6 +446,7 @@ class JobManager:
             was_scheduled = job.status == "scheduled"
             job.cancel_event.set()
             job.status = "cancelled"
+        self._slots.wake()
         self._emit(job, {"type": "error", "message": "Annullato"})
         if was_scheduled:
             self._notify_listeners(job)
@@ -466,12 +528,11 @@ class JobManager:
 
     def _attempt(self, job: DownloadJob, fn, args, kwargs) -> bool:
         """Run the download once. True when it failed and should run again."""
-        with self._semaphore:
-            if job.cancel_event.is_set():
-                job.status = "cancelled"
-                self._emit(job, {"type": "error", "message": "Annullato"})
-                return False
-
+        if not self._slots.acquire(job, on_queued=self._announce_queued):
+            job.status = "cancelled"
+            self._emit(job, {"type": "error", "message": "Annullato"})
+            return False
+        try:
             job.status = "running"
             self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
 
@@ -504,7 +565,14 @@ class JobManager:
                 if tmp_path.exists():
                     shutil.rmtree(tmp_path, ignore_errors=True)
                     logger.info("Cleaned up temp dir: %s", tmp_path)
+        finally:
+            self._slots.release()
         return False
+
+    def _announce_queued(self, job: DownloadJob) -> None:
+        """A job joined the line for a slot — first time, or back from a retry
+        wait. Its ticket is what orders the "In attesa" list."""
+        self._broadcast({"type": "job_queued", "job_id": job.job_id, "queue_seq": job.queue_seq})
 
     def _submit_job(self, job: DownloadJob, fn, *args, **kwargs) -> str:
         with self._lock:

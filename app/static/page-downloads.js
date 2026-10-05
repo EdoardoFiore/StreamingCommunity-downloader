@@ -39,9 +39,24 @@ function connectGlobalStream() {
         break;
       case 'job_status':
         if (_jobs.has(msg.job_id)) {
-          _jobs.get(msg.job_id).status = msg.status;
-          if (msg.status === 'running') _jobs.get(msg.job_id).retry_at = null;
-          refreshCardAppearance(msg.job_id);
+          const job = _jobs.get(msg.job_id);
+          job.status = msg.status;
+          if (msg.status === 'running') { job.retry_at = null; job.queue_seq = null; }
+          // A job starting moves every waiting one up a place, and moves itself
+          // from "In attesa" to "In corso": the whole list, not one card.
+          renderAllJobCards();
+          updateActiveBadge();
+        }
+        break;
+      case 'job_queued':
+        // Joined the line for a slot: first time, or back from a retry wait.
+        // The ticket orders the waiting list and numbers it.
+        if (_jobs.has(msg.job_id)) {
+          const job = _jobs.get(msg.job_id);
+          job.status = 'queued';
+          job.queue_seq = msg.queue_seq;
+          job.retry_at = null;
+          renderAllJobCards();
           updateActiveBadge();
         }
         break;
@@ -93,7 +108,7 @@ function connectGlobalStream() {
 // and back - the running job fell through to the grey fallback and lost its
 // colour, its border and its label. tests/test_assets.py now checks the set.
 const PHASE_LABELS = {
-  scheduled:'Programmato', queued:'In coda', running:'In corso',
+  scheduled:'Programmato', queued:'In attesa', running:'In corso',
   video:'Video', joining:'Finalizzazione',
   audio:'Audio', merging:'Unione', done:'Completato', error:'Errore', cancelled:'Annullato',
 };
@@ -235,6 +250,25 @@ function _retryText(j) {
   return `Nuovo tentativo ${j.retries}/${j.max_retries} alle ${at} · ${j.error || 'errore'}`;
 }
 
+// Where a waiting job stands in the line for a download slot. The server
+// grants slots strictly in ticket order (app/jobs.py, DownloadSlots), so the
+// number is a promise it keeps. A job between retries holds no ticket: it is
+// not in the line yet, and _retryText says when it rejoins.
+function _queuePosition(j) {
+  if (j.queue_seq == null) return null;
+  let ahead = 0;
+  _jobs.forEach(o => {
+    if (o.status === 'queued' && o.queue_seq != null && o.queue_seq < j.queue_seq) ahead += 1;
+  });
+  return ahead + 1;
+}
+
+function _waitingText(j) {
+  const position = _queuePosition(j);
+  if (position == null) return 'In coda';
+  return position === 1 ? 'Il prossimo a partire' : `${position}° in coda`;
+}
+
 function _failedBtnsHtml(jobId) {
   const retry = can('DOWNLOAD')
     ? `<button class="btn btn-sm btn-outline-primary ms-1" data-action="jobs:retry"
@@ -246,7 +280,7 @@ function _failedBtnsHtml(jobId) {
 
 function _buildJobCard(j) {
   const phase = _jobPhases[j.job_id] || j.status;
-  const isActive = j.status==='running' || j.status==='queued' || j.status==='scheduled';
+  const isActive = _isUnfinished(j);
   const isMovie = j.type==='film';
   const isAnimeJob = j.type==='anime';
   const pct = j.progress?.pct||0;
@@ -258,7 +292,8 @@ function _buildJobCard(j) {
   const borderColor = _phaseBorder(phase);
 
 
-  const infoStr = j.retry_at ? _retryText(j) : _jobInfoText(j.progress, j.status);
+  const infoStr = j.retry_at ? _retryText(j)
+    : (j.status === 'queued' ? _waitingText(j) : _jobInfoText(j.progress, j.status));
   const infoTitle = (j.progress?.bytes_total && j.status !== 'done')
     ? ' title="La playlist non dichiara una dimensione: il totale è stimato sui segmenti già scaricati."'
     : '';
@@ -308,11 +343,38 @@ function _buildJobCard(j) {
 let _dlFilter = 'all';
 const _dlCollapsed = new Set();   // batch_id of the groups the user folded away
 
+// "In corso" is what holds a download slot right now; "In attesa" is what is
+// lined up for one (#26). They used to share one bucket, so twenty episodes
+// queued behind a limit of three read as twenty downloads in progress.
+const DL_BUCKETS = ['running', 'waiting', 'scheduled', 'done', 'error'];
+
 function _jobBucket(j) {
-  if (j.status === 'running' || j.status === 'queued' || j.status === 'scheduled') return 'active';
+  if (j.status === 'running') return 'running';
+  if (j.status === 'queued') return 'waiting';
+  if (j.status === 'scheduled') return 'scheduled';
   if (j.status === 'done') return 'done';
   if (j.status === 'error') return 'error';
   return 'other';   // cancelled
+}
+
+function _isUnfinished(j) {
+  return j.status === 'running' || j.status === 'queued' || j.status === 'scheduled';
+}
+
+// The order a list reads in: what is downloading, then the line in the order
+// it will start, then what is scheduled, then the rest, newest first.
+const _BUCKET_RANK = {running: 0, waiting: 1, scheduled: 2};
+
+function _jobOrder(a, b) {
+  const ra = _BUCKET_RANK[_jobBucket(a)] ?? 3, rb = _BUCKET_RANK[_jobBucket(b)] ?? 3;
+  if (ra !== rb) return ra - rb;
+  if (ra === 1) {
+    const sa = a.queue_seq ?? Infinity, sb = b.queue_seq ?? Infinity;
+    if (sa !== sb) return sa - sb;
+    return new Date(a.created_at) - new Date(b.created_at);
+  }
+  if (ra === 2) return new Date(a.scheduled_at) - new Date(b.scheduled_at);
+  return new Date(b.created_at) - new Date(a.created_at);
 }
 
 function setDlFilter(filter) {
@@ -323,20 +385,24 @@ function setDlFilter(filter) {
 }
 
 function _dlSorted(jobs) {
-  return jobs.sort((a, b) => {
-    const rank = j => _jobBucket(j) === 'active' ? 1 : 0;
-    if (rank(a) !== rank(b)) return rank(b) - rank(a);
-    return new Date(b.created_at) - new Date(a.created_at);
-  });
+  return jobs.sort(_jobOrder);
+}
+
+function _bucketCounts(jobs) {
+  const counts = {running: 0, waiting: 0, scheduled: 0, done: 0, error: 0, other: 0};
+  jobs.forEach(j => { counts[_jobBucket(j)] += 1; });
+  return counts;
 }
 
 function renderDlStats() {
   const el = document.getElementById('dl-stats');
   if (!el) return;
-  const counts = {active: 0, done: 0, error: 0, other: 0};
-  _jobs.forEach(j => { counts[_jobBucket(j)] += 1; });
+  const counts = _bucketCounts([..._jobs.values()]);
   const chips = [
-    ['active', 'In corso', 'pg-stat-live'],
+    ['running', 'In corso', 'pg-stat-live'],
+    ['waiting', 'In attesa', 'pg-stat-wait'],
+    // Only when there is one: most panels never schedule anything.
+    ...(counts.scheduled ? [['scheduled', 'Programmati', 'pg-stat-sched']] : []),
     ['done', 'Completati', 'pg-stat-ok'],
     ['error', 'Errori', 'pg-stat-error'],
   ];
@@ -355,13 +421,14 @@ function renderDlStats() {
 // because a heading reading 24 above a single card is a heading that lies.
 function _buildJobGroup(batchId, label, jobs) {
   const all = [..._jobs.values()].filter(j => j.batch_id === batchId);
-  const counts = {active: 0, done: 0, error: 0, other: 0};
-  all.forEach(j => { counts[_jobBucket(j)] += 1; });
+  const counts = _bucketCounts(all);
   const count = jobs.length === all.length
     ? String(all.length) : `${jobs.length} di ${all.length}`;
   const collapsed = _dlCollapsed.has(batchId);
   const summary = [
-    counts.active ? `<span class="jg-n jg-live">${counts.active} in corso</span>` : '',
+    counts.running ? `<span class="jg-n jg-live">${counts.running} in corso</span>` : '',
+    counts.waiting ? `<span class="jg-n jg-wait">${counts.waiting} in attesa</span>` : '',
+    counts.scheduled ? `<span class="jg-n jg-sched">${counts.scheduled} programmati</span>` : '',
     counts.done ? `<span class="jg-n jg-ok">${counts.done} completati</span>` : '',
     counts.error ? `<span class="jg-n jg-err">${counts.error} falliti</span>` : '',
   ].filter(Boolean).join('');
@@ -416,19 +483,16 @@ function renderAllJobCards() {
     groups.get(j.batch_id).push(j);
   });
 
+  // A group sorts where its first job would: a season with one episode
+  // downloading sits among the downloads, ahead of a season still waiting.
   const entries = [
-    ...loose.map(j => ({at: j.created_at, active: _jobBucket(j) === 'active',
-                        html: () => _buildJobCard(j)})),
+    ...loose.map(j => ({lead: j, html: () => _buildJobCard(j)})),
     ...[...groups].map(([batchId, jobs]) => {
       _dlSorted(jobs);
       const label = jobs.find(j => j.batch_label)?.batch_label || 'Gruppo';
-      return {
-        at: jobs.reduce((newest, j) => j.created_at > newest ? j.created_at : newest, ''),
-        active: jobs.some(j => _jobBucket(j) === 'active'),
-        html: () => _buildJobGroup(batchId, label, jobs),
-      };
+      return {lead: jobs[0], html: () => _buildJobGroup(batchId, label, jobs)};
     }),
-  ].sort((a, b) => (b.active - a.active) || (a.at < b.at ? 1 : -1));
+  ].sort((a, b) => _jobOrder(a.lead, b.lead));
 
   container.innerHTML = entries.map(e => e.html()).join('');
   updateActiveSection();
@@ -448,7 +512,7 @@ function refreshCardAppearance(jobId) {
   if (!card) return;
 
   const phase = _jobPhases[j.job_id] || j.status;
-  const isActive = j.status==='running' || j.status==='queued' || j.status==='scheduled';
+  const isActive = _isUnfinished(j);
 
   // Update card classes and border
   card.classList.toggle('is-done', j.status==='done');
@@ -484,6 +548,7 @@ function refreshCardAppearance(jobId) {
   const info = document.getElementById(`job-info-${jobId}`);
   if (info) {
     if (j.status==='error') info.textContent = j.error||'Errore';
+    else if (j.status==='queued' && !j.retry_at) info.textContent = _waitingText(j);
     else if (j.status==='done') info.textContent = 'Completato';
     else if (j.status==='cancelled') info.textContent = 'Annullato';
   }
@@ -496,9 +561,16 @@ function updateActiveSection() {
 }
 
 function updateActiveBadge() {
-  const count = [..._jobs.values()].filter(j=>j.status==='running'||j.status==='queued'||j.status==='scheduled').length;
+  const counts = _bucketCounts([..._jobs.values()]);
+  const count = counts.running + counts.waiting + counts.scheduled;
   const badge = document.getElementById('active-jobs-badge');
-  if (count>0) { badge.style.display=''; badge.textContent=count; }
+  if (count>0) {
+    badge.style.display='';
+    badge.textContent=count;
+    badge.title = [`${counts.running} in corso`, `${counts.waiting} in attesa`,
+                   counts.scheduled ? `${counts.scheduled} programmati` : '']
+      .filter(Boolean).join(' · ');
+  }
   else badge.style.display='none';
   updateActiveSection();
 }
@@ -693,7 +765,10 @@ registerActions({
 registerPageHash('downloads', {
   read: () => ({ params: { f: _dlFilter === 'all' ? null : _dlFilter } }),
   apply: params => {
-    _dlFilter = params.f || 'all';
+    // "active" was the single bucket before #26 split it; old links land on
+    // what it mostly meant. Anything else unknown shows everything.
+    const f = params.f === 'active' ? 'running' : params.f;
+    _dlFilter = DL_BUCKETS.includes(f) ? f : 'all';
     setActivePill('dl-filters', _dlFilter);
   },
 });
