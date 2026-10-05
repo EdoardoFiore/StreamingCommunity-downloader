@@ -141,3 +141,58 @@
     </div>
   </div>
 </div>
+
+<!-- ── Library association ──────────────────────────────────────────── -->
+<!-- One form for adding and correcting: changing the id or the folder is the
+     correction, and the old pair is set aside server-side (app/library.py). -->
+<div class="modal modal-blur fade" id="lib-assoc-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="ti ti-folder-cog me-2"></i><span id="lib-assoc-heading">Associazione</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-3" id="lib-assoc-subject" style="font-weight:600"></p>
+
+        <label class="form-label" for="lib-assoc-id">ID del titolo</label>
+        <div class="input-group mb-1">
+          <span class="input-group-text lib-id-prefix" id="lib-assoc-source">SC</span>
+          <input type="text" id="lib-assoc-id" class="form-control" inputmode="numeric" autocomplete="off">
+        </div>
+        <div class="form-text mb-3">
+          Lo trovi in fondo alla scheda Info della pagina del titolo.
+        </div>
+
+        <label class="form-label" for="lib-assoc-folder">Cartella</label>
+        <select id="lib-assoc-folder" class="form-select mb-3" data-change="lib:preview"></select>
+
+        <div class="row g-2" id="lib-assoc-offsets">
+          <div class="col-6">
+            <label class="form-label" for="lib-assoc-season">Spostamento stagioni</label>
+            <input type="number" id="lib-assoc-season" class="form-control" value="0" step="1"
+                   data-input="lib:preview">
+          </div>
+          <div class="col-6">
+            <label class="form-label" for="lib-assoc-episode">Spostamento episodi</label>
+            <input type="number" id="lib-assoc-episode" class="form-control" value="0" step="1"
+                   data-input="lib:preview">
+          </div>
+          <div class="col-12">
+            <div class="form-text" id="lib-assoc-preview"></div>
+          </div>
+        </div>
+
+        <p class="text-muted mt-3 mb-0" style="font-size:11px">
+          Una cartella scelta qui decide anche dove finiscono i prossimi download di questo
+          titolo. Nessun file viene spostato o rinominato.
+        </p>
+        <div class="form-text text-danger mt-2" id="lib-assoc-feedback"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Annulla</button>
+        <button class="btn btn-primary" id="lib-assoc-save" data-action="lib:save">Salva</button>
+      </div>
+    </div>
+  </div>
+</div>

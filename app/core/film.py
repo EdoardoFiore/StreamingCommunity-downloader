@@ -187,7 +187,12 @@ def download_film(id_film: int, title_name: str, domain: str,
     )
     subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_referer, subtitle_languages)
 
-    dest_path = film_path(output_dir, title_name, year)
+    # A folder a person associated with this film wins over the name the
+    # templates would give it (app/library.py); None means there is none.
+    from app.library import destination
+
+    dest_path = (destination("film", id_film, root=output_dir, year=year, single_file=True)
+                 or film_path(output_dir, title_name, year))
 
     final_path = download_m3u8(
         m3u8_index=m3u8_url,

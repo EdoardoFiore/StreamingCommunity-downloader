@@ -280,6 +280,13 @@ def set_auto_approve(watch_id: int, value: bool) -> Watch | None:
     return get(watch_id)
 
 
+def set_year(watch_id: int, year: str) -> None:
+    db.execute(
+        "UPDATE jf_series_watch SET year = ?, updated_at = ? WHERE id = ?",
+        (year, now_iso(), watch_id),
+    )
+
+
 def set_languages(watch_id: int, audio_languages: list[str],
                   subtitle_languages: list[str]) -> Watch | None:
     """Change what future episodes are downloaded with. Episodes already in the

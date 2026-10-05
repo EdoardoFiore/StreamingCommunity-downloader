@@ -63,10 +63,17 @@
         gap: 2px;
       }
 
-      /* Bootstrap .collapse:not(.show) handles hide. Force flex when shown. */
-      aside.navbar .collapse.show {
+      /* Bootstrap .collapse:not(.show) handles hide. Force flex when shown,
+         and while animating in or out, so the menu has one layout throughout.
+         align-items must be stretch: Tabler gives .navbar-collapse
+         align-items:center, which in a column shrinks the list and the footer
+         to their content — the menu opened full width while .collapsing was
+         display:block, then narrowed the moment .show made it flex. */
+      aside.navbar .collapse.show,
+      aside.navbar .collapsing {
         display: flex !important;
         flex-direction: column;
+        align-items: stretch;
       }
 
       aside.navbar .nav-link {
@@ -108,6 +115,11 @@
         scrollbar-width: none;
       }
       .source-selector::-webkit-scrollbar { display: none; }
+
+      /* An association row stacks: the origin badge moves under the text. */
+      .lib-row { flex-wrap: wrap; }
+      .lib-row-main { flex-basis: 100%; }
+      .lib-origin { margin-right: auto; }
 
       /* Always show file manager actions on mobile */
       .fm-actions { opacity: 1 !important; }

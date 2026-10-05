@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app import __version__, db, downloads_hooks, downloads_notify
+from app import __version__, db, downloads_hooks, downloads_notify, library
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
@@ -26,7 +26,7 @@ from app.config import SCHEDULE_FILE
 from app.mcp import server as mcp_http
 from app.routers import (
     domain, search, home, tv, downloads, progress, files, images, anime, notification_channels,
-    metadata as metadata_router, download_hooks, mcp as mcp_router,
+    metadata as metadata_router, download_hooks, library as library_router, mcp as mcp_router,
 )
 
 logging.basicConfig(
@@ -97,6 +97,9 @@ async def lifespan(app: FastAPI):
     # Third and last: outbound side effects only, so it can neither delay a
     # request's own row nor swallow a notification if it fails.
     downloads_hooks.register_hook_listener()
+    # Files where each finished download went, under its title's id. Order does
+    # not matter: nothing else waits on it, and only the library check reads it.
+    library.register_job_listener()
     # Before anything can approve or complete a request: any row still
     # "approved" or "downloading" from a previous run has no in-memory worker
     # left, and never will — it needs recovering before the app is reachable.
@@ -140,6 +143,7 @@ app.include_router(domain.router)
 app.include_router(metadata_router.router)
 app.include_router(notification_channels.router)
 app.include_router(download_hooks.router)
+app.include_router(library_router.router)
 app.include_router(mcp_router.router)
 # Raw ASGI, outside FastAPI's routing: the MCP transport speaks JSON-RPC itself.
 app.add_route(mcp_http.PATH, mcp_http.endpoint, include_in_schema=False)

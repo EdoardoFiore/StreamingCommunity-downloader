@@ -350,6 +350,8 @@
     .jg-summary { margin-left: auto; display: flex; gap: 9px; flex-shrink: 0; }
     .jg-n { font-size: 11px; font-variant-numeric: tabular-nums; }
     .jg-live { color: var(--blue); }
+    .jg-wait { color: var(--text-sub); }
+    .jg-sched { color: var(--yellow); }
     .jg-ok   { color: var(--green); }
     .jg-err  { color: var(--danger); }
     /* The cards inside lose their own frame: the group is the frame now. */
@@ -599,6 +601,44 @@
       margin: 0;
       overflow-x: auto;
     }
+
+    /* ── Library associations (Settings › Associazioni) ────── */
+    .lib-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .lib-toolbar .form-select { width: auto; flex: 0 0 auto; }
+    .lib-toolbar input[type="search"] { flex: 1 1 180px; min-width: 0; }
+    .lib-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 0; border-bottom: 1px solid var(--border);
+    }
+    .lib-row-main { flex: 1; min-width: 0; }
+    .lib-row-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .lib-row-name { color: var(--text); font-size: 13px; }
+    .lib-id, .th-fact-id {
+      font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .lib-type { font-size: 11px; color: var(--text-dim); }
+    .lib-row-folder {
+      display: flex; align-items: center; gap: 6px; min-width: 0;
+      margin-top: 2px; font-size: 12px; color: var(--text-sub);
+    }
+    .lib-row-folder .ti { color: var(--text-muted); flex: 0 0 auto; }
+    .lib-offsets { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+    .lib-origin { flex: 0 0 auto; }
+    .lib-row-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+    .lib-row-rejected .lib-row-name { color: var(--text-sub); }
+    .lib-rejected summary { cursor: pointer; font-size: 12px; color: var(--text-muted); }
+
+    /* The title page's own view of it */
+    .lib-card-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 0; border-bottom: 1px solid var(--border);
+      font-size: 12px; color: var(--text-sub);
+    }
+    .lib-card-row > .ti { color: var(--text-muted); flex: 0 0 auto; }
+    .lib-card-main { flex: 1; min-width: 0; }
+    .lib-card-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 3px; }
+    #lib-assoc-source { font-family: var(--font-mono); font-size: 12px; }
 
     /* Empty state */
     #jobs-empty { color: var(--text-dim) !important; }

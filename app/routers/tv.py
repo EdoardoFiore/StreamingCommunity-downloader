@@ -48,7 +48,8 @@ async def fetch_seasons(tv_id: int, slug: str = Query(...), version: str = Query
     return {"seasons_count": count}
 
 
-def _mark_in_library(episodes: list[dict], title: str, season: int, year: str) -> None:
+def _mark_in_library(episodes: list[dict], title: str, season: int, year: str,
+                     tv_id=None) -> None:
     """Flag the episodes already sitting in the library.
 
     The title arrives from the caller because the episode list has no other
@@ -57,22 +58,42 @@ def _mark_in_library(episodes: list[dict], title: str, season: int, year: str) -
     ``paths.episode_path``, which runs it through ``sanitize_filename``: "/",
     "\\", control characters and leading dots are stripped, so a crafted title
     cannot walk out of the library directory. This only ever stats.
+
+    ``tv_id`` finds the folders associated with this series in the library
+    registry (``app.library``), wherever and under whatever name they are, and
+    the ones a person has said are not its own.
     """
-    from app.core import container, naming, paths
-    from app.requests.resolver import EPISODE, first_existing, library_dir
+    from app import library
+    from app.core import container
+    from app.requests.resolver import (
+        EPISODE, episode_candidates, first_existing, library_dir, series_years,
+    )
 
     output_dir = library_dir(EPISODE)
-    # Resolved once above the loop rather than per path: each episode builds two
-    # of them, and every build would otherwise re-read data.json.
+    source = library.SOURCE_BY_KIND[EPISODE]
+    # Read once per season rather than per episode: the registry, the series'
+    # folders under other years (#24), and each associated folder's listing,
+    # which Held reads once and keeps.
     cont = container.configured()
+    try:
+        held = library.held(source, EPISODE, tv_id, output_dir) if tv_id is not None else []
+        rejected = library.rejected_folders(source, EPISODE, tv_id) if tv_id is not None else set()
+    except Exception:
+        logger.exception("Cannot read the associated folders of series %s", tv_id)
+        held, rejected = [], set()
+    try:
+        years = series_years(output_dir, title, year, exclude=rejected)
+    except Exception:
+        logger.exception("Cannot list the series folders for %s", title)
+        years = [year or None]
     for episode in episodes:
         try:
-            current = paths.episode_path(output_dir, title, season, episode["n"],
-                                         year or None, container=cont)
-            legacy = paths.episode_path(output_dir, title, season, episode["n"],
-                                        year or None, naming.LEGACY_TEMPLATES,
-                                        container=cont)
-            episode["in_library"] = first_existing(current, legacy) is not None
+            bases = episode_candidates(output_dir, title, season, episode["n"], years,
+                                       container=cont)
+            episode["in_library"] = (
+                first_existing(*bases) is not None
+                or library.locate(held, EPISODE, season=season, episode=episode["n"]) is not None
+            )
         except Exception:
             # A library check is a convenience. It must never be the reason an
             # episode list fails to render.
@@ -103,7 +124,7 @@ async def fetch_episodes(
     # loop like the fetch above. Skipped when the caller sends no title, since
     # there is then nothing to build a path from.
     if title:
-        await asyncio.to_thread(_mark_in_library, episodes, title, season, year)
+        await asyncio.to_thread(_mark_in_library, episodes, title, season, year, tv_id)
     return episodes
 
 

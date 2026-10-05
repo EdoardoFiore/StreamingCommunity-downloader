@@ -177,6 +177,44 @@ def test_a_new_episode_becomes_a_pending_request(client, panel):
     assert created[0].watch_id is not None
 
 
+def test_a_stale_year_is_corrected_before_a_new_episode_lands(client, panel):
+    """A follow from before #21 stored the latest season's year; every new
+    episode would otherwise keep landing in that folder (#24)."""
+    bob = _user("bob", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    panel.props = {"type": "tv", "release_date": "2004-03-01", "last_air_date": "2019-05-01"}
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+
+    poller.run_poll_cycle()
+
+    assert watch_models.get(watch_id).year == "2004"
+    assert request_models.list_all()[0].year == "2004"
+
+
+def test_a_year_that_cannot_be_read_is_kept(client, panel):
+    bob = _user("bob", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    panel.episodes.append({"id": 904, "n": "4", "name": "Episodio 4"})
+
+    poller.run_poll_cycle()
+
+    assert watch_models.get(watch_id).year == "2019"
+    assert request_models.list_all()[0].year == "2019"
+
+
+def test_a_quiet_cycle_does_not_look_the_year_up(client, panel, monkeypatch):
+    from app.core import metadata
+
+    bob = _user("bob", Permission.REQUEST)
+    _follow(client, _login(client, bob))
+    looked = []
+    monkeypatch.setattr(metadata, "title_metadata", lambda *a, **k: looked.append(a) or {})
+
+    poller.run_poll_cycle()
+
+    assert looked == []
+
+
 def test_an_owner_with_download_permission_skips_the_queue(client, panel, stub_jobs):
     ann = _user("ann", Permission.REQUEST | Permission.DOWNLOAD)
     _follow(client, _login(client, ann))

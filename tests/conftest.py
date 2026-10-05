@@ -40,6 +40,20 @@ def _configured_domain(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _own_database(tmp_path):
+    """Every test on a database of its own, even one that never asks for one.
+
+    The library check reads the registry in panel.db (app/library.py), so a
+    plain path test reaches the database too. Without this it read whatever
+    the previous test had configured — or, run alone, the panel.db in the
+    working directory. Same file the ``client`` fixture uses, which finds it
+    already migrated.
+    """
+    db.configure(tmp_path / "test.db")
+    db.run_migrations()
+
+
+@pytest.fixture(autouse=True)
 def _reset_ratelimit():
     """The login backoff in app/auth/ratelimit.py is a module-level dict, not
     DB-backed state, so a fresh test database does not clear it on its own.
@@ -281,6 +295,9 @@ class FakeSource:
         self.dead = False
         self.episodes = [{"id": 900 + n, "n": str(n), "name": f"Episodio {n}"} for n in (1, 2, 3)]
         self.anime_episodes = [{"id": 800 + n, "number": str(n)} for n in (1, 2, 3)]
+        # The title page's props, read for tmdb_id at approval and for a
+        # followed series' year. Empty unless a test says otherwise.
+        self.props = {}
 
     @property
     def languages(self) -> dict:
@@ -299,7 +316,7 @@ class InlineExecutor:
 @pytest.fixture
 def source(monkeypatch, tmp_path):
     """Fake external source plus a temporary library and configured domain."""
-    from app.core import animeunity, film, page, tv
+    from app.core import animeunity, film, metadata, page, tv
     from app.requests import resolver, service
 
     fake = FakeSource()
@@ -329,6 +346,9 @@ def source(monkeypatch, tmp_path):
         lambda *a, **k: ([] if fake.dead else list(fake.episodes)),
     )
     monkeypatch.setattr(tv, "get_episode_languages", lambda *a, **k: fake.languages)
+    monkeypatch.setattr(tv, "get_title_props", lambda *a, **k: dict(fake.props))
+    # Process-wide, so one test's props would otherwise answer the next's.
+    metadata.clear_cache()
     monkeypatch.setattr(
         animeunity, "get_episodes",
         lambda *a, **k: ([] if fake.dead else list(fake.anime_episodes)),

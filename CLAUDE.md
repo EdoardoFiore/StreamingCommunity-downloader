@@ -91,15 +91,16 @@ request before any route runs.
 - `auth.py` — the single token: stored hashed, owned by whoever generated it
 - `tools.py` — the tools, each a thin call into an existing route handler
 
-**`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `downloads_notify.py` (notifications
+**`app/`** — `jobs.py` (thread pool, `DownloadSlots`, SSE broadcast), `downloads_notify.py` (notifications
 for downloads that skipped the queue, one summary per season/series), `downloads_hooks.py`
-(post-download webhooks and the Jellyfin library refresh), `schedule.py`, `db.py`,
+(post-download webhooks and the Jellyfin library refresh), `library.py` (the registry of which
+folder holds which title; endpoints in `routers/library.py`, UI in `static/library.js`), `schedule.py`, `db.py`,
 `config.py`, `progress.py`, `routers/`, `templates/`, `static/`
 
 ### Persistence
 
 - `panel.db` (SQLite, stdlib `sqlite3`) — users, sessions, requests, notifications, notification
-  channels, download hooks, followed series, and the `auth_mode` answer. Migrations are the ordered
+  channels, download hooks, followed series, the library folder registry, and the `auth_mode` answer. Migrations are the ordered
   `MIGRATIONS` list in `app/db.py`, applied against `PRAGMA user_version`. Never edit an applied
   migration; append a new one. An entry is a list of SQL statements, or a `(conn, fresh)` callable
   when the decision depends on whether the database already existed — `fresh` is the only way to
@@ -189,6 +190,12 @@ anything under a mounted static directory is readable by unauthenticated visitor
   never fires. That is why `jobs.py` notifies listeners on *every* path out of `_run_download`,
   including the job cancelled before it started, and why `cancel()` notifies for a job still
   `scheduled` that the executor never saw.
+- **Download slots are granted in arrival order, and the limit changes in place.**
+  `jobs.DownloadSlots` replaced a `BoundedSemaphore`, which promised no wake-up order — so the
+  downloads page could not say what starts next — and which `update_max_concurrent()` *replaced*,
+  leaving jobs already waiting under the old limit beside new ones under the new (3 → 5 could run
+  8). A waiting job carries a `queue_seq` ticket, broadcast as `job_queued`; the page numbers the
+  "In attesa" list by it, so a new way into a slot that skips the line breaks a promise on screen.
 - **An automatic retry is not a way out of a job.** `_run_download` loops on `_attempt()` up to
   `AUTO_RETRIES` times, `AUTO_RETRY_DELAY` apart, outside the semaphore; the job keeps its id and
   stays `queued` meanwhile, so listeners still fire once, with the final outcome. A manual retry
@@ -263,6 +270,38 @@ anything under a mounted static directory is readable by unauthenticated visitor
   so everything it would paper over is refused by `naming.validate()` at save time. Never
   `str.format` a user template: `{title.__class__}` leaks attributes and a stray `{` raises
   mid-download.
+- **The library check asks the name first and the registry second; neither ever moves a file.**
+  By name: the canonical path, plus — for series and anime series — the same title's folders
+  under other years. Before #21 the folder year was the latest season's, so libraries hold
+  `I Simpson/`, `I Simpson (2025)/`, `I Simpson (2026)/` for one show (#24).
+  `resolver.series_years()` finds them by rendering the folder template with each year the library
+  root mentions — no parsing of names back — and refuses any year *earlier* than the canonical
+  one: a wrong year was always a later season's, an earlier one is a remake's original. By
+  registry: `app/library.py` keeps `library_folder` rows keyed on `(source, media_type,
+  external_id)`, the folder stored as a name under the library root so a remounted volume does not
+  orphan it. `origin` says who decided, and **the panel never overrides a person**: `download` and
+  `matched` are filed automatically (matched only when a download lands, never on an episode list
+  being opened, never for a film or anime film); `manual` and `rejected` come from Settings ›
+  Associazioni or the title page. Correcting an id or a folder *rejects* the old pair instead of
+  deleting it — otherwise the next download matches the same folder by name and files it again —
+  and `series_years(exclude=)` skips rejected folders for the same reason. Only a `manual` row
+  decides where new files go (`library.destination()`, called by `resolver.destination_path()` and
+  by all three downloaders), with `season_offset`/`episode_offset` placing a title inside a shared
+  folder: that is how an anime split into parts at the source becomes one series. Check and
+  download build that path with the same `paths.placed_*` functions; keep it that way. Without a
+  `manual` row an episode joins the series' folder already on disk, not the canonical one
+  (`resolver.series_home()`, through `series_episode_path()` for the request path and both episode
+  downloaders): the one holding the most of that season, then the most episodes, canonical on a
+  tie, and never an empty folder. Writing to the canonical year instead gave Ted Lasso a new
+  `(2020)/` beside the `(2026)/` holding the whole series — two series in Jellyfin. The counting is
+  what stops one stray episode from capturing the series, the reason only `manual` used to decide;
+  the registry's `download`/`matched` rows still do not. An
+  associated folder is otherwise searched by the `SxxEyy` in file names, because the title is the
+  part that may have changed. `library.reconcile()` (every poll cycle, and a button) follows a
+  folder renamed outside the panel by the byte size of a file known to be in it — no inode, which
+  Windows lacks — accepting exactly one candidate, and forgets a folder missing for 30 days only
+  while the library root was readable and not empty. A followed series' stored year is corrected
+  from the title props by `poller.refresh_year()`, only in a cycle that found something new.
 - **The container is one setting read in one place, and nothing is ever re-encoded.**
   `container.configured()` is the only source; `paths.*_path()` take `container=` the way they take
   `templates=`, and everything downstream infers the container from the extension of the file it is
