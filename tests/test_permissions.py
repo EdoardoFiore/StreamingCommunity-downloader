@@ -76,7 +76,8 @@ CASES = [
     ((Permission.REQUEST,), "POST", "/api/requests/season",
      {"external_id": "1", "title": "x", "slug": "x", "season": 1}),
     ((Permission.MANAGE_SETTINGS,), "GET", "/api/mcp/status", None),
-    ((Permission.MANAGE_SETTINGS,), "POST", "/api/mcp/token/regenerate", None),
+    ((Permission.MANAGE_SETTINGS,), "POST", "/api/mcp/token", None),
+    ((Permission.MANAGE_SETTINGS,), "DELETE", "/api/mcp/token", None),
 ]
 
 
@@ -241,5 +242,8 @@ def test_public_allowlist_stays_small():
         "/api/auth/skip",
         "/api/auth/jellyfin-token",
         "/api/auth/jellyfin",
+        # Bearer-token authenticated by app/mcp/server.py; tests/test_mcp.py
+        # pins that it refuses everything without that token.
+        "/mcp",
     }
     assert SESSION_ONLY_PATHS == {"/api/auth/me", "/api/auth/logout"}

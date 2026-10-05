@@ -1,79 +1,73 @@
-"""Authentication middleware for the MCP server.
+"""Who an MCP client is, and whether it may be one.
 
-Supports Bearer token authentication via the Authorization header or
-a ?token= query parameter (useful for SSE clients that cannot set headers).
-Uses pure ASGI to avoid buffering or interfering with Server-Sent Events streams.
+The panel holds a single MCP token. It is stored as a SHA-256 hash, like a
+session token, so it is shown once — when it is generated — and never read
+back. Whoever generates it becomes its **owner**, and the agent acts as that
+user with their *live* permissions: a token outliving its owner's DOWNLOAD
+permission no longer downloads, and one whose owner is disabled or deleted
+stops working altogether. There is no identity of its own to grant anything,
+which is what keeps "the agent" from becoming a back door around the
+permission model — and it is the only honest answer to "who asked for this?"
+when a request lands in the queue.
+
+In open mode there are no accounts, so the agent is the same implicit user as
+a browser. A token minted in open mode does not survive a switch to Jellyfin:
+it has no owner there, and is refused until someone regenerates it.
 """
 
+import hashlib
 import hmac
-import logging
-from urllib.parse import parse_qs
+import secrets
 
-from starlette.responses import JSONResponse
+from app import db
+from app.auth import models
+from app.auth.deps import OPEN_MODE_USER
 
-from app.auth.models import get_setting
-
-logger = logging.getLogger(__name__)
-
-SETTING_MCP_TOKEN = "mcp_token"
+SETTING_TOKEN_HASH = "mcp_token_sha256"
+SETTING_TOKEN_OWNER = "mcp_token_owner"
 
 
-def get_configured_token() -> str:
-    """Return the currently configured MCP token, or empty string if none."""
-    return (get_setting(SETTING_MCP_TOKEN) or "").strip()
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
-def verify_token(provided_token: str) -> bool:
-    """Constant-time token verification."""
-    configured = get_configured_token()
-    if not configured:
-        # If no token is configured, allow access (open mode)
-        return True
-    return hmac.compare_digest(configured.encode("utf-8"), provided_token.strip().encode("utf-8"))
+def generate_token(owner: models.User) -> str:
+    """Replace the token, returning the only copy of the new one."""
+    token = secrets.token_urlsafe(32)
+    owner_id = "" if owner is OPEN_MODE_USER else str(owner.id)
+    with db.tx() as conn:
+        models.set_setting(SETTING_TOKEN_HASH, _hash(token), conn=conn)
+        models.set_setting(SETTING_TOKEN_OWNER, owner_id, conn=conn)
+    return token
 
 
-class MCPAuthMiddleware:
-    """Pure ASGI middleware protecting the MCP server endpoints."""
+def revoke_token() -> None:
+    with db.tx() as conn:
+        models.set_setting(SETTING_TOKEN_HASH, "", conn=conn)
+        models.set_setting(SETTING_TOKEN_OWNER, "", conn=conn)
 
-    def __init__(self, app):
-        self.app = app
 
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
+def has_token() -> bool:
+    return bool(models.get_setting(SETTING_TOKEN_HASH))
 
-        configured = get_configured_token()
-        if not configured:
-            await self.app(scope, receive, send)
-            return
 
-        method = scope.get("method", "GET")
-        if method == "OPTIONS":
-            await self.app(scope, receive, send)
-            return
+def token_owner() -> models.User | None:
+    """The user the agent acts as, or None when nobody valid holds the token."""
+    if models.runtime_open_mode():
+        return OPEN_MODE_USER
+    owner_id = models.get_setting(SETTING_TOKEN_OWNER) or ""
+    if not owner_id.isdigit():
+        return None
+    user = models.get_user(int(owner_id))
+    return user if user is not None and user.enabled else None
 
-        # 1. Check Authorization header: Bearer <token>
-        headers = dict(scope.get("headers", []))
-        auth_header = headers.get(b"authorization", b"").decode("latin-1")
-        token = ""
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header[7:].strip()
 
-        # 2. Check query parameter: ?token=<token>
-        if not token:
-            qs = parse_qs(scope.get("query_string", b"").decode("latin-1"))
-            token = qs.get("token", [""])[0].strip()
-
-        if not token or not verify_token(token):
-            path = scope.get("path", "")
-            logger.warning("Rejected unauthorized MCP request to %s", path)
-            response = JSONResponse(
-                {"error": "Unauthorized", "detail": "Valid MCP Bearer token required"},
-                status_code=401,
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-            await response(scope, receive, send)
-            return
-
-        await self.app(scope, receive, send)
+def authenticate(presented: str) -> models.User | None:
+    """The acting user for a presented token, or None. Fails closed: no stored
+    token means no access, never open access."""
+    stored = models.get_setting(SETTING_TOKEN_HASH) or ""
+    if not stored or not presented:
+        return None
+    if not hmac.compare_digest(stored, _hash(presented)):
+        return None
+    return token_owner()

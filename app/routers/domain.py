@@ -180,8 +180,6 @@ class SettingsUpdate(BaseModel):
     # fields, so the switch reported "Salvato." and saved nothing.
     jellyfin_refresh_on_download: bool | None = None
     mcp_enabled: bool | None = None
-    mcp_port: int | None = None
-    mcp_host: str | None = None
 
     @field_validator("naming_templates")
     @classmethod
@@ -245,12 +243,11 @@ _SETTING_RANGES = (
     # than this is hammering somebody else's page for a domain that rotates
     # every few weeks.
     ("domain_check_interval_minutes", 30, 1440),
-    ("mcp_port", 1024, 65535),
 )
 
 
 @router.put("/settings", dependencies=CAN_MANAGE)
-async def set_app_settings(body: SettingsUpdate):
+def set_app_settings(body: SettingsUpdate):
     # save_settings() replaces the whole `settings` dict rather than merging, so
     # every key the caller did not send has to be carried over here or it is
     # lost. Merging over get_settings() makes that structural: a key added to
@@ -269,9 +266,6 @@ async def set_app_settings(body: SettingsUpdate):
     save_settings(new_settings)
     from app.jobs import job_manager
     job_manager.update_max_concurrent(new_settings["max_concurrent_downloads"])
-    if "mcp_enabled" in provided or "mcp_port" in provided or "mcp_host" in provided:
-        from app.mcp.server import mcp_manager
-        await mcp_manager.apply_settings(new_settings)
     return new_settings
 
 

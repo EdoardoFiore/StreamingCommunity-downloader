@@ -129,7 +129,7 @@
 - Independent permissions: download directly, request, approve, manage users, manage settings
 - Request queue with approval, preserving the audio and subtitle tracks the requester chose
 - Request status on the search result cards, and an in-app notification bell
-- **Model Context Protocol (MCP) server** for AI agents (Cursor, Claude Desktop, Antigravity, etc.) to search, download, monitor queues, and follow series
+- MCP server for AI agents (Claude Code, Cursor, …): search, download, follow series and work the request queue
 - Docker ready
 
 ---
@@ -467,38 +467,39 @@ manager.
 
 ## Model Context Protocol (MCP)
 
-The panel includes a built-in **Model Context Protocol (MCP)** server, allowing AI agents (such as Claude Desktop, Cursor, Antigravity, and other MCP clients) to interact with your media library and downloader.
+The panel can act as an MCP server, so an AI agent (Claude Code, Cursor, or any
+client speaking Streamable HTTP) can search titles, start and watch downloads,
+follow series and file or approve requests. It is served by the panel itself at
+`/mcp` — no extra port, and the same reverse proxy and TLS as the web interface.
 
-### Features & Exposed Tools
+Off by default. Enable it under **Impostazioni → MCP**, then generate a token.
+The token is shown once (only its hash is stored), and **the agent acts as the
+user who generated it, with that user's current permissions**: an agent cannot
+download if its owner cannot, and the token stops working if the owner is
+disabled or removed. Requests it files are that user's requests.
 
-- **Content Discovery**: `search_content`, `get_content_details`, `get_series_episodes`, `get_anime_episodes`, `get_home_shelves`
-- **Download Management**: `download_film`, `download_episode`, `download_season`, `download_anime_episode`
-- **Job Monitoring & Control**: `list_downloads`, `get_download_progress`, `cancel_download`, `retry_download`
-- **Series Watch Management**: `follow_series`, `list_watched_series`, `check_series_updates`, `unfollow_series`
-- **Request Queue Operations**: `submit_request`, `list_requests`, `approve_request`
-- **System Information**: `get_system_status`, `list_libraries`
+Client configuration (the settings page shows it pre-filled):
 
-### Configuration
-
-The MCP server is configured and managed directly from the Web UI under **Impostazioni → Server MCP**:
-1. Toggle the **Server MCP** switch to enable or disable it.
-2. Choose your preferred listening port (default: `8001`).
-3. Click **Genera Nuovo Token** to create a secure 48-character Bearer token.
-4. Copy the ready-to-use configuration JSON for Claude Desktop / Cursor.
-
-Example `mcp_config.json`:
 ```json
 {
   "mcpServers": {
     "streamingcommunity": {
-      "url": "http://<PANEL_HOST>:8001/sse",
-      "headers": {
-        "Authorization": "Bearer <YOUR_MCP_TOKEN>"
-      }
+      "type": "http",
+      "url": "https://panel.example.com/mcp",
+      "headers": { "Authorization": "Bearer <TOKEN>" }
     }
   }
 }
 ```
+
+With Claude Code: `claude mcp add --transport http streamingcommunity https://panel.example.com/mcp --header "Authorization: Bearer <TOKEN>"`.
+
+Tools: `search_content`, `get_content_details`, `get_series_episodes`,
+`get_anime_episodes`, `get_home_shelves`, `download_film`, `download_episode`,
+`download_season`, `download_anime_episode`, `list_downloads`,
+`get_download_progress`, `cancel_download`, `retry_download`, `follow_series`,
+`list_followed_series`, `unfollow_series`, `check_series_now`, `submit_request`,
+`list_requests`, `approve_request`, `get_system_status`, `list_libraries`.
 
 ---
 

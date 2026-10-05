@@ -27,7 +27,6 @@ services:
     ports:
       # 8001 sull'host, così può convivere con la produzione sulla 8000.
       - "8001:8000"
-      - "8002:8001"  # Server MCP dev
     volumes:
       - nfs_storage_dev:/app/videos
       - panel_config_dev:/app/config

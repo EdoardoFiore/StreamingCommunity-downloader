@@ -866,181 +866,121 @@ async function saveLibraries() {
 }
 
 
-// ── MCP Server Settings ───────────────────────────────────────
+// ── MCP server ───────────────────────────────────────────────────────────────
+
+// The address an MCP client should use: wherever this page was reached from,
+// which behind a reverse proxy is the public HTTPS name.
+function _mcpUrl(path) {
+  return `${window.location.origin}${path || '/mcp'}`;
+}
+
+function _renderMcpSnippet(path, token) {
+  const snippet = {
+    mcpServers: {
+      streamingcommunity: {
+        type: 'http',
+        url: _mcpUrl(path),
+        headers: { Authorization: `Bearer ${token || '<TOKEN>'}` },
+      },
+    },
+  };
+  document.getElementById('mcp-config-snippet').textContent = JSON.stringify(snippet, null, 2);
+}
+
+let _mcpPath = '/mcp';
 
 async function loadMcpSettings() {
   _feedback('mcp-feedback', '');
   try {
-    const [appSettings, mcpStatus] = await Promise.all([
-      _loadAppSettings(),
-      api.get('/api/mcp/status').catch(() => null),
-    ]);
-
-    const enabled = appSettings?.mcp_enabled ?? false;
-    const port = appSettings?.mcp_port ?? 8001;
-    const token = mcpStatus?.token || '';
-    const running = mcpStatus?.running ?? false;
-    const sseUrl = mcpStatus?.sse_url || `http://${window.location.hostname || 'localhost'}:${port}/sse`;
-
-    const enabledEl = document.getElementById('setting-mcp-enabled');
-    if (enabledEl) enabledEl.checked = enabled;
-
-    const portEl = document.getElementById('setting-mcp-port');
-    if (portEl) portEl.value = port;
-
-    const tokenEl = document.getElementById('mcp-token-display');
-    if (tokenEl) tokenEl.value = token;
-
-    // Badge
-    const badge = document.getElementById('mcp-status-badge');
-    if (badge) {
-      if (running) {
-        badge.className = 'badge bg-success ms-3';
-        badge.textContent = `Attivo sulla porta ${mcpStatus?.port || port}`;
-      } else {
-        badge.className = 'badge bg-secondary ms-3';
-        badge.textContent = enabled ? 'In avvio o inattivo' : 'Inattivo';
-      }
+    const status = await api.get('/api/mcp/status');
+    _mcpPath = status.path;
+    document.getElementById('setting-mcp-enabled').checked = !!status.enabled;
+    const tokenStatus = document.getElementById('mcp-token-status');
+    if (!status.has_token) {
+      tokenStatus.textContent = 'Nessun token: genera un token perché un agente possa collegarsi.';
+    } else if (!status.owner) {
+      // Owner disabled or removed, or minted before Jellyfin was connected.
+      tokenStatus.textContent = 'Il token non è più valido: chi l’ha generato non è più un utente attivo. Generane uno nuovo.';
+    } else {
+      tokenStatus.textContent = `Token attivo, generato da ${status.owner}: l’agente agisce con i suoi permessi.`;
     }
-
-    updateMcpSnippet(sseUrl, token);
+    document.getElementById('mcp-revoke-btn').style.display = status.has_token ? '' : 'none';
+    document.getElementById('mcp-token-once').style.display = 'none';
+    _renderMcpSnippet(_mcpPath, '');
   } catch (e) {
-    _feedback('mcp-feedback', errText(e, 'Errore nel caricamento delle impostazioni MCP.'), 'danger');
+    _feedback('mcp-feedback', errText(e, 'Errore nel caricamento.'), 'danger');
   }
-}
-
-function updateMcpSnippet(url, token) {
-  const code = document.getElementById('mcp-config-snippet');
-  if (!code) return;
-  const snippet = {
-    mcpServers: {
-      streamingcommunity: {
-        url: url,
-        headers: {
-          Authorization: `Bearer ${token || '<TOKEN>'}`
-        }
-      }
-    }
-  };
-  code.textContent = JSON.stringify(snippet, null, 2);
 }
 
 async function saveMcpSettings() {
   const btn = document.getElementById('save-mcp-btn');
-  const enabled = document.getElementById('setting-mcp-enabled').checked;
-  const port = parseInt(document.getElementById('setting-mcp-port').value, 10);
-
-  if (isNaN(port) || port < 1024 || port > 65535) {
-    _feedback('mcp-feedback', 'La porta deve essere un numero compreso tra 1024 e 65535.', 'danger');
-    return;
-  }
-
   btn.disabled = true;
-  _feedback('mcp-feedback', 'Salvataggio in corso...');
+  _feedback('mcp-feedback', 'Salvataggio...');
   try {
     await api.put('/api/domain/settings', {
-      mcp_enabled: enabled,
-      mcp_port: port,
+      mcp_enabled: document.getElementById('setting-mcp-enabled').checked,
     });
     _appSettingsPromise = null;
-    _feedback('mcp-feedback', 'Impostazioni MCP salvate.', 'success');
-    showToast('Impostazioni MCP salvate', 'success');
-    await loadMcpSettings();
-  } catch (e) {
-    _feedback('mcp-feedback', errText(e, 'Errore durante il salvataggio.'), 'danger');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function copyTextToClipboard(text, el) {
-  if (!text) return false;
-  // 1. Try navigator.clipboard if in a secure context (https or localhost)
-  if (navigator.clipboard && window.isSecureContext) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (_) {}
-  }
-  // 2. Fallback using existing input element if provided
-  if (el && typeof el.select === 'function') {
-    try {
-      el.focus();
-      el.select();
-      if (typeof el.setSelectionRange === 'function') el.setSelectionRange(0, 99999);
-      if (document.execCommand('copy')) return true;
-    } catch (_) {}
-  }
-  // 3. Fallback using temporary textarea (for HTTP/LAN IP access)
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.top = '0';
-    ta.style.left = '0';
-    ta.style.width = '2em';
-    ta.style.height = '2em';
-    ta.style.padding = '0';
-    ta.style.border = 'none';
-    ta.style.outline = 'none';
-    ta.style.boxShadow = 'none';
-    ta.style.background = 'transparent';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    if (typeof ta.setSelectionRange === 'function') ta.setSelectionRange(0, 99999);
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    return ok;
-  } catch (_) {
-    return false;
-  }
-}
-
-async function copyMcpToken() {
-  const el = document.getElementById('mcp-token-display');
-  const token = el?.value;
-  if (!token) return;
-  const ok = await copyTextToClipboard(token, el);
-  if (ok) {
-    showToast('Token MCP copiato negli appunti', 'success');
-  } else {
-    showToast('Impossibile copiare negli appunti', 'warning');
-  }
-}
-
-async function copyMcpSnippet() {
-  const el = document.getElementById('mcp-config-snippet');
-  const text = el?.innerText || el?.textContent;
-  if (!text) return;
-  const ok = await copyTextToClipboard(text);
-  if (ok) {
-    showToast('Configurazione JSON copiata negli appunti', 'success');
-  } else {
-    showToast('Impossibile copiare negli appunti', 'warning');
-  }
+    _feedback('mcp-feedback', 'Salvato.', 'success');
+    showToast('Impostazione salvata', 'success');
+  } catch (e) { _feedback('mcp-feedback', errText(e, 'Errore salvataggio.'), 'danger'); }
+  finally { btn.disabled = false; }
 }
 
 async function regenerateMcpToken() {
-  const confirmed = await scConfirm(
-    'Rigenerare il token MCP?',
-    'I client o gli agenti attualmente configurati con il vecchio token dovranno essere aggiornati.'
-  );
-  if (!confirmed) return;
-
-  _feedback('mcp-feedback', 'Rigenerazione token...');
+  const hadToken = document.getElementById('mcp-revoke-btn').style.display !== 'none';
+  if (hadToken && !await scConfirm(
+    'Generare un nuovo token? Quello attuale smette subito di funzionare: '
+    + 'gli agenti che lo usano vanno riconfigurati.'
+  )) return;
   try {
-    const res = await api.post('/api/mcp/token/regenerate', {});
+    const res = await api.post('/api/mcp/token', {});
+    await loadMcpSettings();
     document.getElementById('mcp-token-display').value = res.token;
-    _feedback('mcp-feedback', 'Nuovo token generato con successo.', 'success');
-    showToast('Token MCP rigenerato', 'success');
-    const port = document.getElementById('setting-mcp-port')?.value || '8001';
-    updateMcpSnippet(`http://${window.location.hostname || 'localhost'}:${port}/sse`, res.token);
+    document.getElementById('mcp-token-once').style.display = '';
+    _renderMcpSnippet(_mcpPath, res.token);
   } catch (e) {
-    _feedback('mcp-feedback', errText(e, 'Errore durante la rigenerazione del token.'), 'danger');
+    _feedback('mcp-feedback', errText(e, 'Errore nella generazione del token.'), 'danger');
   }
+}
+
+async function revokeMcpToken() {
+  if (!await scConfirm(
+    'Revocare il token? Nessun agente potrà collegarsi finché non ne generi uno nuovo.'
+  )) return;
+  try {
+    await api.del('/api/mcp/token');
+    await loadMcpSettings();
+    showToast('Token revocato', 'success');
+  } catch (e) {
+    _feedback('mcp-feedback', errText(e, 'Errore nella revoca.'), 'danger');
+  }
+}
+
+// The clipboard API exists only in a secure context, and a panel reached at
+// http://192.168.x.x is not one: there the selection-and-execCommand route is
+// the only one left.
+async function _copyText(text) {
+  if (!text) return false;
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (_) { /* fall through */ }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+  document.body.removeChild(ta);
+  return ok;
+}
+
+async function _copyWithToast(text, what) {
+  const ok = await _copyText(text);
+  showToast(ok ? `${what} copiato` : 'Impossibile copiare: selezionalo a mano', ok ? 'success' : 'warning');
 }
 
 
@@ -1075,9 +1015,10 @@ registerActions({
   'cfg:testHook':         d => testHook(Number(d.id)),
   'cfg:deleteHook':       d => deleteHook(Number(d.id)),
   'cfg:saveMcp':          () => saveMcpSettings(),
-  'cfg:copyMcpToken':     () => copyMcpToken(),
-  'cfg:copyMcpSnippet':   () => copyMcpSnippet(),
+  'cfg:copyMcpToken':     () => _copyWithToast(document.getElementById('mcp-token-display').value, 'Token'),
+  'cfg:copyMcpSnippet':   () => _copyWithToast(document.getElementById('mcp-config-snippet').textContent, 'Configurazione'),
   'cfg:regenerateMcpToken': () => regenerateMcpToken(),
+  'cfg:revokeMcpToken':   () => revokeMcpToken(),
 });
 
 

@@ -19,7 +19,6 @@ services:
     image: ghcr.io/edoardofiore/streamingcommunity-downloader:latest
     ports:
       - "8000:8000"
-      - "8001:8001"  # Optional: MCP Server for AI agents (Claude, Cursor, Antigravity)
     volumes:
       - nfs_storage:/app/videos
       # Users, sessions, requests, notifications, the source domain and the
