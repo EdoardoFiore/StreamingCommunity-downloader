@@ -459,9 +459,11 @@ def destination(kind: str, external_id, *, root: str, season=None, episode=None,
                 year=None, single_file: bool = False, container: str | None = None) -> str | None:
     """The path a person's association sends this download to, or None.
 
-    Only a manual association decides: the panel's own filings describe where
-    things already are, and following them would pin every new episode to
-    whichever stray folder was matched first. None means the canonical path.
+    Only a manual association decides here: the panel's own filings describe
+    where things already are, and following them would pin every new episode
+    to whichever stray folder was matched first. None means "decide by name":
+    the series' folder already on disk for an episode
+    (``resolver.series_episode_path``), the canonical path otherwise.
     Never raises — this runs at the top of a download, and a registry that
     cannot be read must not be the reason one fails.
     """

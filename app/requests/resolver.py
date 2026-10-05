@@ -86,7 +86,8 @@ def destination_path(request: models.Request, templates: dict | None = None) -> 
     """Where this request's file would land, using the downloader's own layout.
 
     A folder a person has associated with the title wins, exactly as it does
-    in the download itself (``library.destination``). Not for an explicit
+    in the download itself (``library.destination``); otherwise an episode
+    joins the series' folder already on disk (``series_home``). Not for an explicit
     ``templates``: that asks where the file would be under a given layout,
     which is a question about names, not about this title.
     """
@@ -101,6 +102,13 @@ def destination_path(request: models.Request, templates: dict | None = None) -> 
         )
         if placed:
             return placed
+        if request.media_type == EPISODE or (request.media_type == ANIME
+                                             and not _single_file(request)):
+            return series_episode_path(
+                request.media_type, request.external_id, output_dir, request.title,
+                request.season or 1, request.episode_number or "1", request.year,
+                anime_type=request.anime_type,
+            )
     if request.media_type == FILM:
         return paths.film_path(output_dir, request.title, request.year, templates)
     if request.media_type == EPISODE:
@@ -221,6 +229,85 @@ def episode_candidates(output_dir: str, title: str, season, episode_number,
     return bases
 
 
+def series_home(output_dir: str, title: str, year, season, *, anime: bool = False,
+                exclude: set[str] = frozenset()) -> tuple[str | None, dict | None]:
+    """The ``(year, templates)`` whose folder a new episode of this series joins.
+
+    The series' folder already on disk, not the canonical one, when the two
+    differ (#24): a series kept in ``Ted Lasso (2026)/`` got its next episode in
+    a brand new ``Ted Lasso (2020)/`` — the right year, but Jellyfin then shows
+    two series, one of them holding a single episode. Among the folders
+    ``series_years`` finds, the one holding the most episodes of this season
+    wins, then the one holding the most episodes at all, then the canonical,
+    which comes first. Counting is what keeps one stray file from capturing the
+    series: it was the fear of exactly that which made the canonical folder
+    the only destination, and a folder with one episode loses to the one with
+    forty. A season split across folders follows its larger half.
+
+    Returns the canonical ``(year, None)`` when there is nothing to choose
+    between. Never raises: a library that cannot be read is no reason for a
+    download that has already fetched its bytes to fail.
+    """
+    from app import library
+
+    folder_for = paths.anime_folder if anime else paths.series_folder
+    canonical = (year or None, None)
+    try:
+        years = series_years(output_dir, title, year, folder_for, exclude=exclude)
+        if len(years) < 2:
+            return canonical
+        try:
+            key_season = int(season)
+        except (TypeError, ValueError):
+            key_season = None
+        # A folder holding no episode never wins: an empty one is not where
+        # the series lives, only where something once was or will be.
+        best, best_score = canonical, (0, 0)
+        for candidate in years:
+            for templates in (None, naming.LEGACY_TEMPLATES):
+                name = folder_for(title, candidate, templates)
+                folder = os.path.join(output_dir, name)
+                if name in exclude or not os.path.isdir(folder):
+                    continue
+                keys = library.episode_files([folder]).keys()
+                score = (sum(1 for s, _ in keys if s == key_season), len(keys))
+                # Strictly greater: on a tie the earlier candidate stays, and
+                # the canonical year is listed first.
+                if score > best_score:
+                    best, best_score = (candidate, templates), score
+                break
+        return best
+    except Exception:
+        logger.exception("Cannot choose the folder of %s; using the canonical one", title)
+        return canonical
+
+
+def series_episode_path(media_type: str, external_id, output_dir: str, title: str,
+                        season, episode_number, year, anime_type: str | None = None,
+                        container: str | None = None) -> str:
+    """Where a new episode lands when no person has decided: see ``series_home``.
+
+    Built with the same ``paths`` builders the check probes, under the year and
+    layout chosen, so the download and the check cannot disagree about it.
+    """
+    from app import library
+
+    anime = media_type == ANIME
+    try:
+        exclude = library.rejected_folders(library.SOURCE_BY_KIND[media_type],
+                                           media_type, external_id)
+    except Exception:
+        logger.exception("Cannot read the rejected folders of %s", external_id)
+        exclude = set()
+    home_year, templates = series_home(output_dir, title, year, 1 if anime else season,
+                                       anime=anime, exclude=exclude)
+    if anime:
+        return paths.anime_path(output_dir, title, episode_number, anime_type or "tv",
+                                home_year, templates, container=container)
+    return paths.episode_path(output_dir, title, season, episode_number, home_year,
+                              templates, container=container)
+
+
 def _rejected(request: models.Request) -> set[str]:
     from app import library
 
@@ -288,9 +375,9 @@ def existing_file(request: models.Request) -> str | None:
     first step includes the same series' folders under other years — see
     ``series_years`` — which is what covers a library older than the registry.
 
-    A new download still goes to ``destination_path`` — the canonical folder,
-    or the one a person associated with the title: only the check looks
-    wider, so the library converges instead of growing another folder.
+    A new download goes to ``destination_path``: the folder a person associated
+    with the title, else — for an episode — the series' folder already on disk
+    that holds most of it, so the library does not grow another folder.
     """
     return first_existing(*_destinations(request)) or _registered_file(request)
 

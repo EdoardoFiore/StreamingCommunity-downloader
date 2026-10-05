@@ -282,7 +282,14 @@ anything under a mounted static directory is readable by unauthenticated visitor
   decides where new files go (`library.destination()`, called by `resolver.destination_path()` and
   by all three downloaders), with `season_offset`/`episode_offset` placing a title inside a shared
   folder: that is how an anime split into parts at the source becomes one series. Check and
-  download build that path with the same `paths.placed_*` functions; keep it that way. An
+  download build that path with the same `paths.placed_*` functions; keep it that way. Without a
+  `manual` row an episode joins the series' folder already on disk, not the canonical one
+  (`resolver.series_home()`, through `series_episode_path()` for the request path and both episode
+  downloaders): the one holding the most of that season, then the most episodes, canonical on a
+  tie, and never an empty folder. Writing to the canonical year instead gave Ted Lasso a new
+  `(2020)/` beside the `(2026)/` holding the whole series — two series in Jellyfin. The counting is
+  what stops one stray episode from capturing the series, the reason only `manual` used to decide;
+  the registry's `download`/`matched` rows still do not. An
   associated folder is otherwise searched by the `SxxEyy` in file names, because the title is the
   part that may have changed. `library.reconcile()` (every poll cycle, and a button) follows a
   folder renamed outside the panel by the byte size of a file known to be in it — no inode, which

@@ -239,10 +239,52 @@ def test_the_canonical_folder_wins_over_a_stray_one(library):
     assert resolver.existing_file(_simpsons_request(episode_number="2")) == canonical
 
 
-def test_a_new_download_still_goes_to_the_canonical_folder(library):
-    """Only the check looks wider; the library converges instead of growing."""
+def test_a_new_episode_joins_the_folder_the_series_is_in(library):
+    """#24: a new canonical folder next to the real one is a second series in
+    Jellyfin, holding one episode."""
     _simpsons(library, "I Simpson (2025)", 1)
+    assert "I Simpson (2025)" in resolver.destination_path(_simpsons_request(episode_number="5"))
+
+
+def test_the_folder_holding_the_season_wins_over_a_stray_episode(library):
+    """Ted Lasso: the whole series in (2026), one episode already sent to the
+    canonical (2020). The next one goes where the season is, not where the
+    stray landed."""
+    for n in range(1, 9):
+        _write(str(library / "Ted Lasso (2026)" / "Season 04" / f"Ted Lasso S04E{n:02d}.mkv"))
+    _write(str(library / "Ted Lasso (2020)" / "Season 04" / "Ted Lasso S04E09.mkv"))
+    request = _request(title="Ted Lasso", year="2020", season=4, episode_number="10")
+
+    assert resolver.destination_path(request) == str(
+        library / "Ted Lasso (2026)" / "Season 04" / "Ted Lasso S04E10.mkv")
+
+
+def test_on_a_tie_the_canonical_folder_wins(library):
+    _simpsons(library, "I Simpson (1989)", 1)
+    _simpsons(library, "I Simpson (2025)", 2)
     assert "I Simpson (1989)" in resolver.destination_path(_simpsons_request(episode_number="5"))
+
+
+def test_an_empty_year_folder_does_not_attract_downloads(library):
+    (library / "I Simpson (2025)").mkdir()
+    assert "I Simpson (1989)" in resolver.destination_path(_simpsons_request(episode_number="5"))
+
+
+def test_a_rejected_folder_is_never_the_destination(client, library):
+    from app import library as registry
+
+    _simpsons(library, "I Simpson (2025)", 1)
+    registry.record("streamingcommunity", "episode", "1", "I Simpson (2025)", "rejected")
+    assert "I Simpson (1989)" in resolver.destination_path(_simpsons_request(episode_number="5"))
+
+
+def test_the_download_lands_where_the_check_looks(library):
+    """The downloader builds its path through the same function, so the next
+    check finds the file it just wrote."""
+    _simpsons(library, "I Simpson (2025)", 1)
+    written = resolver.series_episode_path("episode", "1", str(library), "I Simpson", 10, "5", "1989")
+    _write(written)
+    assert resolver.existing_file(_simpsons_request(episode_number="5")) == written
 
 
 def test_an_earlier_year_is_a_different_series(library):
@@ -388,3 +430,11 @@ def test_an_unknown_slot_in_a_preview_is_ignored(client, admin):
         "templates": {"nonsense": "{title}"},
     }).json()
     assert body["slots"] == {}
+
+
+def test_an_anime_series_joins_its_folder_too(library):
+    _write(str(library / "Naruto (2010)" / "Season 01" / "Naruto S01E01.mkv"))
+    request = _request(source="animeunity", media_type="anime", external_id="5",
+                       title="Naruto", year="2002", season=None, episode_number="2",
+                       anime_type="tv")
+    assert "Naruto (2010)" in resolver.destination_path(request)

@@ -379,9 +379,15 @@ def download_anime_episode(
     from app.core.paths import is_anime_series
     from app.library import destination
 
-    dest_path = (destination("anime", anime_id, root=output_dir, episode=episode_number,
-                             year=year, single_file=not is_anime_series(anime_type))
-                 or anime_path(output_dir, anime_name, episode_number, anime_type, year))
+    dest_path = destination("anime", anime_id, root=output_dir, episode=episode_number,
+                            year=year, single_file=not is_anime_series(anime_type))
+    if not dest_path and is_anime_series(anime_type):
+        # The series' folder already on disk, whatever year it carries (#24).
+        from app.requests.resolver import ANIME, series_episode_path
+
+        dest_path = series_episode_path(ANIME, anime_id, output_dir, anime_name, 1,
+                                        episode_number, year, anime_type=anime_type)
+    dest_path = dest_path or anime_path(output_dir, anime_name, episode_number, anime_type, year)
 
     final_path = download_m3u8(
         m3u8_index=m3u8_url,
