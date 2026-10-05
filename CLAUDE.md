@@ -85,6 +85,12 @@ request before any route runs.
 - `poller.py` — periodic enumeration, diff against what is seen, auto-download decision
 - `router.py` — follow, unfollow, status, manual check
 
+**`app/mcp/`** — MCP server for AI agents, at `/mcp` on the panel itself
+- `server.py` — the `/mcp` ASGI endpoint (switch, bearer token, Streamable HTTP transport) and
+  the session manager the lifespan runs
+- `auth.py` — the single token: stored hashed, owned by whoever generated it
+- `tools.py` — the tools, each a thin call into an existing route handler
+
 **`app/`** — `jobs.py` (thread pool, semaphore, SSE broadcast), `downloads_notify.py` (notifications
 for downloads that skipped the queue, one summary per season/series), `downloads_hooks.py`
 (post-download webhooks and the Jellyfin library refresh), `library.py` (the registry of which
@@ -301,6 +307,17 @@ anything under a mounted static directory is readable by unauthenticated visitor
   — the source is H.264 + AAC, native to both — so the only conversion is WebVTT to `mov_text`, and
   only when subtitles are embedded into MP4. A transcoding option does not belong here: it would
   turn a four-minute download into an hours-long CPU job under a stall watchdog built for neither.
+- **An MCP tool that changes anything calls the route handler, never the layer beneath it.** The agent acts as the
+  token's owner, with their live permissions (`auth.token_owner()`), passed to the handler as
+  `request.state.user` exactly as `AuthMiddleware` would set it; the tool checks the permission
+  the route's dependency declares, since dependencies do not run on a direct call. The first
+  version reimplemented follow, season batches and requests beside the routers and lost, in
+  turn: the seed-or-roll-back (an unreadable source left a watch armed with no baseline, so the
+  next cycle queued the back catalogue), `downloads_notify.abandon()` (a season that failed
+  mid-submit never closed its batch), and the requester (it filed requests as the first Jellyfin
+  admin). The token itself fails closed — no stored hash means no access — travels only in the
+  `Authorization` header (a query string lands in proxy logs), and is not a second server:
+  `/mcp` is a route of the panel, in `PUBLIC_PATHS` only because it authenticates itself.
 - Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
   are the exception by design: every caller of `notify()` is already off the loop.
 

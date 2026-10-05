@@ -587,6 +587,18 @@
       margin-top: 14px;
     }
     .settings-actions .form-text { margin: 0; }
+    /* A block to copy into another program's config: the same chip as inline
+       <code>, scrolling sideways rather than wrapping a JSON line. */
+    .settings-snippet {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      padding: 10px 12px;
+      margin: 0;
+      overflow-x: auto;
+    }
 
     /* ── Library associations (Settings › Associazioni) ────── */
     .lib-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

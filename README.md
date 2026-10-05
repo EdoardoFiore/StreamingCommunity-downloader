@@ -129,6 +129,7 @@
 - Independent permissions: download directly, request, approve, manage users, manage settings
 - Request queue with approval, preserving the audio and subtitle tracks the requester chose
 - Request status on the search result cards, and an in-app notification bell
+- MCP server for AI agents (Claude Code, Cursor, …): search, download, follow series and work the request queue
 - Docker ready
 
 ---
@@ -461,6 +462,44 @@ itself as you type.
 Changing a rule does not rename what is already there. Existing files keep being recognised, so
 nothing is downloaded twice; they simply keep their old names until you rename them in the file
 manager.
+
+---
+
+## Model Context Protocol (MCP)
+
+The panel can act as an MCP server, so an AI agent (Claude Code, Cursor, or any
+client speaking Streamable HTTP) can search titles, start and watch downloads,
+follow series and file or approve requests. It is served by the panel itself at
+`/mcp` — no extra port, and the same reverse proxy and TLS as the web interface.
+
+Off by default. Enable it under **Impostazioni → MCP**, then generate a token.
+The token is shown once (only its hash is stored), and **the agent acts as the
+user who generated it, with that user's current permissions**: an agent cannot
+download if its owner cannot, and the token stops working if the owner is
+disabled or removed. Requests it files are that user's requests.
+
+Client configuration (the settings page shows it pre-filled):
+
+```json
+{
+  "mcpServers": {
+    "streamingcommunity": {
+      "type": "http",
+      "url": "https://panel.example.com/mcp",
+      "headers": { "Authorization": "Bearer <TOKEN>" }
+    }
+  }
+}
+```
+
+With Claude Code: `claude mcp add --transport http streamingcommunity https://panel.example.com/mcp --header "Authorization: Bearer <TOKEN>"`.
+
+Tools: `search_content`, `get_content_details`, `get_series_episodes`,
+`get_anime_episodes`, `get_home_shelves`, `download_film`, `download_episode`,
+`download_season`, `download_anime_episode`, `list_downloads`,
+`get_download_progress`, `cancel_download`, `retry_download`, `follow_series`,
+`list_followed_series`, `unfollow_series`, `check_series_now`, `submit_request`,
+`list_requests`, `approve_request`, `get_system_status`, `list_libraries`.
 
 ---
 

@@ -45,6 +45,9 @@
         <li class="nav-item">
           <a class="nav-link" href="#" data-settings-tab="hook">Hook</a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link" href="#" data-settings-tab="mcp">MCP</a>
+        </li>
       </ul>
 
       <div class="settings-pane" data-settings-pane="sorgente">
@@ -554,6 +557,71 @@
         </button>
         <div class="settings-actions">
           <div id="hooks-feedback" class="form-text"></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-pane" data-settings-pane="mcp" style="display:none">
+      <!-- ── Model Context Protocol ────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Server MCP</p>
+        <p class="settings-section-hint">
+          Permette a un agente AI (Claude Code, Cursor, &hellip;) di cercare titoli, avviare
+          download, seguire serie e gestire le richieste. Il server risponde all&rsquo;indirizzo
+          del pannello, sotto <code>/mcp</code>: nessuna porta in pi&ugrave; da aprire.
+        </p>
+        <p class="settings-section-hint settings-warn">
+          <i class="ti ti-alert-triangle me-1"></i>
+          L&rsquo;agente agisce come l&rsquo;utente che ha generato il token, con i suoi permessi:
+          chi ha il token pu&ograve; fare tutto ci&ograve; che quell&rsquo;utente pu&ograve; fare.
+        </p>
+        <label class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="setting-mcp-enabled">
+          <span class="form-check-label">Abilita il server MCP</span>
+        </label>
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveMcp" id="save-mcp-btn">
+            Salva
+          </button>
+          <div id="mcp-feedback" class="form-text"></div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <p class="settings-section-label">Token</p>
+        <p class="settings-section-hint" id="mcp-token-status"></p>
+        <div id="mcp-token-once" class="mb-2" style="display:none">
+          <div class="input-group">
+            <input type="text" id="mcp-token-display" class="form-control font-monospace" readonly>
+            <button class="btn btn-outline-secondary" type="button" data-action="cfg:copyMcpToken" title="Copia token">
+              <i class="ti ti-copy"></i>
+            </button>
+          </div>
+          <div class="form-text settings-warn">
+            Copialo adesso: il pannello ne conserva solo l&rsquo;impronta e non potr&agrave; mostrarlo di nuovo.
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-action="cfg:regenerateMcpToken" id="mcp-regen-btn">
+            Genera nuovo token
+          </button>
+          <button type="button" class="btn btn-outline-danger btn-sm" data-action="cfg:revokeMcpToken" id="mcp-revoke-btn" style="display:none">
+            Revoca
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <p class="settings-section-label">Configurazione del client</p>
+        <p class="settings-section-hint">
+          Trasporto Streamable HTTP, con il token nell&rsquo;header <code>Authorization</code>.
+          Dietro un reverse proxy usa l&rsquo;indirizzo pubblico del pannello, in HTTPS.
+        </p>
+        <pre class="settings-snippet"><code id="mcp-config-snippet"></code></pre>
+        <div class="settings-actions">
+          <button class="btn btn-outline-secondary btn-sm" type="button" data-action="cfg:copyMcpSnippet">
+            <i class="ti ti-copy me-1"></i>Copia
+          </button>
         </div>
       </div>
       </div>

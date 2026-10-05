@@ -51,6 +51,9 @@ PUBLIC_PATHS = {
     "/api/auth/skip",
     "/api/auth/jellyfin",
     "/api/auth/jellyfin-token",
+    # Not a session route: an MCP client has no cookie. app/mcp/server.py
+    # authenticates it with its own bearer token and refuses everything else.
+    "/mcp",
 }
 PUBLIC_PREFIXES = ("/static/",)
 
