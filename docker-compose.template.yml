@@ -17,6 +17,12 @@
 services:
   web:
     image: ghcr.io/edoardofiore/streamingcommunity-downloader:latest
+    # Optional: run as your own user, so downloaded files belong to it instead
+    # of root. Both host folders below must be writable by that uid — after a
+    # previous run as root, once: chown -R 1000:1000 /srv/scpanel/config
+    # (and the library, if root wrote there). The panel refuses to start, and
+    # says which path and uid, when it cannot write its config or temp folder.
+    # user: "1000:1000"
     ports:
       - "8000:8000"
     volumes:

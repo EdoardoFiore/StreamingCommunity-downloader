@@ -24,6 +24,10 @@ services:
     # e non vedresti mai le modifiche appena pushate.
     pull_policy: always
     container_name: scpanel-dev
+    # Facoltativo: gira col tuo utente, così i file scaricati sono tuoi e non di
+    # root. Le due cartelle sull'host devono essere scrivibili da quell'uid; se
+    # prima girava come root: chown -R 1000:1000 /srv/scpanel-dev/config
+    # user: "1000:1000"
     ports:
       # 8001 sull'host, così può convivere con la produzione sulla 8000.
       - "8001:8000"
