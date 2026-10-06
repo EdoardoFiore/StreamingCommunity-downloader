@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app import __version__, db, downloads_hooks, downloads_notify, library
+from app import __version__, config, db, downloads_hooks, downloads_notify, library, writable
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
@@ -86,8 +86,30 @@ class VersionedStaticFiles(StaticFiles):
         return response
 
 
+def _library_dirs() -> list[Path]:
+    """Every folder a download can land in: each configured library, plus
+    VIDEOS_DIR while some kind has none (it is the fallback, see jobs.py)."""
+    libraries = config.read_data().get("libraries", [])
+    dirs = {Path(lib["path"]) for lib in libraries if lib.get("path")}
+    if not {"film", "tv", "anime"} <= {lib.get("type") for lib in libraries}:
+        dirs.add(config.VIDEOS_DIR)
+    return sorted(dirs)
+
+
+def check_writable_paths() -> None:
+    """Fail at boot, not three retries into the first download (#28)."""
+    writable.check(
+        tmp_dir=config.TMP_DIR,
+        config_files=[db.current_path(), config.DATA_FILE, config.SCHEDULE_FILE],
+        library_dirs=_library_dirs(),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # First: a database the process cannot write fails migrations with SQLite's
+    # "unable to open database file", which names neither the path nor the uid.
+    check_writable_paths()
     db.run_migrations()
     auth_session.purge_expired()
     requests_service.register_job_listener()

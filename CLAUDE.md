@@ -95,7 +95,8 @@ request before any route runs.
 for downloads that skipped the queue, one summary per season/series), `downloads_hooks.py`
 (post-download webhooks and the Jellyfin library refresh), `library.py` (the registry of which
 folder holds which title; endpoints in `routers/library.py`, UI in `static/library.js`), `schedule.py`, `db.py`,
-`config.py`, `progress.py`, `routers/`, `templates/`, `static/`
+`config.py`, `progress.py`, `writable.py` (the boot check that temp, config and libraries can be
+written), `routers/`, `templates/`, `static/`
 
 ### Persistence
 
@@ -115,6 +116,14 @@ folder holds which title; endpoints in `routers/library.py`, UI in `static/libra
 
 Point `DB_FILE`, `DATA_FILE` and `SCHEDULE_FILE` at a persistent volume in Docker; see
 `docker-compose.template.yml`.
+
+**The image runs as root by default and must also run under any `user:` (#28).** Everything the
+panel writes inside the image itself (`/app/tmp`, `/app/config`) is created `1777` in the
+Dockerfile; anything new it writes in-image needs the same, or a non-root container fails only once
+a download starts. `writable.check()` runs first in the lifespan, before migrations: temp and config
+not writable is fatal and names the uid and every path, a library is only a warning (it may be a
+mount that comes up later). A `PermissionError` is not auto-retried on POSIX; on Windows it can be
+a sharing violation, which is.
 
 `docs/` holds README screenshots only. It is **not** served by the app and is excluded from the
 image — the favicon lives in `app/static/`. Design notes go in `design/`, likewise never served:

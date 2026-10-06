@@ -146,6 +146,49 @@ def test_a_missing_audio_track_is_not_retried(monkeypatch):
         jm._executor.shutdown(wait=False)
 
 
+def test_a_permission_error_is_not_retried(monkeypatch):
+    """#28: a non-root container could not create tmp/, and the job spent three
+    minutes retrying an error the same uid would meet every time."""
+    from app import jobs
+
+    monkeypatch.setattr(jobs, "AUTO_RETRIES", 3)
+    monkeypatch.setattr(jobs, "AUTO_RETRY_DELAY", 0)
+    jm = JobManager()
+    attempts = []
+
+    def no_access():
+        attempts.append(1)
+        raise PermissionError(13, "Permission denied", "tmp")
+
+    try:
+        job = jm._make_job("Film", "film")
+        jm._submit_job(job, no_access)
+        _wait(job)
+
+        assert job.status == "error"
+        assert len(attempts) == 1
+        assert "Permission denied" in job.error
+    finally:
+        jm._executor.shutdown(wait=False)
+
+
+def test_what_is_worth_retrying():
+    import requests
+
+    from app.jobs import _worth_retrying
+
+    class SharingViolation(PermissionError):
+        # What Windows raises for a file another process holds open: it goes
+        # away once Jellyfin or the antivirus lets go.
+        winerror = 32
+
+    assert not _worth_retrying(PermissionError(13, "Permission denied", "tmp"))
+    assert _worth_retrying(SharingViolation(13, "in use", "film.mkv"))
+    # Also an OSError, and exactly what a retry is for.
+    assert _worth_retrying(requests.ConnectionError("connection reset"))
+    assert _worth_retrying(RuntimeError("503"))
+
+
 def test_cancelling_during_the_wait_ends_it_at_once(monkeypatch):
     from app import jobs
 

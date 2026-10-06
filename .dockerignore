@@ -11,6 +11,15 @@ tmp/
 
 docker-compose.yml
 
+# Runtime state of a local `python main.py`: gitignored, so CI never sees it,
+# but a local `docker build .` would bake it in — panel.db holds the Jellyfin
+# API key, and root-owned copies in /app trip a non-root `user:` (#28).
+panel.db
+panel.db-*
+data.json
+data.json.lock
+schedule.json
+
 # README screenshots and the design doc: repo-only, never needed at runtime.
 # Keeping them out also stops the design doc from being served and drops ~5 MB
 # from the image. The favicon lives in app/static/, not here.

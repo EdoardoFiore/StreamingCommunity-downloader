@@ -101,10 +101,21 @@ _JOB_BOUND_KWARGS = ("temp_dir", "progress_factory", "cancel_event")
 
 
 def _worth_retrying(exc: Exception) -> bool:
-    """Everything but a missing audio track, which no retry can fix: it waits
-    for a person to choose, and on the request path parks the request."""
+    """Everything but what no retry can fix.
+
+    A missing audio track waits for a person to choose, and on the request path
+    parks the request. A permission error is a deployment problem (#28): the
+    same uid meets the same mode bits a minute later. Only on POSIX, though —
+    on Windows a sharing violation (a file held open by Jellyfin or an
+    antivirus) is also a PermissionError, carries a ``winerror``, and does go
+    away. Never all of OSError: ``requests.ConnectionError`` is one too.
+    """
     from app.core._shared import MissingAudioTrackError
-    return not isinstance(exc, MissingAudioTrackError)
+    if isinstance(exc, MissingAudioTrackError):
+        return False
+    if isinstance(exc, PermissionError) and getattr(exc, "winerror", None) is None:
+        return False
+    return True
 
 
 class DownloadSlots:

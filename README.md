@@ -153,6 +153,27 @@ The image is published to GitHub Container Registry on every push to `main`:
 ghcr.io/edoardofiore/streamingcommunity-downloader:latest
 ```
 
+### Running as your own user
+
+By default the container runs as root, so the files it downloads belong to root. To have them
+belong to you instead, uncomment `user:` in the compose file with your uid and gid (`id -u`,
+`id -g`):
+
+```yaml
+    user: "1000:1000"
+```
+
+That user has to be able to write the library and the config folder on the host. If the panel ran
+as root before, hand them over once:
+
+```bash
+sudo chown -R 1000:1000 /srv/scpanel/config   # and the library, if root wrote files there
+```
+
+If it still cannot write its config or its temp folder, the panel does not start, and the log names
+the uid and every path it is missing. A library it cannot write is only a warning — it may be a
+network mount that comes up later — but downloads into it will fail.
+
 ### Trying a branch before it is released
 
 Every push to a branch other than `main` publishes to a **separate** package, so a work-in-progress
@@ -327,7 +348,7 @@ failed and why.
 | `DB_FILE` | `panel.db` | users, sessions, requests — **put this on a persistent volume** |
 | `DATA_FILE` | `data.json` | source domain, libraries, performance settings |
 | `SCHEDULE_FILE` | `schedule.json` | scheduled downloads |
-| `TMP_DIR` | `tmp` | HLS segments while a job runs, cleaned up afterwards |
+| `TMP_DIR` | `tmp` | HLS segments while a job runs, cleaned up afterwards; writable by any uid in the image |
 | `FFMPEG_PATH` | — | full path to `ffmpeg`, when it is not on `PATH` |
 | `FFPROBE_PATH` | — | full path to `ffprobe`; see the note below |
 | `DOMAIN_SOURCE_URL` | a public page | where replacement domains are read from |
