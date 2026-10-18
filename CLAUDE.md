@@ -162,7 +162,10 @@ anything under a mounted static directory is readable by unauthenticated visitor
   whole anime flow keys off that, from the detail modal to the episodes endpoint to
   the job kind. The source's own word (Movie/TV/OVA/ONA/Special, and a long tail like
   "TV Short") rides beside it in `media_type`. Folding one into the other is what made
-  every anime, films included, render as a TV series.
+  every anime, films included, render as a TV series. The reverse holds for the
+  layout: `paths.is_anime_series()` names the film (`_ANIME_FILM_KINDS`: `movie`,
+  `film`) and treats every other value as a series — listing the series kinds instead sent an ONA down the
+  single-file path, every episode overwriting one episode-less file.
 - **A page payload is unescaped exactly once.** BeautifulSoup decodes HTML entities in
   attribute values itself — the `data-page` on StreamingCommunity, `items-json` and
   `animes` on AnimeUnity — so there is no `html.unescape()` on top, and adding one

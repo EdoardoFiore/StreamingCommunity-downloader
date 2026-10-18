@@ -341,8 +341,8 @@ def download_anime_episode(
 ) -> str:
     """
     Full download pipeline for a single anime episode.
-    - Series (anime_type="tv"): videos/AnimeName/Season 01/AnimeName S01E01.mkv
-    - Movies (anime_type="movie"): videos/AnimeName (YYYY)/AnimeName.mkv
+    - Movies (anime_type="movie" or "film", any case): videos/AnimeName (YYYY)/AnimeName.mkv
+    - Anything else (TV, ONA, OVA, Special, …): videos/AnimeName/Season 01/AnimeName S01E01.mkv
 
     The extension is whatever app.core.container is configured to write.
     """

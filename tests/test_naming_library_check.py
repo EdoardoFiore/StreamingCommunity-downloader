@@ -82,6 +82,21 @@ def test_anime_paths_are_unchanged(kwargs, expected):
         "/lib", *expected.split("/"))
 
 
+@pytest.mark.parametrize("anime_type", ["TV", "ONA", "OVA", "Special", "TV Short", None])
+def test_every_anime_kind_but_movie_is_a_series(anime_type):
+    """An ONA used to take the film path: every episode wrote one file over the last."""
+    assert paths.is_anime_series(anime_type)
+    first = paths.anime_path("/lib", "Whale", "1", anime_type, container="mp4")
+    second = paths.anime_path("/lib", "Whale", "2", anime_type, container="mp4")
+    assert first == os.path.join("/lib", "Whale", "Season 01", "Whale S01E01.mp4")
+    assert second == os.path.join("/lib", "Whale", "Season 01", "Whale S01E02.mp4")
+
+
+@pytest.mark.parametrize("anime_type", ["Movie", "movie", "film", "Film"])
+def test_only_a_film_kind_is_a_film(anime_type):
+    assert not paths.is_anime_series(anime_type)
+
+
 def test_the_default_container_decides_the_extension():
     """The one thing the anchors above deliberately stop asserting."""
     assert paths.film_path("/lib", "Blade Runner", "1982").endswith(".mkv")
@@ -438,3 +453,16 @@ def test_an_anime_series_joins_its_folder_too(library):
                        title="Naruto", year="2002", season=None, episode_number="2",
                        anime_type="tv")
     assert "Naruto (2010)" in resolver.destination_path(request)
+
+
+@pytest.mark.parametrize("sent, is_film", [
+    ("ONA", False), ("Movie", True), ("Film", True), (" TV Short ", False), ("", False), (None, False),
+])
+def test_a_request_accepts_the_sources_own_anime_kind(sent, is_film):
+    """The old allowlist answered 422 to "ONA" — and to "Movie", which the title page sends."""
+    from app.requests.router import CreateRequest
+
+    body = CreateRequest(source="animeunity", media_type="anime", external_id="1",
+                         title="Whale", anime_type=sent)
+    assert body.anime_type == sent
+    assert paths.is_anime_series(body.anime_type) is not is_film

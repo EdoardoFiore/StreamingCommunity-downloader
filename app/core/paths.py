@@ -210,8 +210,20 @@ def anime_folder(anime_name: str, year=None, templates: dict | None = None) -> s
     return naming.render("anime_folder", tpl.get("anime_folder"), values)
 
 
+# "film" is not a word AnimeUnity uses; it is here for API and MCP callers.
+# isAnimeFilm() in app/static/core.js holds the same list.
+_ANIME_FILM_KINDS = frozenset({"movie", "film"})
+
+
 def is_anime_series(anime_type: str) -> bool:
-    return (anime_type or "tv").lower() in ("tv", "serie", "series", "anime")
+    """Everything but a film is a series.
+
+    ``anime_type`` is AnimeUnity's own ``media_type`` (Movie/TV/OVA/ONA/Special,
+    and a long tail like "TV Short"), so the film is what has to be named: listing
+    the series kinds instead sent every ONA down the single-file path, and each
+    episode overwrote the last under one episode-less name.
+    """
+    return (anime_type or "tv").strip().lower() not in _ANIME_FILM_KINDS
 
 
 def anime_path(output_dir: str, anime_name: str, episode_number,
