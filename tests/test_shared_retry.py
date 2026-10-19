@@ -54,7 +54,7 @@ def _serving(*replies):
 
 def _fetch_key(monkeypatch, fake_get):
     monkeypatch.setattr(_shared.requests, "get", fake_get)
-    return _shared._get_m3u8_key({}, {}, "https://vixcloud.co/embed/1")
+    return _shared._get_m3u8_key({"host": "vixcloud.cc"}, {}, "https://vixcloud.cc/embed/1")
 
 
 # ── The bug ───────────────────────────────────────────────────────────────────

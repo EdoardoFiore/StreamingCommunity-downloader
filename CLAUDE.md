@@ -360,7 +360,13 @@ according to `subtitle_mode`. Temp segments go to `tmp/<job_id>/` and are cleane
 Highest available resolution is chosen automatically (1080p → 720p → 480p → 360p). Audio and
 subtitle languages are chosen per download or per request.
 
-### vixcloud.co quirk
+### vixcloud quirks
+
+The video host is never hardcoded. It moved from `vixcloud.co` to `vixcloud.cc` and every download
+broke, so `_shared.embed_host()` reads it off the embed URL the source itself hands over (SC iframe,
+AnimeUnity `/embed-url/`), `_parse_content()` stores it as `json_win_video["host"]`, and playlist,
+`enc.key` and referers are built from that. The playlist key allowlist (`_KEY_HOSTS`) matches the
+second-level label only, any TLD.
 
 TV episode M3U8 URLs sometimes return 403; appending `?b=1` (or `&b=1`) resolves it. Handled in
 `_fetch_text_with_b1_fallback` and `_collect_audio_tracks`.

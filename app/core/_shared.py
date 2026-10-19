@@ -13,7 +13,7 @@ _scraper = None
 
 
 def _get_scraper():
-    """Shared cloudscraper session for vixcloud.co pages behind Cloudflare.
+    """Shared cloudscraper session for vixcloud pages behind Cloudflare.
 
     Falls back to a plain requests.Session if cloudscraper is unavailable.
     """
@@ -83,9 +83,9 @@ def with_retry(send, *, what: str, attempts: int = RESOLVE_ATTEMPTS,
 
 
 def _fetch_vixcloud_embed(url_embed, referer=None):
-    """Fetch a vixcloud.co /embed/ HTML page and return its <script> text.
+    """Fetch a vixcloud /embed/ HTML page and return its <script> text.
 
-    vixcloud.co serves the /embed/ page behind Cloudflare, so a plain
+    vixcloud serves the /embed/ page behind Cloudflare, so a plain
     requests.get intermittently returns a 403 challenge page. Route it through
     the cloudscraper session, which clears the challenge. (Downstream /playlist,
     /storage/enc.key and CDN segment URLs are NOT Cloudflare-gated.)
@@ -98,7 +98,7 @@ def _fetch_vixcloud_embed(url_embed, referer=None):
     req.raise_for_status()
     body = BeautifulSoup(req.text, "lxml").find("body")
     if body is None:
-        raise RuntimeError("Empty embed page body from vixcloud.co")
+        raise RuntimeError("Empty embed page body from the video host")
     script = body.find("script")
     if script is None:
         raise RuntimeError("Video not available (no script tag found in embed)")
@@ -122,6 +122,27 @@ class MissingAudioTrackError(RuntimeError):
         )
 
 
+def embed_host(url_embed: str) -> str:
+    """The video host, read off the embed URL the source handed us.
+
+    Never a constant. vixcloud has moved TLD (.co to .cc) and will again, and
+    the source's own iframe always names the current one — so the playlist,
+    the key and every referer follow it without a release. It grants no trust
+    the panel did not already extend: the embed page itself is fetched from
+    this same URL.
+    """
+    parsed = urlparse(url_embed)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise RuntimeError(f"Unexpected embed URL: {url_embed[:100]!r}")
+    return parsed.hostname.lower()
+
+
+def embed_referer(json_win_video, json_win_param) -> str:
+    """The /embed/ URL the playlist and key expect as referer."""
+    return (f"https://{json_win_video['host']}/embed/{json_win_video['id']}"
+            f"?token={json_win_param['token']}&expires={json_win_param['expires']}")
+
+
 def _parse_content(embed_content, url_embed):
     """Parse video metadata from embed page HTML. Shared between film.py and tv.py."""
     s = str(embed_content)
@@ -129,7 +150,7 @@ def _parse_content(embed_content, url_embed):
     video_id_m = re.search(r"window\.video\s*=\s*\{[^}]*?\bid\s*:\s*['\"]?(\d+)['\"]?", s, re.DOTALL)
     if not video_id_m:
         raise RuntimeError(f"Cannot find video ID in embed. Snippet: {s[:400]!r}")
-    parsed_video = {"id": video_id_m.group(1)}
+    parsed_video = {"id": video_id_m.group(1), "host": embed_host(url_embed)}
 
     qs = parse_qs(urlparse(url_embed).query)
     parsed_video["can_play_fhd"] = bool(qs.get("canPlayFHD"))
@@ -148,8 +169,8 @@ def _parse_content(embed_content, url_embed):
 
 
 def _get_m3u8_key(json_win_video, json_win_param, referer):
-    """Fetch the AES decryption key from vixcloud.co, where it has always lived."""
-    url = "https://vixcloud.co/storage/enc.key"
+    """Fetch the AES decryption key from the video host, where it has always lived."""
+    url = f"https://{json_win_video['host']}/storage/enc.key"
     headers = {"user-agent": get_headers(), "referer": referer}
     req = with_retry(lambda: requests.get(url, headers=headers, timeout=15),
                      what="enc.key")
@@ -159,8 +180,8 @@ def _get_m3u8_key(json_win_video, json_win_param, referer):
 
 
 def _get_m3u8_url(json_win_video, json_win_param, add_b1=False):
-    """Build M3U8 playlist URL for vixcloud.co."""
-    base = f"https://vixcloud.co/playlist/{json_win_video['id']}"
+    """Build the M3U8 playlist URL on the video host the embed came from."""
+    base = f"https://{json_win_video['host']}/playlist/{json_win_video['id']}"
     url = f"{base}?"
     if add_b1:
         url += "b=1&"
@@ -193,8 +214,9 @@ def _get_m3u8_url(json_win_video, json_win_param, add_b1=False):
 
 # Hosts a playlist may name as the source of its AES key. The playlist is
 # published by the stream page, so an unconstrained URI would have the panel
-# fetching whatever that page asked it to.
-_KEY_HOSTS = ("vixcloud.co",)
+# fetching whatever that page asked it to. Matched on the second-level label,
+# any TLD: vixcloud moved from .co to .cc, and a pin on the full name broke.
+_KEY_HOSTS = ("vixcloud",)
 
 # Fallback providers, tried in order when the primary fails. Each takes
 # (tmdb_id, media_type, season, episode) and returns a StreamSource.
@@ -247,8 +269,8 @@ def _key_uri_from(text: str) -> tuple[str | None, str | None]:
 def fetch_key_from_playlist(master_url: str, referer: str) -> str | None:
     """The AES key a playlist names, or None when it is not encrypted.
 
-    Read rather than assumed. The vixcloud path can hardcode
-    ``vixcloud.co/storage/enc.key`` because that is where it has always been; a
+    Read rather than assumed. The vixcloud path can assume
+    ``/storage/enc.key`` on the embed's host because that is where it has always been; a
     different provider has no obligation to agree, and guessing produces a file
     full of correctly-downloaded garbage rather than an error. Unused while no
     fallback is registered, and the reason a new one would not have to solve
@@ -273,9 +295,8 @@ def fetch_key_from_playlist(master_url: str, referer: str) -> str | None:
 
     parsed = urlparse(key_uri)
     host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or not any(
-        host == allowed or host.endswith("." + allowed) for allowed in _KEY_HOSTS
-    ):
+    labels = host.split(".")
+    if parsed.scheme != "https" or len(labels) < 2 or labels[-2] not in _KEY_HOSTS:
         raise RuntimeError(f"Chiave di cifratura su un host non consentito: {host or key_uri}")
 
     headers = {"user-agent": get_headers(), "referer": referer}

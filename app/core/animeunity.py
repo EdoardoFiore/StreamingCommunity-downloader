@@ -275,13 +275,13 @@ def get_episodes(anime_id: str) -> list[dict]:
 
 def _get_embed_content(episode_id) -> tuple[str, str]:
     """
-    Fetch the vixcloud.co embed page for an episode.
+    Fetch the vixcloud embed page for an episode.
     Returns (script_text, embed_url) — same shape as film._get_iframe().
     """
     scraper = _get_scraper()
     host = ANIMEUNITY_HOST
 
-    # AnimeUnity returns the vixcloud.co embed URL as plain text
+    # AnimeUnity returns the vixcloud embed URL as plain text
     r = scraper.get(f"https://{host}/embed-url/{episode_id}", timeout=15)
     r.raise_for_status()
     embed_url = r.text.strip()
@@ -291,7 +291,7 @@ def _get_embed_content(episode_id) -> tuple[str, str]:
 
     logger.info("Episode %s embed URL: %s", episode_id, embed_url[:80])
 
-    # Fetch the vixcloud.co embed page. vixcloud.co now serves this /embed/ HTML
+    # Fetch the vixcloud embed page. vixcloud now serves this /embed/ HTML
     # page behind Cloudflare, so plain requests.get returns a 403 challenge page.
     # Use the cloudscraper session to clear the challenge. (The downstream
     # /playlist, /storage/enc.key and CDN segment URLs are NOT Cloudflare-gated
@@ -309,7 +309,7 @@ def _get_embed_content(episode_id) -> tuple[str, str]:
         raise RuntimeError("Empty embed page body")
     script = body.find("script")
     if not script:
-        raise RuntimeError("No script tag found in vixcloud.co embed page")
+        raise RuntimeError("No script tag found in vixcloud embed page")
 
     logger.info("Embed script (first 400 chars): %s", script.text[:400])
     return script.text, embed_url

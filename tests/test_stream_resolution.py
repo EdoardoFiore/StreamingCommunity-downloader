@@ -244,3 +244,61 @@ def test_a_film_without_a_tmdb_id_still_reports_the_real_error(monkeypatch, tmp_
 
     with pytest.raises(RuntimeError, match="403 Cloudflare"):
         film.download_film(1, "Test", "example.test", output_dir=str(tmp_path))
+
+
+# ── The video host follows the embed ─────────────────────────────────────────
+#
+# vixcloud moved from .co to .cc and every download broke on a hardcoded
+# name. The host now comes from the embed URL the source hands over.
+
+_EMBED_SCRIPT = "window.video = {id: '42'}; window.masterPlaylist = {params: {'token': 't', 'expires': '9',}}"
+
+
+def test_the_playlist_and_key_follow_the_embed_host(monkeypatch):
+    video, params = _shared._parse_content(
+        _EMBED_SCRIPT, "https://vixcloud.cc/embed/42?token=t&expires=9")
+
+    assert video["host"] == "vixcloud.cc"
+    assert _shared._get_m3u8_url(video, params).startswith("https://vixcloud.cc/playlist/42?")
+    assert _shared.embed_referer(video, params) == "https://vixcloud.cc/embed/42?token=t&expires=9"
+
+    reached = []
+
+    def fake_get(url, *args, **kwargs):
+        reached.append(url)
+        return _Response(content=b"\x00")
+
+    monkeypatch.setattr(_shared.requests, "get", fake_get)
+    _shared._get_m3u8_key(video, params, "r")
+    assert reached == ["https://vixcloud.cc/storage/enc.key"]
+
+
+@pytest.mark.parametrize("url", ["http://vixcloud.cc/embed/1", "/embed/1", ""])
+def test_an_embed_url_without_an_https_host_is_refused(url):
+    with pytest.raises(RuntimeError, match="Unexpected embed URL"):
+        _shared.embed_host(url)
+
+
+@pytest.mark.parametrize("host,ok", [
+    ("vixcloud.cc", True),
+    ("vixcloud.co", True),
+    ("sc-u1.vixcloud.cc", True),
+    ("vixcloud.attacker.tld", False),
+    ("evilvixcloud.cc", False),
+])
+def test_the_key_host_allowlist_ignores_the_tld(monkeypatch, host, ok):
+    playlist = f'#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="https://{host}/storage/enc.key"\n#EXTINF:4,\nseg.ts\n'
+
+    def fake_get(url, *args, **kwargs):
+        return _Response(playlist, content=b"\x11")
+
+    monkeypatch.setattr(_shared.requests, "get", fake_get)
+    from app.core import m3u8
+
+    monkeypatch.setattr(m3u8.requests, "get", fake_get)
+
+    if ok:
+        assert _shared.fetch_key_from_playlist("https://vixcloud.cc/playlist/1", "r") == "11"
+    else:
+        with pytest.raises(RuntimeError, match="host non consentito"):
+            _shared.fetch_key_from_playlist("https://vixcloud.cc/playlist/1", "r")
