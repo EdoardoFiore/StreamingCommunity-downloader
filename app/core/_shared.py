@@ -137,6 +137,24 @@ def embed_host(url_embed: str) -> str:
     return parsed.hostname.lower()
 
 
+def apply_video_host(url_embed: str) -> str:
+    """The embed URL, moved to the manually configured video host if there is one.
+
+    Applied to the embed URL before anything is fetched from it, so the embed
+    page, playlist, key and referers all land on the override together — the
+    case it exists for is a source still naming a host that no longer answers.
+    """
+    from app.config import configured_video_host
+
+    override = configured_video_host()
+    if not override:
+        return url_embed
+    parsed = urlparse(url_embed)
+    if not parsed.hostname:
+        return url_embed
+    return parsed._replace(scheme="https", netloc=override).geturl()
+
+
 def embed_referer(json_win_video, json_win_param) -> str:
     """The /embed/ URL the playlist and key expect as referer."""
     return (f"https://{json_win_video['host']}/embed/{json_win_video['id']}"

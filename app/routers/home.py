@@ -26,9 +26,9 @@ async def home(
 ):
     """The shelves the source itself publishes on its front page."""
     if source == "animeunity":
-        # AnimeUnity lives at a fixed host and needs nothing configured, so the
+        # AnimeUnity has a default host and needs nothing configured, so the
         # refusal below would be a lie there.
-        host = animeunity.ANIMEUNITY_HOST
+        host = animeunity.host()
     else:
         host = configured_domain()
         if not host:

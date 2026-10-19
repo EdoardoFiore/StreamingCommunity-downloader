@@ -11,7 +11,7 @@
 const _SETTINGS_FEEDBACK_IDS = [
   'domain-feedback', 'libraries-feedback', 'perf-settings-feedback',
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
-  'domain-recovery-feedback',
+  'domain-recovery-feedback', 'hosts-feedback',
   'jf-refresh-feedback', 'hooks-feedback', 'naming-feedback',
   'output-feedback', 'mcp-feedback',
 ];
@@ -27,7 +27,7 @@ function _feedback(id, message = '', kind = 'muted') {
 // modal no longer waits on the slowest section (disk usage stats every library
 // path, on an NFS mount that can be asleep).
 const _SETTINGS_TAB_LOADERS = {
-  sorgente: () => loadDomainRecoverySettings(),
+  sorgente: () => Promise.all([loadDomainRecoverySettings(), loadHosts()]),
   // Loaded here rather than at boot. It was the one settings pane fed by a
   // prefetch the whole application waited on before it could show any page
   // at all, for data only this tab reads.
@@ -448,6 +448,35 @@ async function loadDomainRecoverySettings() {
     data.domain_check_interval_minutes ?? 360;
 }
 
+
+// AnimeUnity's host and the video host override. A blank field means the
+// default, which the placeholder shows; the server reads "" as "reset".
+function _fillHosts(data) {
+  const au = document.getElementById('animeunity-host-input');
+  au.placeholder = data.animeunity_default;
+  au.value = data.animeunity_saved || '';
+  document.getElementById('video-host-input').value = data.video_host || '';
+}
+
+async function loadHosts() {
+  try { _fillHosts(await api.get('/api/domain/hosts')); } catch (e) { /* 403: tab hidden */ }
+}
+
+async function saveHosts() {
+  const btn = document.getElementById('save-hosts-btn');
+  btn.disabled = true;
+  _feedback('hosts-feedback', 'Verifica in corso...');
+  try {
+    const data = await api.put('/api/domain/hosts', {
+      animeunity: document.getElementById('animeunity-host-input').value.trim(),
+      video_host: document.getElementById('video-host-input').value.trim(),
+    });
+    _fillHosts(data);
+    _feedback('hosts-feedback', 'Salvato.', 'success');
+    showToast('Host salvati', 'success');
+  } catch (e) { _feedback('hosts-feedback', errText(e, 'Errore salvataggio.'), 'danger'); }
+  finally { btn.disabled = false; }
+}
 
 // ── Naming templates ───────────────────────────────────────────────────────────
 //
@@ -990,6 +1019,7 @@ async function _copyWithToast(text, what) {
 registerActions({
   'settings:open':        () => openSettings(),
   'cfg:saveDomain':       () => saveDomain(),
+  'cfg:saveHosts':        () => saveHosts(),
   'cfg:saveRecovery':     () => saveDomainRecovery(),
   'cfg:checkDomain':      () => checkDomainNow(),
   'cfg:addLibrary':       () => addLibrary(),

@@ -10,7 +10,7 @@ from app import config
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import get_settings, save_settings
-from app.core import domain_recovery, home, metadata, naming
+from app.core import animeunity, domain_recovery, home, hosts, metadata, naming
 from app.core.paths import validate_library_path
 from app.core.page import get_domain_version
 
@@ -112,6 +112,63 @@ async def apply_domain_candidate(body: DomainUpdate):
 def dismiss_domain_candidate():
     domain_recovery.clear_pending()
     return {"ok": True}
+
+
+class HostsUpdate(BaseModel):
+    """Either field may be omitted; an empty string resets it to automatic."""
+
+    animeunity: str | None = None
+    video_host: str | None = None
+
+
+def _hosts_state() -> dict:
+    data = _read_data()
+    return {
+        "animeunity": config.configured_animeunity_host(),
+        "animeunity_saved": (data.get("animeunity_domain") or "").strip(),
+        "animeunity_default": config.ANIMEUNITY_DEFAULT_HOST,
+        "video_host": config.configured_video_host(),
+    }
+
+
+@router.get("/hosts", dependencies=CAN_MANAGE)
+def get_hosts():
+    return _hosts_state()
+
+
+@router.put("/hosts", dependencies=CAN_MANAGE)
+async def set_hosts(body: HostsUpdate):
+    """Save the AnimeUnity host and the video host override.
+
+    Each value is normalised to a bare hostname and verified against the
+    service it claims to be before it is stored: a host saved here decides
+    where the panel sends requests, so a typo should fail now, in front of the
+    person who typed it, not as a broken download hours later.
+    """
+    changes = {}
+    for field, key, verify in (
+        ("animeunity", "animeunity_domain", hosts.verify_animeunity),
+        ("video_host", "video_host", hosts.verify_video_host),
+    ):
+        value = getattr(body, field)
+        if value is None:
+            continue
+        if not value.strip():
+            changes[key] = ""
+            continue
+        try:
+            host = hosts.normalize_host(value)
+            await asyncio.to_thread(verify, host)
+        except (ValueError, RuntimeError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        changes[key] = host
+
+    if changes:
+        _update_data(changes)
+    if "animeunity_domain" in changes:
+        animeunity.forget_csrf()
+        home.clear_cache("animeunity")
+    return _hosts_state()
 
 
 class LibraryItem(BaseModel):

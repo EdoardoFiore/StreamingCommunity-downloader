@@ -16,6 +16,7 @@ from app.core._shared import (
     _get_m3u8_key,
     _get_m3u8_url,
     embed_referer,
+    apply_video_host,
 )
 from app.core.paths import episode_path, fmt_ep  # noqa: F401  (fmt_ep re-exported)
 
@@ -139,7 +140,7 @@ def _get_iframe(tv_id, ep_id, domain, token):
     else:
         raise RuntimeError(f"Cannot fetch episode iframe: HTTP {req.status_code}")
 
-    url_embed = BeautifulSoup(req.text, "lxml").find("iframe").get("src")
+    url_embed = apply_video_host(BeautifulSoup(req.text, "lxml").find("iframe").get("src"))
     # The vixcloud /embed/ is behind Cloudflare — fetch via cloudscraper.
     script_text = _fetch_vixcloud_embed(url_embed, referer=f"https://{domain}/")
     return script_text, url_embed

@@ -67,6 +67,27 @@
         </div>
       </div>
 
+      <!-- ── Altri host ────────────────────────────────────────────────── -->
+      <div class="settings-section">
+        <p class="settings-section-label">Altri host</p>
+        <p class="settings-section-hint">
+          Anche AnimeUnity e il server video cambiano dominio. Il server video viene
+          letto dalla sorgente a ogni download; impostalo qui solo se la sorgente
+          continua a indicarne uno che non risponde. Un campo vuoto torna al
+          comportamento automatico. Salvando ogni host viene verificato.
+        </p>
+        <label class="form-label" for="animeunity-host-input">AnimeUnity</label>
+        <input type="text" id="animeunity-host-input" class="form-control" placeholder="www.animeunity.to">
+        <label class="form-label mt-3" for="video-host-input">Server video</label>
+        <input type="text" id="video-host-input" class="form-control" placeholder="Automatico (dalla sorgente)">
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-action="cfg:saveHosts" id="save-hosts-btn">
+            Verifica e salva
+          </button>
+          <div id="hosts-feedback" class="form-text"></div>
+        </div>
+      </div>
+
       <!-- ── Recupero automatico del dominio ───────────────────────────── -->
       <div class="settings-section">
         <p class="settings-section-label">Recupero automatico</p>

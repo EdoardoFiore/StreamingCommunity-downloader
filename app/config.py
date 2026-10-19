@@ -123,6 +123,29 @@ def configured_domain() -> str:
     return (read_data().get("domain") or "").strip()
 
 
+# Where AnimeUnity lives unless an administrator says otherwise. The source moves
+# TLD (.so to .to); Settings › Sorgente overrides it without a release, and the
+# ANIMEUNITY_HOST env var still works for deployments that set it.
+ANIMEUNITY_DEFAULT_HOST = "www.animeunity.to"
+
+
+def configured_animeunity_host() -> str:
+    """AnimeUnity's host: the saved one, then ANIMEUNITY_HOST, then the default."""
+    return ((read_data().get("animeunity_domain") or "").strip()
+            or os.getenv("ANIMEUNITY_HOST", "").strip()
+            or ANIMEUNITY_DEFAULT_HOST)
+
+
+def configured_video_host() -> str:
+    """A manual override for the video host, or "" to follow the embed URL.
+
+    Empty is the normal state: the host is read off the embed URL the source
+    hands over (app.core._shared.embed_host). The override is the escape hatch
+    for when the source keeps pointing at a host that no longer answers.
+    """
+    return (read_data().get("video_host") or "").strip()
+
+
 def get_settings() -> dict:
     try:
         with open(DATA_FILE) as f:
