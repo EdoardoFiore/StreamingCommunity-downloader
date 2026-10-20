@@ -74,6 +74,10 @@ async function loadTitlePage(route) {
     // Raw value of the datetime input, kept so a re-render does not clear
     // what the user typed; scheduledAt is its ISO form, or null for "now".
     scheduledRaw: '', scheduledAt: null,
+    // Batches skip episodes whose file is already in the library (#30). On by
+    // default: fetching a season again over files already there is the
+    // exception, and the per-episode button still forces one.
+    onlyMissing: true,
     tab: null,
   };
 
@@ -495,11 +499,20 @@ function _tpRenderEpisodes() {
   let batch = '';
   if (_tp.episodes?.length) {
     if (can('DOWNLOAD')) {
-      batch = _tp.type === 'anime'
+      // Only a StreamingCommunity season knows what it holds before asking:
+      // its episodes arrive flagged in_library. For anime the server decides.
+      const owned = _tp.type === 'tv' ? _tp.episodes.filter(e => e.in_library).length : 0;
+      const ownedHint = owned ? ` <span class="th-only-missing-n">(${owned} già presenti)</span>` : '';
+      batch = `<label class="form-check form-switch th-only-missing"
+                      title="Salta gli episodi il cui file è già in libreria">
+            <input class="form-check-input" type="checkbox" data-change="tp:onlyMissing"
+                   ${_tp.onlyMissing ? 'checked' : ''}>
+            <span class="form-check-label">Solo mancanti${ownedHint}</span>
+          </label>` + (_tp.type === 'anime'
         ? `<button class="btn btn-sm btn-outline-primary" data-action="tp:batchAnime">
              <i class="ti ti-download me-1"></i>${verb} tutti gli episodi</button>`
         : `<button class="btn btn-sm btn-outline-primary" data-action="tp:batchSeason" data-season="${_tp.season}">
-             <i class="ti ti-download me-1"></i>${verb} la stagione</button>`;
+             <i class="ti ti-download me-1"></i>${verb} la stagione</button>`);
     } else if (_tp.type === 'tv' && can('REQUEST')) {
       batch = `<button class="btn btn-sm btn-outline-primary" data-action="tp:requestSeason">
                  <i class="ti ti-send me-1"></i>Richiedi la stagione</button>`;
@@ -754,8 +767,10 @@ async function _startBatch(path, body, modalId) {
     showToast(errText(e, 'Errore avviando i download'), 'danger');
     return false;
   }
+  const skipped = data.skipped ? `, ${data.skipped} già in libreria` : '';
   showToast(
-    body.scheduled_at ? `${data.count} episodi programmati` : `${data.count} episodi in coda`,
+    (body.scheduled_at ? `${data.count} episodi programmati` : `${data.count} episodi in coda`)
+      + skipped,
     'success',
   );
   if (modalId) hideModal(modalId);
@@ -763,25 +778,41 @@ async function _startBatch(path, body, modalId) {
   return true;
 }
 
+// The "Solo mancanti" switch, and the words a confirmation adds for it.
+function _onlyMissing() { return !!_tp?.onlyMissing; }
+function _skipNote() { return _onlyMissing() ? ', saltando quelli già in libreria' : ''; }
+
 async function downloadWholeSeason(season) {
   const { tvId, slug, tvName, year, episodes, scheduledAt, audioLangs, subLangs } = _epCtx;
   const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
-  if (!await scConfirm(`${label} tutti i ${episodes.length} episodi della stagione ${season}?`)) return;
+  // The episode list says which are already there, so the question can name
+  // the real number instead of promising every episode.
+  const missing = episodes.filter(e => !e.in_library).length;
+  if (_onlyMissing() && missing === 0) {
+    showToast('Tutti gli episodi della stagione sono già in libreria', 'info');
+    return;
+  }
+  const question = _onlyMissing() && missing < episodes.length
+    ? `${label} i ${missing} episodi mancanti della stagione ${season}?`
+    : `${label} tutti i ${episodes.length} episodi della stagione ${season}?`;
+  if (!await scConfirm(question)) return;
   await _startBatch('/api/download/season', {
     tv_id: tvId, slug, tv_name: tvName, season, year,
     audio_languages: audioLangs, subtitle_languages: subLangs,
     scheduled_at: scheduledAt || null,
+    only_missing: _onlyMissing(),
   });
 }
 
 async function downloadWholeSeries() {
   const { tvId, slug, tvName, year, scheduledAt, seasonsCount, audioLangs, subLangs } = _epCtx;
   const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
-  if (!await scConfirm(`${label} tutte le ${seasonsCount} stagioni?`)) return;
+  if (!await scConfirm(`${label} tutte le ${seasonsCount} stagioni${_skipNote()}?`)) return;
   await _startBatch('/api/download/series', {
     tv_id: tvId, slug, tv_name: tvName, year,
     audio_languages: audioLangs, subtitle_languages: subLangs,
     scheduled_at: scheduledAt || null,
+    only_missing: _onlyMissing(),
   });
 }
 
@@ -822,12 +853,13 @@ async function downloadAllAnime() {
   const { animeId, animeName, animeType, animeYear, episodes, scheduledAt,
           audioLangs, subLangs } = _animeCtx;
   const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
-  if (!await scConfirm(`${label} tutti i ${episodes.length} episodi?`)) return;
+  if (!await scConfirm(`${label} tutti i ${episodes.length} episodi${_skipNote()}?`)) return;
   await _startBatch('/api/download/anime-all', {
     anime_id: String(animeId), anime_name: animeName, anime_type: animeType,
     year: animeYear,
     audio_languages: audioLangs, subtitle_languages: subLangs,
     scheduled_at: scheduledAt || null,
+    only_missing: _onlyMissing(),
   });
 }
 
@@ -848,6 +880,7 @@ registerActions({
   'tp:trailer':       () => tpPlayTrailer(),
   'tp:season':        d => tpLoadSeason(Number(d.n)),
   'tp:schedule':      (d, el) => tpSetSchedule(el.value),
+  'tp:onlyMissing':   (d, el) => { _tp.onlyMissing = el.checked; },
   'tp:requestSeason': () => tpRequestSeason(),
   'tp:batchSeason':   d => downloadWholeSeason(Number(d.season)),
   'tp:batchAnime':    () => downloadAllAnime(),

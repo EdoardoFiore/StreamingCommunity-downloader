@@ -78,6 +78,65 @@ def test_the_anime_endpoint_enumerates_animeunity(client, panel, stub_jobs):
     assert {kwargs["batch_kind"] for _, _, kwargs in stub_jobs} == {"anime_all"}
 
 
+def _touch(path):
+    import os
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "wb").close()
+
+
+def test_only_missing_skips_what_is_already_in_the_library(client, panel, stub_jobs):
+    """#30: a re-run of a season fetches only the episodes that are absent."""
+    from app.core import paths
+
+    _touch(paths.episode_path(str(panel.library), "Test Series", 1, "2"))
+
+    response = _post(client, panel, "/api/download/season", {**SEASON_BODY, "only_missing": True})
+
+    assert response.status_code == 202, response.text
+    assert response.json()["count"] == 2
+    assert response.json()["skipped"] == 1
+    assert sorted(args[2] for _, args, _ in stub_jobs) == [0, 2]
+
+
+def test_without_the_option_everything_is_fetched_again(client, panel, stub_jobs):
+    from app.core import paths
+
+    _touch(paths.episode_path(str(panel.library), "Test Series", 1, "2"))
+
+    response = _post(client, panel, "/api/download/season", SEASON_BODY)
+
+    assert response.json()["count"] == 3
+    assert response.json()["skipped"] == 0
+
+
+def test_a_season_already_complete_says_so(client, panel, stub_jobs):
+    from app.core import paths
+
+    for n in ("1", "2", "3"):
+        _touch(paths.episode_path(str(panel.library), "Test Series", 1, n))
+
+    response = _post(client, panel, "/api/download/season", {**SEASON_BODY, "only_missing": True})
+
+    assert response.status_code == 409
+    assert "già in libreria" in response.json()["detail"]
+    assert stub_jobs == []
+    assert downloads_notify.pending_batches() == 0
+
+
+def test_only_missing_covers_anime_too(client, panel, stub_jobs):
+    from app.core import paths
+
+    _touch(paths.anime_path(str(panel.library), "Test Anime", "1", "ONA"))
+
+    response = _post(client, panel, "/api/download/anime-all",
+                     {**ANIME_BODY, "anime_type": "ONA", "only_missing": True})
+
+    assert response.status_code == 202, response.text
+    assert response.json()["count"] == 2
+    assert response.json()["skipped"] == 1
+
+
 def test_a_season_with_no_episodes_is_refused(client, panel, stub_jobs):
     panel.dead = True
 

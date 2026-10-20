@@ -295,6 +295,7 @@ async def download_season(
     year: str | None = None,
     audio_languages: list[str] = ["ita"],
     subtitle_languages: list[str] = ["ita", "eng"],
+    only_missing: bool = False,
 ) -> dict:
     """Download every episode of one season of a StreamingCommunity series.
 
@@ -306,11 +307,13 @@ async def download_season(
         year: Series year, used in the folder name.
         audio_languages: Audio tracks to keep.
         subtitle_languages: Subtitle tracks to keep.
+        only_missing: Skip episodes whose file is already in the library.
     """
     user = _user(Permission.DOWNLOAD)
     body = _model(downloads_router.SeasonDownloadRequest, tv_id=tv_id, slug=slug, tv_name=tv_name,
                   season=season_number, year=year,
-                  audio_languages=audio_languages, subtitle_languages=subtitle_languages)
+                  audio_languages=audio_languages, subtitle_languages=subtitle_languages,
+                  only_missing=only_missing)
     return await _call(downloads_router.download_season, body, _request_as(user))
 
 

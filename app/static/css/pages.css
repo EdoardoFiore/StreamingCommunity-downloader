@@ -1278,6 +1278,13 @@
     /* Batch actions sit at the end of the season bar, away from the per-row
        buttons: "the whole season" and "this episode" should not be adjacent. */
     .th-season-batch { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+    .th-only-missing {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin: 0 6px 0 0; min-height: 0;
+      font-size: 13px; color: var(--text-sub); cursor: pointer;
+    }
+    .th-only-missing .form-check-input { margin: 0; float: none; }
+    .th-only-missing-n { color: var(--text-muted); }
 
     /* Scheduling. Empty means now, which is why it is a field and not a mode. */
     .th-sched {
