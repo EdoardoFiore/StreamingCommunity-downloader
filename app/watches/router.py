@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from app.auth.deps import OPEN_MODE_USER, current_user, require
 from app.auth.permissions import Permission
+from app.core import paths
 from app.requests import models as request_models
 from app.watches import models, poller
 
@@ -124,6 +125,10 @@ def watch_status(source: str, media_type: str, external_id: str, http_request: H
 async def follow_series(body: WatchCreate, http_request: HttpRequest):
     if body.media_type not in (models.TV, models.ANIME):
         raise HTTPException(status_code=400, detail="Si possono seguire solo serie e anime")
+    # An anime film has no next episode, and every request a watch made for it
+    # would land on the same single file.
+    if body.media_type == models.ANIME and not paths.is_anime_series(body.anime_type):
+        raise HTTPException(status_code=400, detail="Un film non si può seguire")
     user_id = acting_user_id(http_request)
 
     watch, created = await asyncio.to_thread(

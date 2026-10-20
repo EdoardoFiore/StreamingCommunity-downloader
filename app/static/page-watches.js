@@ -249,7 +249,7 @@ function _followTarget(kind) {
       audio_languages: _tpPicked('audio'),
       subtitle_languages: _tpPicked('subs'),
       // A film has no next episode to wait for.
-      followable: _tp.type !== 'movie' && (!anime || (_tp.animeType || 'tv') !== 'movie'),
+      followable: _tp.type !== 'movie' && (!anime || !isAnimeFilm(_tp.animeType)),
     };
   }
   if (kind === 'anime') {
@@ -264,7 +264,7 @@ function _followTarget(kind) {
       audio_languages: _animeCtx.audioLangs || [],
       subtitle_languages: _animeCtx.subLangs || [],
       // A one-shot anime film has no next episode to wait for.
-      followable: (_animeCtx.animeType || 'tv') !== 'movie',
+      followable: !isAnimeFilm(_animeCtx.animeType),
     };
   }
   return {

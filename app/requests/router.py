@@ -50,7 +50,8 @@ class CreateRequest(BaseModel):
     poster: str | None = Field(default=None, max_length=500)
     season: int | None = Field(default=None, ge=0, le=200)
     episode_number: str | None = Field(default=None, max_length=16)
-    anime_type: str | None = Field(default=None, pattern="^(tv|movie|serie|series|anime)$")
+    # The source's own word (TV, ONA, "TV Short", …); only "movie" means a film.
+    anime_type: str | None = Field(default=None, max_length=32)
     audio_languages: list[str] = Field(default_factory=lambda: ["ita"])
     subtitle_languages: list[str] = Field(default_factory=list)
 

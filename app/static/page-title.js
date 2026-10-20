@@ -341,7 +341,8 @@ function _tpRenderCta() {
     : (!wants && _tp.seasonsCount > 1 ? ' la serie' : ' la stagione'));
   const label = `${verb}${scope}`;
   const icon = wants ? 'ti-send' : (_tp.seasonsCount > 1 && _tp.type === 'tv' ? 'ti-stack-2' : 'ti-download');
-  const followable = _tp.type !== 'movie';
+  // An anime film is _tp.type 'anime'; only the source's own kind says it is a film.
+  const followable = _tp.type !== 'movie' && !(_tp.type === 'anime' && isAnimeFilm(_tp.animeType));
 
   // Scheduling is part of the download privilege: a requester picks tracks and
   // an approver decides when it runs.

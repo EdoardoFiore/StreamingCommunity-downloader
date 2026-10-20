@@ -287,6 +287,17 @@ def test_an_unchanged_series_creates_nothing(client, panel):
     assert request_models.list_all() == []
 
 
+@pytest.mark.parametrize("anime_type", ["Movie", "film"])
+def test_an_anime_film_cannot_be_followed(client, panel, anime_type):
+    bob = _user("bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+
+    response = _follow(client, csrf, {**ANIME_BODY, "anime_type": anime_type})
+
+    assert response.status_code == 400
+    assert watch_models.list_all() == []
+
+
 def test_anime_are_followed_the_same_way(client, panel, stub_jobs):
     ann = _user("ann", Permission.REQUEST | Permission.DOWNLOAD)
     csrf = _login(client, ann)
