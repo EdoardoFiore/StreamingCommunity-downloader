@@ -382,6 +382,32 @@ def existing_file(request: models.Request) -> str | None:
     return first_existing(*_destinations(request)) or _registered_file(request)
 
 
+def episode_on_disk(media_type: str, source: str, external_id, title: str, year,
+                    season, episode_number, anime_type: str | None = None) -> bool:
+    """Whether one episode already has a file, by the same check a request gets.
+
+    For a batch asked to skip what is already there (#30). Presence only, not
+    languages: a person picking "solo mancanti" means files that are absent,
+    and a file with one track too few is still a file they chose to keep.
+    """
+    draft = models.Request(
+        id=0, content_key="", source=source, media_type=media_type,
+        external_id=str(external_id), slug=None, title=title, year=year, poster=None,
+        season=season, episode_number=str(episode_number), anime_type=anime_type,
+        audio_languages=[], subtitle_languages=[], available_snapshot=None,
+        status=models.PENDING, problem=None, denial_reason=None, requested_by=0,
+        decided_by=None, decided_at=None, job_id=None, output_path=None,
+        created_at="", updated_at="",
+    )
+    try:
+        return existing_file(draft) is not None
+    except Exception:
+        # Unknown means download it: a skipped episode nobody fetches is the
+        # worse mistake.
+        logger.exception("Library check failed for %s %s", title, episode_number)
+        return False
+
+
 def library_gap(request: models.Request) -> dict | None:
     """Which requested languages the file in the library does not carry.
 

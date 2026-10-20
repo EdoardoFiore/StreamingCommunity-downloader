@@ -295,6 +295,7 @@ async def download_season(
     year: str | None = None,
     audio_languages: list[str] = ["ita"],
     subtitle_languages: list[str] = ["ita", "eng"],
+    only_missing: bool = False,
 ) -> dict:
     """Download every episode of one season of a StreamingCommunity series.
 
@@ -306,11 +307,13 @@ async def download_season(
         year: Series year, used in the folder name.
         audio_languages: Audio tracks to keep.
         subtitle_languages: Subtitle tracks to keep.
+        only_missing: Skip episodes whose file is already in the library.
     """
     user = _user(Permission.DOWNLOAD)
     body = _model(downloads_router.SeasonDownloadRequest, tv_id=tv_id, slug=slug, tv_name=tv_name,
                   season=season_number, year=year,
-                  audio_languages=audio_languages, subtitle_languages=subtitle_languages)
+                  audio_languages=audio_languages, subtitle_languages=subtitle_languages,
+                  only_missing=only_missing)
     return await _call(downloads_router.download_season, body, _request_as(user))
 
 
@@ -332,7 +335,7 @@ async def download_anime_episode(
         anime_name: The anime title, from search.
         episode_id: The episode's 'id', from get_anime_episodes.
         episode_number: The episode's 'number', from get_anime_episodes.
-        anime_type: 'tv' for a series, 'movie' for a film.
+        anime_type: The source's kind (TV, ONA, OVA, …); only 'movie' (or 'film') is a film.
         year: Year, used in the folder name.
         audio_languages: Audio tracks to keep.
         subtitle_languages: Subtitle tracks to keep.
@@ -436,7 +439,7 @@ async def follow_series(
         title: The title, from search.
         slug: The slug, from search.
         year: Year, used in the folder name.
-        anime_type: AnimeUnity only: 'tv' for a series.
+        anime_type: AnimeUnity only: the source's kind; anything but 'movie' (or 'film') is a series.
         audio_languages: Audio tracks to keep on every new episode.
         subtitle_languages: Subtitle tracks to keep on every new episode.
     """
@@ -516,7 +519,7 @@ async def submit_request(
         year: Year.
         season: Season, for an episode.
         episode_number: Episode number, for an episode or anime.
-        anime_type: AnimeUnity only: 'tv' or 'movie'.
+        anime_type: AnimeUnity only: the source's kind; only 'movie' (or 'film') is a film.
         audio_languages: Audio tracks wanted.
         subtitle_languages: Subtitle tracks wanted.
     """

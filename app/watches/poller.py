@@ -12,6 +12,7 @@ from dataclasses import replace
 
 from app.auth.permissions import Permission
 from app.config import get_settings
+from app.core import paths
 from app.requests import models as request_models, resolver, service
 from app.watches import models
 
@@ -304,7 +305,15 @@ def refresh_year(watch: models.Watch) -> models.Watch:
 
 
 def poll_watch(watch: models.Watch) -> dict:
-    """Check one series. Returns a small summary, mostly for tests and logs."""
+    """Check one series. Returns a small summary, mostly for tests and logs.
+
+    An anime film is skipped. Following one is refused now, but a watch made
+    before that still exists, and every request it made would land on the same
+    single file.
+    """
+    if watch.media_type == models.ANIME and not paths.is_anime_series(watch.anime_type):
+        logger.debug("Watch %s (%s) is an anime film, skipped", watch.id, watch.title)
+        return {"checked": 0, "new": 0, "outcomes": {}}
     episodes = current_episodes(watch)
     seen = models.seen_keys(watch.id)
     fresh = [(key, ep) for key, ep in episodes if key not in seen]

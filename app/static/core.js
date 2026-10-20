@@ -124,6 +124,12 @@ async function logout() {
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
 
+// Whether an AnimeUnity kind (its own media_type: Movie, TV, ONA, …) is a film.
+// Mirrors paths._ANIME_FILM_KINDS: everything else is a series.
+function isAnimeFilm(kind) {
+  return ['movie', 'film'].includes(String(kind || 'tv').trim().toLowerCase());
+}
+
 function scConfirm(msg) {
   return new Promise(resolve => {
     document.getElementById('sc-confirm-msg').textContent = msg;

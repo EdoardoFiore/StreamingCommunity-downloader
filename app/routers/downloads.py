@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request as HttpRequest
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import downloads_notify
 from app.auth.deps import OPEN_MODE_USER, current_user, require
@@ -85,7 +85,7 @@ class AnimeDownloadRequest(BaseModel):
     anime_id: str
     episode: EpisodeInfo
     anime_name: str
-    anime_type: str = "tv"
+    anime_type: str = Field(default="tv", max_length=32)
     year: str | None = None
     audio_languages: list[str] = ["ita"]
     subtitle_languages: list[str] = ["ita", "eng"]
@@ -106,6 +106,8 @@ class SeasonDownloadRequest(BaseModel):
     audio_languages: list[str] = ["ita"]
     subtitle_languages: list[str] = ["ita", "eng"]
     scheduled_at: datetime | None = None
+    # Skip episodes whose file is already in the library (#30).
+    only_missing: bool = False
 
 
 class SeriesDownloadRequest(BaseModel):
@@ -116,16 +118,20 @@ class SeriesDownloadRequest(BaseModel):
     audio_languages: list[str] = ["ita"]
     subtitle_languages: list[str] = ["ita", "eng"]
     scheduled_at: datetime | None = None
+    # Skip episodes whose file is already in the library (#30).
+    only_missing: bool = False
 
 
 class AnimeAllDownloadRequest(BaseModel):
     anime_id: str
     anime_name: str
-    anime_type: str = "tv"
+    anime_type: str = Field(default="tv", max_length=32)
     year: str | None = None
     audio_languages: list[str] = ["ita"]
     subtitle_languages: list[str] = ["ita", "eng"]
     scheduled_at: datetime | None = None
+    # Skip episodes whose file is already in the library (#30).
+    only_missing: bool = False
 
 
 class FilmScheduleRequest(FilmDownloadRequest):
@@ -185,7 +191,9 @@ def _enumerate(work):
         )
 
 
-def _check_size(count: int):
+def _check_size(count: int, skipped: int = 0):
+    if count == 0 and skipped:
+        raise HTTPException(status_code=409, detail="Tutti gli episodi sono già in libreria")
     if count == 0:
         raise HTTPException(status_code=409, detail="Nessun episodio disponibile sulla fonte")
     if count > MAX_BATCH_JOBS:
@@ -217,8 +225,23 @@ def _run_batch(kind: str, label: str, user_id: int | None, submits: list) -> dic
     return {"batch_id": batch_id, "job_ids": job_ids, "count": len(job_ids)}
 
 
+def _missing_only(body, indices: list[int], present) -> tuple[list[int], int]:
+    """The indices still to download, and how many were skipped as present."""
+    if not body.only_missing:
+        return indices, 0
+    kept = [i for i in indices if not present(i)]
+    return kept, len(indices) - len(kept)
+
+
 def _episode_submits(body, tv_id, slug, tv_name, season, domain, version, token, user_id, kind, label):
+    """One submit per episode to fetch, and how many were skipped as present."""
+    from app.requests import resolver
+
     episodes = _season_episodes(tv_id, slug, season, domain, version, token)
+    indices, skipped = _missing_only(body, list(range(len(episodes))), lambda i: (
+        resolver.episode_on_disk(resolver.EPISODE, "streamingcommunity", tv_id, tv_name,
+                                 body.year, season, episodes[i]["n"])
+    ))
 
     def make(index):
         def submit(batch_id):
@@ -239,7 +262,7 @@ def _episode_submits(body, tv_id, slug, tv_name, season, domain, version, token,
             )
         return submit
 
-    return [make(i) for i in range(len(episodes))]
+    return [make(i) for i in indices], skipped
 
 
 @router.post("/season", status_code=202, dependencies=CAN_DOWNLOAD)
@@ -249,10 +272,11 @@ async def download_season(body: SeasonDownloadRequest, http_request: HttpRequest
 
     def work():
         domain, version, token = _tv_context(body.tv_id)
-        submits = _episode_submits(body, body.tv_id, body.slug, body.tv_name, body.season,
-                                   domain, version, token, user_id, "season", label)
-        _check_size(len(submits))
-        return _run_batch("season", label, user_id, submits)
+        submits, skipped = _episode_submits(body, body.tv_id, body.slug, body.tv_name,
+                                            body.season, domain, version, token, user_id,
+                                            "season", label)
+        _check_size(len(submits), skipped)
+        return {**_run_batch("season", label, user_id, submits), "skipped": skipped}
 
     result = await asyncio.to_thread(_enumerate, work)
     return {**result, "status": "scheduled" if body.scheduled_at else "queued"}
@@ -268,16 +292,19 @@ async def download_series(body: SeriesDownloadRequest, http_request: HttpRequest
         domain, version, token = _tv_context(body.tv_id)
         # The season count comes from the source, never from the client.
         seasons = get_info_tv(body.tv_id, body.slug, version, domain) or 0
-        submits = []
+        submits, skipped = [], 0
         for season in range(1, seasons + 1):
             try:
-                submits += _episode_submits(body, body.tv_id, body.slug, body.tv_name, season,
-                                            domain, version, token, user_id, "series", body.tv_name)
+                more, less = _episode_submits(body, body.tv_id, body.slug, body.tv_name, season,
+                                              domain, version, token, user_id, "series",
+                                              body.tv_name)
+                submits += more
+                skipped += less
             except Exception:
                 # One unavailable season must not sink the whole series.
                 logger.exception("Series %s: season %s could not be listed", body.tv_id, season)
-        _check_size(len(submits))
-        return _run_batch("series", body.tv_name, user_id, submits)
+        _check_size(len(submits), skipped)
+        return {**_run_batch("series", body.tv_name, user_id, submits), "skipped": skipped}
 
     result = await asyncio.to_thread(_enumerate, work)
     return {**result, "status": "scheduled" if body.scheduled_at else "queued"}
@@ -289,9 +316,16 @@ async def download_anime_all(body: AnimeAllDownloadRequest, http_request: HttpRe
 
     def work():
         from app.core.animeunity import get_episodes
+        from app.requests import resolver
 
-        episodes = get_episodes(body.anime_id) or []
-        _check_size(len(episodes))
+        listed = get_episodes(body.anime_id) or []
+        indices, skipped = _missing_only(body, list(range(len(listed))), lambda i: (
+            resolver.episode_on_disk(resolver.ANIME, "animeunity", body.anime_id,
+                                     body.anime_name, body.year, None,
+                                     listed[i].get("number"), body.anime_type)
+        ))
+        episodes = [listed[i] for i in indices]
+        _check_size(len(episodes), skipped)
 
         def make(episode):
             def submit(batch_id):
@@ -311,8 +345,8 @@ async def download_anime_all(body: AnimeAllDownloadRequest, http_request: HttpRe
                 )
             return submit
 
-        return _run_batch("anime_all", body.anime_name, user_id,
-                          [make(ep) for ep in episodes])
+        return {**_run_batch("anime_all", body.anime_name, user_id,
+                             [make(ep) for ep in episodes]), "skipped": skipped}
 
     result = await asyncio.to_thread(_enumerate, work)
     return {**result, "status": "scheduled" if body.scheduled_at else "queued"}

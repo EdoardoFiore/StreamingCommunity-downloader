@@ -102,7 +102,7 @@ def clear_cache(source: str | None = None) -> None:
 
 def _sc_shelves(domain: str) -> list[dict]:
     """The home page's own sliders: trending, recently added, today's top ten."""
-    props = page.fetch_page_props(f"https://{domain}/it")
+    props = page.fetch_site_props(domain)
     shelves = []
     for slider in props.get("sliders") or []:
         key = slider.get("name") or slider.get("label")

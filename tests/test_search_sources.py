@@ -140,6 +140,66 @@ def test_entities_are_unescaped_exactly_once(sc):
     assert page.search("x", "source.test")[0]["name"] == 'Tom &amp; Jerry "1940"'
 
 
+# ── A host without the /it segment (#34) ─────────────────────────────────────
+
+@pytest.fixture
+def unprefixed(monkeypatch):
+    """A clone that serves /search and answers 404 to /it/search."""
+    monkeypatch.setattr(page, "_locale_by_host", {})
+    calls = []
+
+    def fake_get(url, *args, **kwargs):
+        calls.append(url)
+        if "/it/" in url or url.endswith("/it"):
+            return _Response("not found", status_code=404)
+        return _Response(_page_html({"props": {"titles": [_title(1)]}}))
+
+    monkeypatch.setattr(page.requests, "get", fake_get)
+    return calls
+
+
+def test_a_host_without_the_locale_segment_is_searched_without_it(unprefixed):
+    assert [r["name"] for r in page.search("x", "clone.test")] == ["Title 1"]
+    assert unprefixed == ["https://clone.test/it/search", "https://clone.test/search"]
+
+
+def test_the_form_that_worked_is_remembered_per_host(unprefixed):
+    page.search("x", "clone.test")
+    unprefixed.clear()
+
+    page.search("y", "clone.test")
+
+    assert unprefixed == ["https://clone.test/search"]
+    assert page.site_url("clone.test", "/titles/1-a") == "https://clone.test/titles/1-a"
+    assert page.site_url("other.test", "/titles/1-a") == "https://other.test/it/titles/1-a"
+
+
+def test_a_page_missing_both_ways_does_not_flip_the_host(monkeypatch):
+    """A title that does not exist is a 404 with or without /it."""
+    monkeypatch.setattr(page, "_locale_by_host", {})
+    monkeypatch.setattr(page.requests, "get",
+                        lambda url, *a, **kw: _Response("nope", status_code=404))
+
+    response = page.get_localized("source.test", "/titles/9-gone")
+
+    assert response.status_code == 404
+    assert page.locale("source.test") == "/it"
+
+
+def test_a_host_that_regains_the_segment_is_followed_back(monkeypatch):
+    monkeypatch.setattr(page, "_locale_by_host", {"source.test": ""})
+
+    def fake_get(url, *args, **kwargs):
+        if "/it/" in url:
+            return _Response(_page_html({"props": {"titles": [_title(2)]}}))
+        return _Response("not found", status_code=404)
+
+    monkeypatch.setattr(page.requests, "get", fake_get)
+
+    assert [r["name"] for r in page.search("x", "source.test")] == ["Title 2"]
+    assert page.locale("source.test") == "/it"
+
+
 # ── get_domain_version keeps its three answers ────────────────────────────────
 
 def test_an_unreachable_domain_raises(monkeypatch):

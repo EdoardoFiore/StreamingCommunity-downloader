@@ -96,6 +96,32 @@
       margin-bottom: 14px;
     }
     .search-filters:empty { margin-bottom: 0; }
+    .search-filters .results-view { margin-left: auto; display: flex; gap: 6px; }
+
+    /* ── Results as a list (#35) ──
+       The same cards as the grid, laid out as rows, so a title is read in
+       full. Each column takes the whole row; the poster shrinks to a thumb. */
+    #search-results.results-list { --bs-gutter-y: .5rem; }
+    #search-results.results-list > [class*="col-"] { flex: 0 0 100%; width: 100%; max-width: 100%; }
+    .results-list .result-card { flex-direction: row; align-items: center; position: relative; }
+    .results-list .result-card:hover {
+      transform: none !important;
+      box-shadow: none !important;
+    }
+    .results-list .poster-wrap { width: 52px; position: static; }
+    .results-list .result-card:hover .poster-wrap img { transform: none; }
+    .results-list .poster-noimg { font-size: 1.4rem; }
+    .results-list .poster-overlay,
+    .results-list .poster-play { display: none; }
+    /* Out of the thumb, which is too small to hold it, to the row's end. */
+    .results-list .status-ribbon { top: 50%; right: 12px; transform: translateY(-50%); }
+    .results-list .card-meta { padding: 8px 14px; min-width: 0; padding-right: 130px; }
+    .results-list .card-meta .card-title-text { white-space: normal; font-size: 14px; }
+    .results-list .skeleton-card { aspect-ratio: auto; height: 78px; }
+    @media (max-width: 575px) {
+      .results-list .card-meta { padding-right: 108px; }
+      .results-list .card-meta .card-title-text { font-size: 13px; }
+    }
 
     #search-more .source-btn { display: inline-flex; }
 
@@ -1278,6 +1304,13 @@
     /* Batch actions sit at the end of the season bar, away from the per-row
        buttons: "the whole season" and "this episode" should not be adjacent. */
     .th-season-batch { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+    .th-only-missing {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin: 0 6px 0 0; min-height: 0;
+      font-size: 13px; color: var(--text-sub); cursor: pointer;
+    }
+    .th-only-missing .form-check-input { margin: 0; float: none; }
+    .th-only-missing-n { color: var(--text-muted); }
 
     /* Scheduling. Empty means now, which is why it is a field and not a mode. */
     .th-sched {
