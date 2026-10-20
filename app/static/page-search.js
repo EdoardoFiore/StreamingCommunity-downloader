@@ -112,7 +112,39 @@ function renderSearchFilters() {
     ? `<button class="source-btn${_dubOnly ? ' active' : ''}" data-action="search:dub" data-on="${_dubOnly ? '0' : '1'}">` +
       `<i class="ti ti-microphone"></i>Solo doppiati IT</button>`
     : '';
-  bar.innerHTML = chips + dub;
+  // Pushed to the end of the bar: it changes how results look, not which.
+  const views = [['grid', 'ti-layout-grid', 'Griglia'], ['list', 'ti-list', 'Elenco']]
+    .map(([view, icon, label]) =>
+      `<button class="source-btn${_resultsView === view ? ' active' : ''}" ` +
+      `data-action="search:view" data-view="${view}" title="${label}" aria-label="${label}">` +
+      `<i class="ti ${icon}"></i></button>`).join('');
+  bar.innerHTML = chips + dub + `<div class="results-view">${views}</div>`;
+  _applyResultsView();
+}
+
+// ── Grid or list (#35) ────────────────────────────────────────────────────────
+//
+// The grid truncates titles to one line, and the parts of one anime differ
+// only at the end of theirs. The list is the same cards laid out as rows
+// (pages.css, .results-list), so nothing else about a result changes. The
+// choice is this browser's own, so it lives in localStorage and the page
+// works the same without it.
+
+const _RESULTS_VIEW_KEY = 'sc.resultsView';
+let _resultsView = (() => {
+  try { return localStorage.getItem(_RESULTS_VIEW_KEY) === 'list' ? 'list' : 'grid'; }
+  catch (e) { return 'grid'; }
+})();
+
+function _applyResultsView() {
+  const container = document.getElementById('search-results');
+  if (container) container.classList.toggle('results-list', _resultsView === 'list');
+}
+
+function setResultsView(view) {
+  _resultsView = view === 'list' ? 'list' : 'grid';
+  try { localStorage.setItem(_RESULTS_VIEW_KEY, _resultsView); } catch (e) { /* private window */ }
+  renderSearchFilters();
 }
 
 function setKindFilter(kind) {
@@ -570,6 +602,7 @@ registerActions({
   'search:more':   () => loadMoreResults(),
   'search:kind':   d => setKindFilter(d.kind),
   'search:dub':    d => setDubOnly(d.on === '1'),
+  'search:view':   d => setResultsView(d.view),
   'search:open':   d => openTitle(Number(d.idx)),
 });
 
