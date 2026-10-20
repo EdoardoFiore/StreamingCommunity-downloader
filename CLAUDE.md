@@ -47,6 +47,9 @@ request before any route runs.
   `fetch_page_props()` read the Inertia payload out of the server-rendered page's
   `data-page` attribute — no XHR headers, no session — and `normalize_title()` is the
   one place a raw title becomes a result. `home.py` uses all three.
+  Pages of the source go through `get_localized()` / `site_url()`, never a literal
+  `/it`: some hosts serve no locale segment (#34), and the form each host answers
+  to is learned from a 404 and remembered per host.
 - `home.py` — the shelves each source publishes on its own front page, behind a TTL
   cache keyed on `(source, host)`, so a rotation cannot reach the old domain's entry
 - `domain_recovery.py` — finds the source domain again when it rotates: scrapes a

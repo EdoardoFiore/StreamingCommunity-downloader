@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 
 from app.core.headers import get_headers, sanitize_filename
 from app.core.m3u8 import download_m3u8, fetch_master_languages, M3U8_Parser
+from app.core.page import get_localized, site_url
 from app.core._shared import (
     MissingAudioTrackError,
     StreamSource,
@@ -45,8 +46,8 @@ def get_title_props(id_film: int, title_name: str, site_version: str, domain: st
     page, and splitting this in two would mean two copies of the Inertia header
     dance.
     """
-    req = requests.get(
-        f"https://{domain}/it/titles/{id_film}-{title_name}",
+    req = get_localized(
+        domain, f"/titles/{id_film}-{title_name}",
         headers={
             "X-Inertia": "true",
             "X-Inertia-Version": site_version,
@@ -71,11 +72,11 @@ def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -
 
 
 def get_info_season(tv_id: int, tv_name: str, domain: str, version: str, token: str, n_stagione: int) -> list[dict]:
-    req = requests.get(
-        f"https://{domain}/it/titles/{tv_id}-{tv_name}/season-{n_stagione}",
+    req = get_localized(
+        domain, f"/titles/{tv_id}-{tv_name}/season-{n_stagione}",
         headers={
             "authority": f"{domain}",
-            "referer": f"https://{domain}/it/titles/{tv_id}-{tv_name}",
+            "referer": site_url(domain, f"/titles/{tv_id}-{tv_name}"),
             "user-agent": get_headers(),
             "x-inertia": "true",
             "x-inertia-version": version,
@@ -130,7 +131,7 @@ def _get_iframe(tv_id, ep_id, domain, token):
             params=params,
             cookies=cookies,
             headers={
-                "referer": f"https://{domain}/it/watch/{tv_id}?e={ep_id}",
+                "referer": site_url(domain, f"/watch/{tv_id}?e={ep_id}"),
                 "user-agent": ua,
             },
             timeout=15,

@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 
 import requests
 from bs4 import BeautifulSoup
@@ -36,6 +37,51 @@ def _data_page(html: str) -> dict:
     return json.loads(raw)
 
 
+# The locale segment StreamingCommunity puts in front of its pages. Not every
+# host has one: some clones answer 404 to /it/search and serve /search (#34).
+_LOCALE = "/it"
+
+# Which form each host answered to, remembered per host so a rotation starts
+# fresh and nothing needs clearing. Only a 404 moves it, and in both
+# directions, so a host that changes its layout is followed either way.
+_locale_by_host: dict[str, str] = {}
+_locale_lock = threading.Lock()
+
+
+def locale(domain: str) -> str:
+    """``/it``, or ``""`` for a host known to serve its pages without it."""
+    with _locale_lock:
+        return _locale_by_host.get(domain, _LOCALE)
+
+
+def site_url(domain: str, path: str = "") -> str:
+    """``https://{domain}/it{path}``, in the form this host answers to."""
+    return f"https://{domain}{locale(domain)}{path}"
+
+
+def get_localized(domain: str, path: str, **kwargs) -> requests.Response:
+    """GET a page of the source, with or without the locale segment.
+
+    The remembered form is tried first, so a host that works costs exactly the
+    one request it always did. On a 404 the other form is tried once, and
+    adopted only if it is not a 404 too: a title that genuinely does not exist
+    answers 404 both ways, and must not flip the host.
+    """
+    current = locale(domain)
+    response = requests.get(f"https://{domain}{current}{path}", **kwargs)
+    if getattr(response, "status_code", None) != 404:
+        return response
+    other = "" if current else _LOCALE
+    retry = requests.get(f"https://{domain}{other}{path}", **kwargs)
+    if getattr(retry, "status_code", None) == 404:
+        return response
+    with _locale_lock:
+        _locale_by_host[domain] = other
+    logger.info("%s serves its pages %s the %s segment", domain,
+                "with" if other else "without", _LOCALE)
+    return retry
+
+
 def fetch_page_props(url: str, *, params: dict | None = None, timeout: int = 10) -> dict:
     """The ``props`` of one server-rendered page.
 
@@ -44,6 +90,16 @@ def fetch_page_props(url: str, *, params: dict | None = None, timeout: int = 10)
     """
     response = requests.get(
         url, params=params, headers={"user-agent": get_headers()}, timeout=timeout,
+    )
+    response.raise_for_status()
+    return _data_page(response.text).get("props") or {}
+
+
+def fetch_site_props(domain: str, path: str = "", *, params: dict | None = None,
+                     timeout: int = 10) -> dict:
+    """``fetch_page_props`` for a page of the source, locale segment or not."""
+    response = get_localized(
+        domain, path, params=params, headers={"user-agent": get_headers()}, timeout=timeout,
     )
     response.raise_for_status()
     return _data_page(response.text).get("props") or {}
@@ -136,7 +192,7 @@ def search(title_search: str, domain: str, *, page: int = 1,
     if page > 1:
         params["page"] = page
 
-    props = fetch_page_props(f"https://{domain}/it/search", params=params)
+    props = fetch_site_props(domain, "/search", params=params)
     titles = props.get("titles") or []
 
     if media_type:
