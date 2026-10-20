@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request as HttpRequest
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import downloads_notify
 from app.auth.deps import OPEN_MODE_USER, current_user, require
@@ -85,7 +85,7 @@ class AnimeDownloadRequest(BaseModel):
     anime_id: str
     episode: EpisodeInfo
     anime_name: str
-    anime_type: str = "tv"
+    anime_type: str = Field(default="tv", max_length=32)
     year: str | None = None
     audio_languages: list[str] = ["ita"]
     subtitle_languages: list[str] = ["ita", "eng"]
@@ -121,7 +121,7 @@ class SeriesDownloadRequest(BaseModel):
 class AnimeAllDownloadRequest(BaseModel):
     anime_id: str
     anime_name: str
-    anime_type: str = "tv"
+    anime_type: str = Field(default="tv", max_length=32)
     year: str | None = None
     audio_languages: list[str] = ["ita"]
     subtitle_languages: list[str] = ["ita", "eng"]

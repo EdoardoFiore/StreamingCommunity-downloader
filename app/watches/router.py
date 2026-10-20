@@ -50,7 +50,8 @@ class WatchCreate(BaseModel):
     slug: str | None = None
     year: str | None = None
     poster: str | None = None
-    anime_type: str | None = None
+    # The source's own word (TV, ONA, "TV Short", …); stored, so bounded.
+    anime_type: str | None = Field(default=None, max_length=32)
     audio_languages: list[str] = Field(default_factory=list)
     subtitle_languages: list[str] = Field(default_factory=list)
 

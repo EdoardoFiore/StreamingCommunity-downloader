@@ -97,6 +97,18 @@ def test_only_a_film_kind_is_a_film(anime_type):
     assert not paths.is_anime_series(anime_type)
 
 
+def test_the_frontend_names_the_same_film_kinds():
+    """isAnimeFilm() in core.js mirrors _ANIME_FILM_KINDS; a kind added to one
+    and not the other would hide "Segui" on a series, or offer it on a film."""
+    import re
+    from pathlib import Path
+
+    source = (Path(__file__).parent.parent / "app" / "static" / "core.js").read_text()
+    body = re.search(r"function isAnimeFilm\(kind\) \{(.*?)\n\}", source, re.S).group(1)
+    listed = re.search(r"\[([^\]]*)\]", body).group(1)
+    assert set(re.findall(r"'([^']+)'", listed)) == set(paths._ANIME_FILM_KINDS)
+
+
 def test_the_default_container_decides_the_extension():
     """The one thing the anchors above deliberately stop asserting."""
     assert paths.film_path("/lib", "Blade Runner", "1982").endswith(".mkv")

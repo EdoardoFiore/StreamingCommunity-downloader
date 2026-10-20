@@ -298,6 +298,32 @@ def test_an_anime_film_cannot_be_followed(client, panel, anime_type):
     assert watch_models.list_all() == []
 
 
+def test_an_anime_film_watch_from_before_the_guard_is_not_polled(client, panel, monkeypatch):
+    """Following a film is refused now; one followed earlier must stay inert."""
+    watch, _ = watch_models.create(
+        source="animeunity", media_type="anime", external_id="56", title="Test Film",
+        anime_type="Movie", audio_languages=["ita"], subtitle_languages=[], created_by=None,
+    )
+
+    def never(watch):
+        raise AssertionError("an anime film was enumerated")
+
+    monkeypatch.setattr(poller, "current_episodes", never)
+
+    assert poller.poll_watch(watch) == {"checked": 0, "new": 0, "outcomes": {}}
+    assert request_models.list_all() == []
+
+
+def test_an_overlong_anime_type_is_refused(client, panel):
+    bob = _user("bob", Permission.REQUEST)
+    csrf = _login(client, bob)
+
+    response = _follow(client, csrf, {**ANIME_BODY, "anime_type": "x" * 33})
+
+    assert response.status_code == 422
+    assert watch_models.list_all() == []
+
+
 def test_anime_are_followed_the_same_way(client, panel, stub_jobs):
     ann = _user("ann", Permission.REQUEST | Permission.DOWNLOAD)
     csrf = _login(client, ann)
