@@ -728,8 +728,7 @@ async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLa
     await api.post(endpoint, body);
     showToast(scheduledAt
       ? `Programmato: ${title} — ${new Date(scheduledAt).toLocaleString('it-IT')}`
-      : `Download avviato: ${title}`, 'success');
-    showPage('downloads');
+      : `Download avviato: ${title}`, 'success', DOWNLOADS_LINK);
   } catch(e) { showToast(errText(e), 'danger'); }
 }
 
@@ -770,6 +769,8 @@ async function startEpisodeDownload(epIndex) {
   } catch(e) { showToast(errText(e), 'danger'); }
 }
 
+const DOWNLOADS_LINK = { label: 'Vai ai download', page: 'downloads' };
+
 // Whole seasons and whole series are one call: the server lists the episodes
 // itself and queues them as a batch. That is also what lets it report the season
 // once at the end instead of pinging for every episode.
@@ -788,9 +789,11 @@ async function _startBatch(path, body, modalId) {
     (body.scheduled_at ? `${data.count} episodi programmati` : `${data.count} episodi in coda`)
       + skipped,
     'success',
+    DOWNLOADS_LINK,
   );
   if (modalId) hideModal(modalId);
-  showPage('downloads');
+  // No jump to the downloads page: queueing seasons 4, 5 and 6 meant finding
+  // the series again after each one (#20).
   return true;
 }
 
