@@ -45,7 +45,7 @@ class DownloadJob:
     job_id: str
     title: str
     type: str  # "film" | "episode" | "anime"
-    status: str  # "scheduled" | "queued" | "running" | "done" | "error" | "cancelled"
+    status: str  # "scheduled" | "queued" | "paused" | "running" | "done" | "error" | "cancelled"
     created_at: datetime
     scheduled_at: Optional[datetime] = None
     schedule_id: Optional[str] = None
@@ -94,6 +94,12 @@ class DownloadJob:
     # Its ticket while it waits for a download slot (None otherwise): the
     # waiting jobs start in ticket order, so the frontend can number the line.
     queue_seq: Optional[int] = None
+    # Held back with the rest of its batch (#43). A paused job gives up its
+    # place in the line *and its executor thread*: ``parked`` keeps the exact
+    # call, so resuming resubmits it. Only a job that has not started is ever
+    # paused - one mid-download would come back to an expired stream token.
+    paused: bool = False
+    parked: Optional[tuple] = field(default=None, repr=False)
 
 
 # Rebuilt for every attempt: each belongs to one job id.
@@ -140,8 +146,11 @@ class DownloadSlots:
         self._tickets = 0
 
     def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
-        """Wait for a slot. False when the job was cancelled while waiting."""
+        """Wait for a slot. False when the job was cancelled or paused while
+        waiting; the caller tells the two apart."""
         with self._cond:
+            if job.paused:
+                return False
             self._tickets += 1
             job.queue_seq = self._tickets
             self._line.append(job)
@@ -150,10 +159,10 @@ class DownloadSlots:
         with self._cond:
             try:
                 while not (self._line[0] is job and self._busy < self._limit):
-                    if job.cancel_event.is_set():
+                    if job.cancel_event.is_set() or job.paused:
                         return False
                     self._cond.wait()
-                if job.cancel_event.is_set():
+                if job.cancel_event.is_set() or job.paused:
                     return False
                 self._busy += 1
                 return True
@@ -174,7 +183,7 @@ class DownloadSlots:
             self._cond.notify_all()
 
     def wake(self) -> None:
-        """Let waiters re-check: a cancelled one leaves the line."""
+        """Let waiters re-check: a cancelled or paused one leaves the line."""
         with self._cond:
             self._cond.notify_all()
 
@@ -448,20 +457,75 @@ class JobManager:
     def cancel(self, job_id: str) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
-            if not job or job.status not in ("scheduled", "queued", "running"):
+            if not job or job.status not in ("scheduled", "queued", "paused", "running"):
                 return False
-            # A scheduled job was never handed to the executor, so _run_download
-            # will never run for it and nothing else would ever tell listeners it
-            # is over. Queued and running ones go through _run_download, which
-            # notifies on every path.
-            was_scheduled = job.status == "scheduled"
+            # A scheduled job was never handed to the executor, and a parked one
+            # has left it, so _run_download will not run for either and nothing
+            # else would ever tell listeners it is over. Queued and running ones
+            # go through _run_download, which notifies on every path.
+            orphaned = job.status == "scheduled" or job.parked is not None
+            job.parked = None
+            job.paused = False
             job.cancel_event.set()
             job.status = "cancelled"
         self._slots.wake()
         self._emit(job, {"type": "error", "message": "Annullato"})
-        if was_scheduled:
+        if orphaned:
             self._notify_listeners(job)
         return True
+
+    def pause_batch(self, batch_id: str) -> int:
+        """Hold back every job of a batch still waiting to start (#43).
+
+        What is already downloading finishes: its stream token was issued when
+        it started and would not outlive a long pause, while a job that has not
+        started asks for its own when it does. Returns how many were paused.
+        """
+        with self._lock:
+            jobs = [j for j in self._jobs.values()
+                    if j.batch_id == batch_id and j.status == "queued" and not j.paused]
+            for job in jobs:
+                job.paused = True
+                job.status = "paused"
+                job.queue_seq = None
+                # One between automatic retries parks when its wait ends.
+                job.retry_at = None
+                # Under the lock, so it cannot overtake the "running" of a job
+                # that won its slot a moment before (_attempt).
+                self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "paused"})
+        # Waiters re-check and leave the line; each parks on its own thread.
+        self._slots.wake()
+        return len(jobs)
+
+    def resume_batch(self, batch_id: str) -> int:
+        """Put a paused batch back in the line, behind whatever joined it since."""
+        with self._lock:
+            jobs = [j for j in self._jobs.values()
+                    if j.batch_id == batch_id and j.status == "paused"]
+            parked = []
+            for job in jobs:
+                job.paused = False
+                job.status = "queued"
+                if job.parked is not None:
+                    parked.append((job, job.parked))
+                    job.parked = None
+        for job in jobs:
+            self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "queued"})
+        # A job not parked yet is still on its thread and goes back in line by
+        # itself (_attempt); a parked one needs a thread again.
+        for job, (fn, args, kwargs) in parked:
+            self._executor.submit(self._run_download, job, fn, *args, **kwargs)
+        return len(jobs)
+
+    def _park(self, job: DownloadJob, fn, args, kwargs) -> bool:
+        """Leave the executor for a paused job. False when it was resumed or
+        cancelled in the meantime, which the caller handles."""
+        with self._lock:
+            if not job.paused or job.cancel_event.is_set():
+                return False
+            job.parked = (fn, args, kwargs)
+            job.status = "paused"
+            return True
 
     def dismiss(self, job_id: str) -> bool:
         """Remove a finished/cancelled job and clean it from the schedule store."""
@@ -535,17 +599,28 @@ class JobManager:
                     # failed attempt's must not count toward the new one.
                     kwargs = {**kwargs, "progress_factory": self._make_progress_factory(job)}
         finally:
-            self._notify_listeners(job)
+            # A parked job is not over: it is resubmitted on resume, and
+            # notifies then - or cancel() does, if it never comes back.
+            if job.parked is None:
+                self._notify_listeners(job)
 
     def _attempt(self, job: DownloadJob, fn, args, kwargs) -> bool:
         """Run the download once. True when it failed and should run again."""
-        if not self._slots.acquire(job, on_queued=self._announce_queued):
-            job.status = "cancelled"
-            self._emit(job, {"type": "error", "message": "Annullato"})
-            return False
+        while not self._slots.acquire(job, on_queued=self._announce_queued):
+            if job.cancel_event.is_set():
+                job.status = "cancelled"
+                self._emit(job, {"type": "error", "message": "Annullato"})
+                return False
+            if self._park(job, fn, args, kwargs):
+                return False
+            # Resumed before it could park: straight back in line.
         try:
-            job.status = "running"
-            self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
+            with self._lock:
+                # It won its slot, so a pause arriving now is too late for it:
+                # it runs, and must not be resumed later as if still waiting.
+                job.paused = False
+                job.status = "running"
+                self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
 
             try:
                 result = fn(*args, **kwargs)

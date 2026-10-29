@@ -219,6 +219,13 @@ anything under a mounted static directory is readable by unauthenticated visitor
   leaving jobs already waiting under the old limit beside new ones under the new (3 → 5 could run
   8). A waiting job carries a `queue_seq` ticket, broadcast as `job_queued`; the page numbers the
   "In attesa" list by it, so a new way into a slot that skips the line breaks a promise on screen.
+- **Pausing is per batch and never touches a running download (#43).** A job mid-download holds a
+  vixcloud token issued when it started; a job still waiting asks for its own when it starts, so
+  only those are held back. A paused job leaves the line *and its executor thread* — `parked`
+  keeps the call and `resume_batch()` resubmits it, behind whatever queued since. Parked
+  jobs notify nobody (they are not over); `cancel()` notifies for one, as it does for a
+  `scheduled` job, or its batch never closes. Parking on the thread instead would let a paused
+  series hold all 64 workers and starve every other download.
 - **An automatic retry is not a way out of a job.** `_run_download` loops on `_attempt()` up to
   `AUTO_RETRIES` times, `AUTO_RETRY_DELAY` apart, outside the semaphore; the job keeps its id and
   stays `queued` meanwhile, so listeners still fire once, with the final outcome. A manual retry

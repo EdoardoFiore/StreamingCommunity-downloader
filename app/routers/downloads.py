@@ -442,6 +442,24 @@ def fire_now(job_id: str):
     raise HTTPException(status_code=404, detail="Job non trovato o non in stato programmato")
 
 
+# Pausing holds back what has not started; resuming only lets go what was
+# already approved and queued, so both are job control, like stopping (#43).
+@router.post("/batch/{batch_id}/pause", status_code=200, dependencies=CAN_CONTROL_JOBS)
+def pause_batch(batch_id: str):
+    count = job_manager.pause_batch(batch_id)
+    if not count:
+        raise HTTPException(status_code=404, detail="Nessun download in attesa in questo gruppo")
+    return {"batch_id": batch_id, "paused": count}
+
+
+@router.post("/batch/{batch_id}/resume", status_code=200, dependencies=CAN_CONTROL_JOBS)
+def resume_batch(batch_id: str):
+    count = job_manager.resume_batch(batch_id)
+    if not count:
+        raise HTTPException(status_code=404, detail="Nessun download in pausa in questo gruppo")
+    return {"batch_id": batch_id, "resumed": count}
+
+
 # Starts a download, so it takes what starting one takes — not the job-control
 # permission approvers hold for stopping what they approved.
 @router.post("/{job_id}/retry", status_code=202, dependencies=CAN_DOWNLOAD)
