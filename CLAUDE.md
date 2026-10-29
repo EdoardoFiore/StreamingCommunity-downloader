@@ -170,6 +170,13 @@ anything under a mounted static directory is readable by unauthenticated visitor
   layout: `paths.is_anime_series()` names the film (`_ANIME_FILM_KINDS`: `movie`,
   `film`) and treats every other value as a series — listing the series kinds instead sent an ONA down the
   single-file path, every episode overwriting one episode-less file.
+- **Seasons are the numbers the title page lists, never `1..seasons_count`.** Numbering has
+  holes — Bake Off Italia is 1-4 and 10-14, `seasons_count` 9 (#40) — and the site answers a
+  season it lacks with **season 1**, status 200. Counting showed five copies of S01 and filed them
+  as S05-S09. `tv.get_season_numbers()` is the enumeration everywhere, and `get_info_season()`
+  refuses a page whose `loadedSeason.number` is not the one asked. Watch ledgers seeded before
+  the fix hold those phantom seasons; `poller._rebaseline_phantom_seasons()` drops them and
+  re-seeds instead of queueing the real seasons as new.
 - **A page payload is unescaped exactly once.** BeautifulSoup decodes HTML entities in
   attribute values itself — the `data-page` on StreamingCommunity, `items-json` and
   `animes` on AnimeUnity — so there is no `html.unescape()` on top, and adding one

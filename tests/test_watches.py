@@ -36,7 +36,7 @@ def panel(client, admin_credentials, source, stub_jobs, monkeypatch):
     do_setup(client, admin_credentials)
     from app.core import tv
 
-    monkeypatch.setattr(tv, "get_info_tv", lambda *a, **k: 1)
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: [1])
     return source
 
 
@@ -175,6 +175,39 @@ def test_a_new_episode_becomes_a_pending_request(client, panel):
     assert created[0].status == request_models.PENDING
     assert created[0].episode_number == "4"
     assert created[0].watch_id is not None
+
+
+def test_a_ledger_seeded_from_phantom_seasons_is_rebaselined_not_queued(client, panel, monkeypatch):
+    """#40: seasons were counted 1..seasons_count and a missing one answered
+    with season 1, so a watch on a series numbered 1, 3 holds a fake S02 and no
+    S03. Reading the real numbers must not queue S03 as if it had just aired."""
+    from app.core import tv
+
+    bob = _user("bob", Permission.REQUEST)
+    watch_id = _follow(client, _login(client, bob)).json()["id"]
+    watch_models.seed_seen(watch_id, ["S02E1", "S02E2", "S02E3"])
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: [1, 3])
+
+    result = poller.run_poll_cycle()
+
+    assert result["new"] == 0
+    assert request_models.list_all() == []
+    assert watch_models.seen_keys(watch_id) == {
+        "S01E1", "S01E2", "S01E3", "S03E1", "S03E2", "S03E3",
+    }
+
+
+def test_a_genuinely_new_season_is_still_queued(client, panel, monkeypatch):
+    from app.core import tv
+
+    bob = _user("bob", Permission.REQUEST)
+    _follow(client, _login(client, bob))
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: [1, 2])
+
+    result = poller.run_poll_cycle()
+
+    assert result["new"] == 3
+    assert len(request_models.list_all()) == 3
 
 
 def test_a_stale_year_is_corrected_before_a_new_episode_lands(client, panel):

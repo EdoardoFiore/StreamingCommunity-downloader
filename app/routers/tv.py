@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import configured_domain
-from app.core.tv import get_info_tv, get_info_season, get_token, get_tv_languages
+from app.core.tv import get_season_numbers, get_info_season, get_token, get_tv_languages
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +40,12 @@ async def fetch_token(tv_id: int):
 @router.get("/{tv_id}/seasons")
 async def fetch_seasons(tv_id: int, slug: str = Query(...), version: str = Query(...)):
     try:
-        count = await asyncio.to_thread(get_info_tv, tv_id, slug, version, _domain())
+        numbers = await asyncio.to_thread(get_season_numbers, tv_id, slug, version, _domain())
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"seasons_count": count}
+    return {"seasons_count": len(numbers), "seasons": numbers}
 
 
 def _mark_in_library(episodes: list[dict], title: str, season: int, year: str,

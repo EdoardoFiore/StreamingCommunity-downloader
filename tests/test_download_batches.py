@@ -24,7 +24,7 @@ def panel(client, admin_credentials, source, stub_jobs, monkeypatch):
     do_setup(client, admin_credentials)
     from app.core import tv
 
-    monkeypatch.setattr(tv, "get_info_tv", lambda *a, **k: 1)
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: [1])
     boss = make_user("boss", "jf-boss-id", int(ALL_PERMISSIONS))
     client.cookies.clear()
     source.csrf = session_for(client, boss.id)
@@ -60,7 +60,7 @@ def test_a_season_creates_one_job_per_episode_sharing_a_batch(client, panel, stu
 def test_a_series_walks_every_season(client, panel, stub_jobs, monkeypatch):
     from app.core import tv
 
-    monkeypatch.setattr(tv, "get_info_tv", lambda *a, **k: 2)
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: [1, 2])
 
     response = _post(client, panel, "/api/download/series", SERIES_BODY)
 
@@ -154,7 +154,7 @@ def test_a_batch_above_the_cap_is_refused(client, panel, stub_jobs, monkeypatch)
 
     many = [{"id": 900 + n, "n": str(n), "name": f"Ep {n}"} for n in range(1, 60)]
     monkeypatch.setattr(tv, "get_info_season", lambda *a, **k: list(many))
-    monkeypatch.setattr(tv, "get_info_tv", lambda *a, **k: 20)  # 20 × 59 = 1180
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: list(range(1, 21)))  # 20 × 59 = 1180
 
     response = _post(client, panel, "/api/download/series", SERIES_BODY)
 

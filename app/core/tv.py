@@ -60,15 +60,34 @@ def get_title_props(id_film: int, title_name: str, site_version: str, domain: st
     return req.json()["props"]["title"]
 
 
-def get_info_tv(id_film: int, title_name: str, site_version: str, domain: str) -> int:
-    """How many seasons this series has.
+def season_numbers(props: dict) -> list[int]:
+    """The numbers of the seasons a title page lists, ascending.
 
-    Signature and int return kept exactly as they were: the watch poller, the
-    seasons endpoint and the batch download path all call this, and several
-    tests monkeypatch it. Widening it to return the props would have been the
-    obvious refactor and would have broken all of them.
+    Not ``range(1, seasons_count + 1)``: numbering has holes. Bake Off Italia
+    lists 1-4 and 10-14 with ``seasons_count`` 9 (#40), and the site answers a
+    season it does not have with season 1 - so counting up to nine showed five
+    copies of season 1, and downloading "season 5" filed its episodes as S05.
+    The count is only the fallback for a payload without the list.
     """
-    return get_title_props(id_film, title_name, site_version, domain)["seasons_count"]
+    numbers = set()
+    for season in props.get("seasons") or []:
+        try:
+            numbers.add(int(season.get("number")))
+        except (TypeError, ValueError):
+            continue
+    if numbers:
+        return sorted(n for n in numbers if n > 0)
+    return list(range(1, int(props.get("seasons_count") or 0) + 1))
+
+
+def get_season_numbers(id_film: int, title_name: str, site_version: str, domain: str) -> list[int]:
+    """The seasons of a series, as the numbers the site itself uses.
+
+    The watch poller, the seasons endpoint, the batch download path and the
+    MCP tools all enumerate through this; see ``season_numbers`` for why it is
+    a list and not a count.
+    """
+    return season_numbers(get_title_props(id_film, title_name, site_version, domain))
 
 
 def get_info_season(tv_id: int, tv_name: str, domain: str, version: str, token: str, n_stagione: int) -> list[dict]:
@@ -84,9 +103,16 @@ def get_info_season(tv_id: int, tv_name: str, domain: str, version: str, token: 
         },
         timeout=15,
     )
-    if req.ok:
-        return [_episode(ep) for ep in req.json()["props"]["loadedSeason"]["episodes"]]
-    raise RuntimeError(f"Cannot fetch season info: HTTP {req.status_code}")
+    if not req.ok:
+        raise RuntimeError(f"Cannot fetch season info: HTTP {req.status_code}")
+    loaded = req.json()["props"]["loadedSeason"]
+    # A season the title does not have is answered with 200 and season 1, not
+    # a 404 (#40). Taking it at its word would file season 1 under another
+    # number, so the season the page actually loaded has to be the one asked.
+    number = loaded.get("number")
+    if number is not None and str(number) != str(n_stagione):
+        raise RuntimeError(f"Season {n_stagione} not found (the site answered with season {number})")
+    return [_episode(ep) for ep in loaded["episodes"]]
 
 
 def _episode_image(images: list | None) -> str | None:

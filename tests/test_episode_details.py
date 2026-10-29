@@ -50,6 +50,35 @@ def test_the_still_goes_through_the_image_proxy():
     assert out["still"] == "/api/image/x.jpg"
 
 
+# ── The season asked is the season served ──────────────────────────────────────
+
+class _SeasonPage:
+    ok = True
+    status_code = 200
+
+    def __init__(self, number):
+        self._number = number
+
+    def json(self):
+        return {"props": {"loadedSeason": {"number": self._number,
+                                           "episodes": [{"id": 1, "number": "1"}]}}}
+
+
+def test_a_season_the_site_does_not_have_is_refused(monkeypatch):
+    """#40: the site answers /season-5 of a show without one with season 1.
+    Taking it would file season 1's episodes as S05."""
+    monkeypatch.setattr(tv, "get_localized", lambda *a, **k: _SeasonPage(1))
+
+    with pytest.raises(RuntimeError, match="Season 5 not found"):
+        tv.get_info_season(1, "slug", "example.test", "v1", "token", 5)
+
+
+def test_the_season_asked_for_is_returned(monkeypatch):
+    monkeypatch.setattr(tv, "get_localized", lambda *a, **k: _SeasonPage(10))
+
+    assert [ep["id"] for ep in tv.get_info_season(1, "slug", "example.test", "v1", "token", 10)] == [1]
+
+
 # ── The library check ──────────────────────────────────────────────────────────
 
 @pytest.fixture

@@ -287,13 +287,13 @@ async def download_series(body: SeriesDownloadRequest, http_request: HttpRequest
     user_id = _acting_user_id(http_request)
 
     def work():
-        from app.core.tv import get_info_tv
+        from app.core.tv import get_season_numbers
 
         domain, version, token = _tv_context(body.tv_id)
-        # The season count comes from the source, never from the client.
-        seasons = get_info_tv(body.tv_id, body.slug, version, domain) or 0
+        # The seasons come from the source, never from the client.
+        seasons = get_season_numbers(body.tv_id, body.slug, version, domain)
         submits, skipped = [], 0
-        for season in range(1, seasons + 1):
+        for season in seasons:
             try:
                 more, less = _episode_submits(body, body.tv_id, body.slug, body.tv_name, season,
                                               domain, version, token, user_id, "series",

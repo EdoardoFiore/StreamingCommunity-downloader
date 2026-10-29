@@ -8,6 +8,7 @@ whether that request is approved on the spot or waits for a human.
 
 import asyncio
 import logging
+import re
 from dataclasses import replace
 
 from app.auth.permissions import Permission
@@ -57,15 +58,15 @@ def current_episodes(watch: models.Watch) -> list[tuple[str, dict]]:
         ]
 
     from app.core.page import get_domain_version
-    from app.core.tv import get_info_season, get_info_tv, get_token
+    from app.core.tv import get_info_season, get_season_numbers, get_token
 
     domain = resolver.current_domain()
     version = get_domain_version(domain) or ""
     token = get_token(int(watch.external_id), domain)
-    seasons_count = get_info_tv(int(watch.external_id), watch.slug or "", version, domain)
+    seasons = get_season_numbers(int(watch.external_id), watch.slug or "", version, domain)
 
     found: list[tuple[str, dict]] = []
-    for season in range(1, (seasons_count or 0) + 1):
+    for season in seasons:
         episodes = get_info_season(
             int(watch.external_id), watch.slug or "", domain, version, token, season
         )
@@ -90,14 +91,14 @@ def available_tracks(watch: models.Watch) -> dict:
         langs = animeunity.get_episode_languages(episodes[-1]["id"])
     else:
         from app.core.page import get_domain_version
-        from app.core.tv import get_episode_languages, get_info_season, get_info_tv, get_token
+        from app.core.tv import get_episode_languages, get_info_season, get_season_numbers, get_token
 
         tv_id = int(watch.external_id)
         domain = resolver.current_domain()
         version = get_domain_version(domain) or ""
         token = get_token(tv_id, domain)
-        seasons = get_info_tv(tv_id, watch.slug or "", version, domain) or 0
-        episodes = get_info_season(tv_id, watch.slug or "", domain, version, token, seasons) \
+        seasons = get_season_numbers(tv_id, watch.slug or "", version, domain)
+        episodes = get_info_season(tv_id, watch.slug or "", domain, version, token, seasons[-1]) \
             if seasons else []
         if not episodes:
             raise RuntimeError("nessun episodio letto dalla fonte")
@@ -304,6 +305,42 @@ def refresh_year(watch: models.Watch) -> models.Watch:
     return replace(watch, year=str(year))
 
 
+_KEY_SEASON = re.compile(r"^S(\d+)E")
+
+
+def _rebaseline_phantom_seasons(watch: models.Watch, episodes, seen: set[str],
+                                fresh: list) -> bool:
+    """Repair a ledger seeded from seasons the source never had (#40).
+
+    Seasons used to be counted ``1..seasons_count``, and the site answers a
+    season it lacks with season 1. A series numbered 1-4 and 10-14 was seeded
+    with copies of season 1 as S05-S09 and nothing from S10 on - so once the
+    real numbers are read, S10-S14 all look new and the back catalogue would
+    be queued. The signature is exact: seen keys in a season inside the
+    source's numbering that the source does not list. Those keys go (a real
+    S05 published later must not already be "seen") and what is fresh now
+    becomes the baseline, as a follow would have made it.
+    """
+    if watch.media_type != models.TV or not fresh:
+        return False
+    listed = {int(ep["season"]) for _, ep in episodes}
+    if not listed:
+        return False
+    phantom = [key for key in seen
+               if (m := _KEY_SEASON.match(key))
+               and int(m.group(1)) not in listed and int(m.group(1)) < max(listed)]
+    if not phantom:
+        return False
+    models.forget_seen(watch.id, phantom)
+    models.seed_seen(watch.id, [key for key, _ in fresh])
+    logger.warning(
+        "Watch %s (%s): ledger held %d episode(s) of seasons the source does not list; "
+        "re-seeded %d published episode(s) as seen instead of queueing them",
+        watch.id, watch.title, len(phantom), len(fresh),
+    )
+    return True
+
+
 def poll_watch(watch: models.Watch) -> dict:
     """Check one series. Returns a small summary, mostly for tests and logs.
 
@@ -317,6 +354,8 @@ def poll_watch(watch: models.Watch) -> dict:
     episodes = current_episodes(watch)
     seen = models.seen_keys(watch.id)
     fresh = [(key, ep) for key, ep in episodes if key not in seen]
+    if _rebaseline_phantom_seasons(watch, episodes, seen, fresh):
+        fresh = []
     # Only when something new is about to land: the year decides where it
     # goes, and a quiet cycle has no use for the lookup.
     if fresh:

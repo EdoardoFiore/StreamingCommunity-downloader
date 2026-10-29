@@ -37,9 +37,9 @@ def recorded_get(monkeypatch):
     return calls
 
 
-def test_get_info_tv_has_a_timeout(recorded_get):
-    from app.core.tv import get_info_tv
-    get_info_tv(1, "slug", "v1", "example.test")
+def test_get_season_numbers_has_a_timeout(recorded_get):
+    from app.core.tv import get_season_numbers
+    get_season_numbers(1, "slug", "v1", "example.test")
     assert recorded_get and recorded_get[-1].get("timeout") is not None
 
 

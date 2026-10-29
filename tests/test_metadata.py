@@ -2,10 +2,8 @@
 
 Two regression pins here, both for mistakes that were actually made.
 
-``get_info_tv`` must still return an ``int``. It is called by the watch poller,
-the seasons endpoint and the batch download path, and several other test files
-monkeypatch it; widening it to return the whole props dict is the obvious
-refactor and would have broken all of them silently.
+The seasons are the numbers the page lists, not ``1..seasons_count``: numbering
+has holes (#40), and counting up to the total showed copies of season 1.
 
 And the answer must carry the score and the trailer. It was once documented as
 having neither, on the strength of reading the code rather than calling it — the
@@ -96,11 +94,16 @@ def test_the_title_props_carry_everything_the_page_had(title_page):
     assert result["plot"]
 
 
-def test_get_info_tv_still_returns_an_int(title_page):
-    """The poller, the seasons endpoint and the batch path all depend on this."""
-    result = tv.get_info_tv(1, "test-series", "v1", "example.test")
-    assert result == 3
-    assert isinstance(result, int)
+def test_season_numbers_fall_back_to_the_count(title_page):
+    """A payload with no season list still enumerates something."""
+    assert tv.get_season_numbers(1, "test-series", "v1", "example.test") == [1, 2, 3]
+
+
+def test_season_numbers_follow_the_list_and_its_holes():
+    """Bake Off Italia, as the site serves it: nine seasons, numbered 1-4 and 10-14."""
+    props = {"seasons_count": 9,
+             "seasons": [{"number": n} for n in (1, 2, 3, 4, 10, 11, 12, 13, 14)]}
+    assert tv.season_numbers(props) == [1, 2, 3, 4, 10, 11, 12, 13, 14]
 
 
 def test_reading_the_props_costs_one_request(title_page):
@@ -118,7 +121,7 @@ def test_a_failed_page_still_raises_the_same_error(monkeypatch):
         tv.requests, "get", lambda *a, **k: _FakeResponse(ok=False, status_code=404)
     )
     with pytest.raises(RuntimeError, match="Cannot fetch TV info"):
-        tv.get_info_tv(1, "test-series", "v1", "example.test")
+        tv.get_season_numbers(1, "test-series", "v1", "example.test")
 
 
 # ── What the provider produces ────────────────────────────────────────────────
