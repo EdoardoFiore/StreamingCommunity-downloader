@@ -23,8 +23,8 @@ _HOSTNAME = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.
 def normalize_host(value: str) -> str:
     """A bare lowercase hostname, or ValueError.
 
-    Lenient about what people paste — ``https://www.animeunity.to/`` becomes
-    ``www.animeunity.to`` — and strict about what is left: a path, a port or an
+    Lenient about what people paste — ``https://www.animeunity.co/`` becomes
+    ``www.animeunity.co`` — and strict about what is left: a path, a port or an
     IP address is refused rather than quietly dropped.
     """
     raw = (value or "").strip().lower()
@@ -32,7 +32,7 @@ def normalize_host(value: str) -> str:
         parsed = urlparse(raw)
         if parsed.scheme not in ("http", "https") or parsed.path not in ("", "/") \
                 or parsed.query or parsed.port:
-            raise ValueError("Inserisci solo il nome host, ad esempio www.animeunity.to")
+            raise ValueError("Inserisci solo il nome host, ad esempio www.animeunity.co")
         raw = parsed.hostname or ""
     raw = raw.rstrip("/")
     if not _HOSTNAME.match(raw):
