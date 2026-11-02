@@ -226,6 +226,15 @@ anything under a mounted static directory is readable by unauthenticated visitor
   jobs notify nobody (they are not over); `cancel()` notifies for one, as it does for a
   `scheduled` job, or its batch never closes. Parking on the thread instead would let a paused
   series hold all 64 workers and starve every other download.
+- **Cancelling a batch can take its files with it, and that part is a file deletion.**
+  `cancel_batch()` cancels the waiting jobs before the running one (or a sibling takes the slot it
+  frees), each through `cancel()` so every job still reaches its listeners once. With
+  `delete_files` — which also takes `MANAGE_FILES`, as the file manager's delete does — the
+  episodes already finished leave the library via `remove_download_output()`: video, its `.vtt`
+  siblings, then folders left empty, never outside a configured library and never its root. Their
+  listeners already heard "done" and are not told again; the batch summary is `silence()`d
+  instead, since it would count as downloaded what is gone. A job finishing in the instant after
+  the cancel carries `purge` and removes what it just wrote.
 - **An automatic retry is not a way out of a job.** `_run_download` loops on `_attempt()` up to
   `AUTO_RETRIES` times, `AUTO_RETRY_DELAY` apart, outside the semaphore; the job keeps its id and
   stays `queued` meanwhile, so listeners still fire once, with the final outcome. A manual retry

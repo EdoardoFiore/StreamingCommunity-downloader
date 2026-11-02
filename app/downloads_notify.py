@@ -42,6 +42,7 @@ class _Batch:
     done: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
     cancelled: list[str] = field(default_factory=list)
+    silent: bool = False
 
 
 _batches: dict[str, _Batch] = {}
@@ -70,6 +71,19 @@ def abandon(batch_id: str, count: int):
             summary = _batches.pop(batch_id)
     if summary is not None:
         _announce_batch(summary)
+
+
+def silence(batch_id: str):
+    """Close the batch without a summary when it does.
+
+    For a batch cancelled together with the files it had already written: the
+    summary would count as "scaricati" episodes no longer in the library, and
+    whoever pressed the button knows what happened.
+    """
+    with _lock:
+        batch = _batches.get(batch_id)
+        if batch is not None:
+            batch.silent = True
 
 
 def pending_batches() -> int:
@@ -153,6 +167,8 @@ def _announce_single(job):
 # ── Batch summaries ────────────────────────────────────────────────────────────
 
 def _announce_batch(batch: _Batch):
+    if batch.silent:
+        return
     ok, failed, cancelled = len(batch.done), batch.failed, batch.cancelled
     recipients = [batch.user_id] if batch.user_id else []
     panel = not recipients

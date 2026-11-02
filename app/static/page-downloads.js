@@ -446,7 +446,7 @@ function _buildJobGroup(batchId, label, jobs) {
         <span class="jg-count">${count}</span>
         <span class="jg-summary">${summary}</span>
       </button>
-      ${_groupPauseBtnHtml(batchId, all)}
+      ${_groupPauseBtnHtml(batchId, all)}${_groupCancelBtnHtml(batchId, all)}
     </div>
     <div class="job-group-body">${body}</div>
   </div>`;
@@ -471,6 +471,16 @@ function _groupPauseBtnHtml(batchId, all) {
   return '';
 }
 
+// A paused group is one somebody stopped to think about, so that is when
+// dropping the rest of it is offered: everything not over, the download still
+// running included.
+function _groupCancelBtnHtml(batchId, all) {
+  if (!all.some(j => j.status === 'paused')) return '';
+  return `<button class="btn btn-sm btn-ghost-danger jg-action" data-action="jobs:cancelGroup"
+      data-batch="${escapeHtml(batchId)}" title="Annulla tutti i download rimasti del gruppo">
+      <i class="ti ti-x"></i><span class="d-none d-sm-inline ms-1">Annulla</span></button>`;
+}
+
 async function pauseJobGroup(batchId) {
   try {
     const r = await api.post(`/api/download/batch/${encodeURIComponent(batchId)}/pause`);
@@ -482,6 +492,26 @@ async function resumeJobGroup(batchId) {
   try {
     const r = await api.post(`/api/download/batch/${encodeURIComponent(batchId)}/resume`);
     showToast(`${r.resumed} download rimessi in coda`, 'success');
+  } catch (e) { showToast(errText(e), 'danger'); }
+}
+
+// Cancelling a group drops it whole: what is left, and - for whoever may
+// delete files - the episodes it already put in the library.
+async function cancelJobGroup(batchId) {
+  const all = [..._jobs.values()].filter(j => j.batch_id === batchId);
+  const left = all.filter(_isUnfinished).length;
+  const running = all.some(j => j.status === 'running');
+  const done = all.filter(j => j.status === 'done').length;
+  const purge = can('MANAGE_FILES');
+  let msg = `Annullare ${left === 1 ? 'il download rimasto' : `i ${left} download rimasti`} del gruppo?`
+    + (running ? ' Anche quello in corso viene interrotto.' : '');
+  if (done) msg += purge
+    ? ` ${done === 1 ? "L'episodio già scaricato viene eliminato" : `I ${done} episodi già scaricati vengono eliminati`} dalla libreria.`
+    : ` ${done === 1 ? "L'episodio già scaricato resta" : `I ${done} episodi già scaricati restano`} nella libreria.`;
+  if (!await scConfirm(msg)) return;
+  try {
+    const r = await api.post(`/api/download/batch/${encodeURIComponent(batchId)}/cancel${purge ? '?delete_files=true' : ''}`);
+    showToast(`${r.cancelled} download annullati` + (r.removed ? `, ${r.removed} eliminati dalla libreria` : ''), 'info');
   } catch (e) { showToast(errText(e), 'danger'); }
 }
 
@@ -800,6 +830,7 @@ registerActions({
   'jobs:toggleGroup': d => toggleJobGroup(d.batch),
   'jobs:pauseGroup':  d => pauseJobGroup(d.batch),
   'jobs:resumeGroup': d => resumeJobGroup(d.batch),
+  'jobs:cancelGroup': d => cancelJobGroup(d.batch),
 });
 
 

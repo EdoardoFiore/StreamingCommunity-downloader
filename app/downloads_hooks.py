@@ -239,7 +239,7 @@ def on_job_finished(job) -> None:
         return
 
     if status == "done":
-        _maybe_refresh_jellyfin()
+        maybe_refresh_jellyfin()
 
     tokens = job_tokens(job)
     for hook in list_enabled_for_event(status):
@@ -252,7 +252,7 @@ def on_job_finished(job) -> None:
             _notify_failure(hook.get("name") or "senza nome", code)
 
 
-def _maybe_refresh_jellyfin() -> None:
+def maybe_refresh_jellyfin() -> None:
     from app.config import get_settings
 
     if not get_settings().get("jellyfin_refresh_on_download"):

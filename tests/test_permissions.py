@@ -72,6 +72,8 @@ CASES = [
     ((Permission.VIEW_LIBRARY,), "GET", "/api/files", None),
     ((Permission.MANAGE_REQUESTS, Permission.DOWNLOAD), "POST",
      "/api/download/does-not-exist/fire", None),
+    ((Permission.MANAGE_REQUESTS, Permission.DOWNLOAD), "POST",
+     "/api/download/batch/does-not-exist/cancel", None),
     ((Permission.MANAGE_USERS,), "GET", "/api/users", None),
     ((Permission.REQUEST,), "POST", "/api/requests/season",
      {"external_id": "1", "title": "x", "slug": "x", "season": 1}),
@@ -121,6 +123,21 @@ def test_each_granting_permission_opens_the_endpoint_on_its_own(
         # The call may still fail on its own merits (no such job, unreachable
         # source); what matters is that authorisation is not what stopped it.
         assert response.status_code != 403, f"{method} {path} denied despite {permission.name}"
+
+
+def test_cancelling_a_batch_with_its_files_also_takes_manage_files(client, admin_credentials):
+    """Stopping downloads is job control; deleting what they put in the library
+    is deleting files, which the file manager keeps to MANAGE_FILES."""
+    do_setup(client, admin_credentials)
+    path = "/api/download/batch/does-not-exist/cancel?delete_files=true"
+
+    client.cookies.clear()
+    _, csrf = _as(client, Permission.DOWNLOAD | Permission.MANAGE_REQUESTS, "jobs-only")
+    assert client.post(path, headers={"X-CSRF-Token": csrf}).status_code == 403
+
+    client.cookies.clear()
+    _, csrf = _as(client, Permission.DOWNLOAD | Permission.MANAGE_FILES, "jobs-and-files")
+    assert client.post(path, headers={"X-CSRF-Token": csrf}).status_code == 404
 
 
 def test_a_user_with_no_permissions_can_do_nothing(client, admin_credentials):

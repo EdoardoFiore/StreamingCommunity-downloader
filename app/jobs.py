@@ -22,6 +22,61 @@ def _get_library_path(type_: str) -> str:
             return lib["path"]
     return str(VIDEOS_DIR)
 
+def _library_roots() -> list[str]:
+    from app.routers.domain import _read_data
+    roots = [lib["path"] for lib in _read_data().get("libraries", []) if lib.get("path")]
+    return [os.path.realpath(p) for p in (*roots, str(VIDEOS_DIR))]
+
+
+def _inside(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # another drive, on Windows
+        return False
+
+
+def remove_download_output(path: str) -> list[str]:
+    """Delete a finished download from the library: the video, the subtitles
+    beside it ({stem}.{lang}.vtt), then every folder it leaves empty.
+
+    Only inside a configured library, and never the library root itself - the
+    path comes from a job, but what it points at is a person's library. A
+    folder that still holds anything (the series' other episodes) stays.
+    Returns what was removed.
+    """
+    roots = _library_roots()
+    video = os.path.realpath(path)
+    if not any(_inside(video, r) and video != r for r in roots):
+        logger.warning("Not removing %s: outside every library", path)
+        return []
+
+    folder, name = os.path.split(video)
+    stem = os.path.splitext(name)[0]
+    try:
+        siblings = [os.path.join(folder, f) for f in os.listdir(folder)
+                    if f.startswith(stem + ".") and f.endswith(".vtt")]
+    except OSError:
+        siblings = []
+    removed = []
+    for target in (video, *siblings):
+        try:
+            os.remove(target)
+            removed.append(target)
+        except OSError:
+            pass
+
+    while folder not in roots and any(_inside(folder, r) for r in roots):
+        try:
+            os.rmdir(folder)  # fails on a folder not empty, which is the point
+        except OSError:
+            break
+        removed.append(folder)
+        folder = os.path.dirname(folder)
+    for target in removed:
+        logger.info("Removed with its cancelled batch: %s", target)
+    return removed
+
+
 def _schedule_external_id(params: dict) -> Optional[str]:
     """The source id a scheduled entry's params carry, whatever its type."""
     value = params.get("id") or params.get("tv_id") or params.get("anime_id")
@@ -100,6 +155,9 @@ class DownloadJob:
     # paused - one mid-download would come back to an expired stream token.
     paused: bool = False
     parked: Optional[tuple] = field(default=None, repr=False)
+    # Cancelled with its batch and its files with it: a download that finishes
+    # in the instant after the cancel removes what it just wrote.
+    purge: bool = False
 
 
 # Rebuilt for every attempt: each belongs to one job id.
@@ -517,6 +575,40 @@ class JobManager:
             self._executor.submit(self._run_download, job, fn, *args, **kwargs)
         return len(jobs)
 
+    def cancel_batch(self, batch_id: str, delete_files: bool = False) -> tuple[int, int]:
+        """Cancel every job of a batch not over yet, the running one included.
+
+        Through cancel(), one job at a time, so each still reaches its listeners
+        exactly once and the batch closes. The waiting ones go first: cancelling
+        the running one frees its slot, and a sibling still in line would take
+        it and start downloading before its own turn to be cancelled came.
+
+        With ``delete_files`` the episodes the batch already finished leave the
+        library too, and turn "cancelled" on the page; their listeners heard
+        "done" already and are not told again. The running one's partial file
+        is removed by the download itself as it stops. Returns how many jobs
+        were cancelled and how many finished ones were removed.
+        """
+        with self._lock:
+            batch = [j for j in self._jobs.values() if j.batch_id == batch_id]
+            jobs = [j for j in batch if j.status in ("scheduled", "queued", "paused", "running")]
+            finished = [j for j in batch if j.status == "done"] if delete_files else []
+            for job in jobs:
+                job.purge = delete_files
+        jobs.sort(key=lambda j: j.status == "running")
+        cancelled = sum(self.cancel(j.job_id) for j in jobs)
+
+        removed = 0
+        for job in finished:
+            if job.output_path:
+                remove_download_output(job.output_path)
+            with self._lock:
+                job.status = "cancelled"
+                job.output_path = None
+                self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "cancelled"})
+            removed += 1
+        return cancelled, removed
+
     def _park(self, job: DownloadJob, fn, args, kwargs) -> bool:
         """Leave the executor for a paused job. False when it was resumed or
         cancelled in the meantime, which the caller handles."""
@@ -624,8 +716,18 @@ class JobManager:
 
             try:
                 result = fn(*args, **kwargs)
-                job.status = "done"
-                job.output_path = result
+                # Under the lock cancel_batch() reads the batch with: either it
+                # sees this job done and removes its files, or this sees purge.
+                with self._lock:
+                    if not job.purge:
+                        job.status = "done"
+                        job.output_path = result
+                if job.purge:
+                    # Its batch was cancelled with its files while the last
+                    # bytes landed: what it wrote goes the way of the rest.
+                    if result:
+                        remove_download_output(result)
+                    raise DownloadCancelledError("Download annullato dall'utente")
                 self._emit(job, {"type": "done", "output_path": result})
             except DownloadCancelledError:
                 job.status = "cancelled"

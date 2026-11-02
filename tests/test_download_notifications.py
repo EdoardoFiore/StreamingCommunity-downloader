@@ -217,6 +217,19 @@ def test_a_cancelled_episode_still_closes_its_batch(manager, delivered):
     assert downloads_notify.pending_batches() == 0
 
 
+def test_a_batch_cancelled_with_its_files_closes_without_a_summary(manager, delivered):
+    """Its "scaricati" would name episodes no longer in the library."""
+    downloads_notify.register("b1", kind="season", label="Serie — Stagione 2",
+                              expected=2, user_id=7)
+    downloads_notify.on_job_finished(_season_job(manager, 1))
+
+    downloads_notify.silence("b1")
+    downloads_notify.on_job_finished(_season_job(manager, 2, status="cancelled"))
+
+    assert delivered == []
+    assert downloads_notify.pending_batches() == 0
+
+
 def test_the_summary_waits_for_every_episode(manager, delivered):
     downloads_notify.register("b1", kind="season", label="Serie — Stagione 2",
                               expected=3, user_id=7)

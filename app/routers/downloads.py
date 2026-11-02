@@ -460,6 +460,24 @@ def resume_batch(batch_id: str):
     return {"batch_id": batch_id, "resumed": count}
 
 
+# Stopping a whole batch is stopping each of its jobs, so it takes what
+# stopping one takes. Deleting what it already put in the library is deleting
+# files, so that part also takes what the file manager's delete takes.
+@router.post("/batch/{batch_id}/cancel", status_code=200, dependencies=CAN_CONTROL_JOBS)
+def cancel_batch(batch_id: str, request: HttpRequest, delete_files: bool = False):
+    if delete_files and not current_user(request).has(Permission.MANAGE_FILES):
+        raise HTTPException(status_code=403, detail="Permesso negato")
+    if delete_files:
+        downloads_notify.silence(batch_id)
+    cancelled, removed = job_manager.cancel_batch(batch_id, delete_files=delete_files)
+    if not cancelled and not removed:
+        raise HTTPException(status_code=404, detail="Nessun download da annullare in questo gruppo")
+    if removed:
+        from app.downloads_hooks import maybe_refresh_jellyfin
+        maybe_refresh_jellyfin()
+    return {"batch_id": batch_id, "cancelled": cancelled, "removed": removed}
+
+
 # Starts a download, so it takes what starting one takes — not the job-control
 # permission approvers hold for stopping what they approved.
 @router.post("/{job_id}/retry", status_code=202, dependencies=CAN_DOWNLOAD)
