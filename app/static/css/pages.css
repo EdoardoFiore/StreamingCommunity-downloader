@@ -361,7 +361,15 @@
       border-bottom: 1px solid var(--border);
     }
     .job-group-head:hover { background: var(--bg-hover); }
-    .job-group.is-collapsed .job-group-head { border-bottom-color: transparent; }
+    /* The pause button sits beside the heading, not inside it: a button
+       cannot hold another. The row carries the divider the heading had. */
+    .job-group-headrow {
+      display: flex; align-items: center;
+      border-bottom: 1px solid var(--border);
+    }
+    .job-group-headrow .job-group-head { border-bottom: 0; flex: 1 1 auto; min-width: 0; }
+    .jg-action { flex-shrink: 0; margin-right: 8px; }
+    .job-group.is-collapsed .job-group-headrow { border-bottom-color: transparent; }
     .jg-chev { font-size: 14px; color: var(--text-muted); transition: transform .15s ease; }
     .job-group.is-collapsed .jg-chev { transform: rotate(-90deg); }
     .jg-title {
@@ -378,6 +386,7 @@
     .jg-live { color: var(--blue); }
     .jg-wait { color: var(--text-sub); }
     .jg-sched { color: var(--yellow); }
+    .jg-paused { color: var(--orange); }
     .jg-ok   { color: var(--green); }
     .jg-err  { color: var(--danger); }
     /* The cards inside lose their own frame: the group is the frame now. */

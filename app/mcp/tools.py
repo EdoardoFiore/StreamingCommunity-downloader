@@ -182,16 +182,17 @@ async def get_series_episodes(tv_id: int, slug: str, season_number: int | None =
     def fetch():
         version = page.get_domain_version(domain) or ""
         token = tv.get_token(tv_id, domain)
-        count = tv.get_info_tv(tv_id, slug, version, domain) or 0
-        wanted = [season_number] if season_number is not None else range(1, count + 1)
-        return count, [
+        numbers = tv.get_season_numbers(tv_id, slug, version, domain)
+        wanted = [season_number] if season_number is not None else numbers
+        return numbers, [
             {"season_number": n,
              "episodes": tv.get_info_season(tv_id, slug, domain, version, token, n) or []}
-            for n in wanted if 1 <= n <= count
+            for n in wanted if n in numbers
         ]
 
-    count, seasons = await asyncio.to_thread(fetch)
-    return {"tv_id": tv_id, "seasons_count": count, "seasons": seasons}
+    numbers, seasons = await asyncio.to_thread(fetch)
+    return {"tv_id": tv_id, "seasons_count": len(numbers), "season_numbers": numbers,
+            "seasons": seasons}
 
 
 @mcp_server.tool(annotations=READ_ONLY)

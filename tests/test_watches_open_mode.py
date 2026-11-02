@@ -18,7 +18,7 @@ def open_panel(client, source, stub_jobs, monkeypatch):
     enable_open_mode()
     from app.core import tv
 
-    monkeypatch.setattr(tv, "get_info_tv", lambda *a, **k: 1)
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: [1])
     return source
 
 

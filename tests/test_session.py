@@ -60,6 +60,7 @@ def test_expired_sessions_are_rejected_and_cleaned(client, admin_credentials):
 
 def test_unknown_session_token_is_rejected(client, admin_credentials):
     do_setup(client, admin_credentials)
+    client.cookies.delete(sessions.SESSION_COOKIE)  # the admin's, from the login above
     client.cookies.set(sessions.SESSION_COOKIE, "not-a-real-token")
     assert client.get("/api/auth/me").status_code == 401
 

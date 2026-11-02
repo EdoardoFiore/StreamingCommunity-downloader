@@ -227,16 +227,24 @@ document.addEventListener('click', (e) => {
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
 
-function showToast(message, type = 'info') {
+// `link` ({label, page}) offers a way somewhere instead of taking the user
+// there: queueing a season used to jump to the downloads page, and the title
+// you were picking seasons from was gone (#20).
+function showToast(message, type = 'info', link = null) {
   const colors = { success:'bg-success', danger:'bg-danger', info:'bg-info', warning:'bg-warning' };
   const toast = document.createElement('div');
   toast.style.cssText = 'position:fixed;bottom:1rem;right:1rem;left:auto;z-index:9999;min-width:220px;max-width:calc(100vw - 2rem)';
+  const go = link
+    ? ` <a href="#" class="alert-link text-white ms-1" data-action="toast:go"
+          data-page="${escapeHtml(link.page)}">${escapeHtml(link.label)}</a>`
+    : '';
   toast.innerHTML = `<div class="alert ${colors[type]||'bg-info'} alert-dismissible text-white mb-0 shadow" role="alert">
-    ${escapeHtml(message)}
+    ${escapeHtml(message)}${go}
     <button type="button" class="btn-close btn-close-white" data-action="toast:dismiss"></button>
   </div>`;
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  // Longer with a link: it has to be read and then reached.
+  setTimeout(() => toast.remove(), link ? 7000 : 4000);
 }
 
 // ── Artwork ───────────────────────────────────────────────────────────────────
@@ -386,4 +394,5 @@ registerActions({
   // The button sits inside the .alert; the positioned wrapper is its parent,
   // and that is what has to go, or an invisible box keeps covering the corner.
   'toast:dismiss':  (d, el) => el.closest('.alert')?.parentElement?.remove(),
+  'toast:go':       (d, el) => { el.closest('.alert')?.parentElement?.remove(); showPage(d.page); },
 });

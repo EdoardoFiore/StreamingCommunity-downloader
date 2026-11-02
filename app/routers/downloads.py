@@ -287,13 +287,13 @@ async def download_series(body: SeriesDownloadRequest, http_request: HttpRequest
     user_id = _acting_user_id(http_request)
 
     def work():
-        from app.core.tv import get_info_tv
+        from app.core.tv import get_season_numbers
 
         domain, version, token = _tv_context(body.tv_id)
-        # The season count comes from the source, never from the client.
-        seasons = get_info_tv(body.tv_id, body.slug, version, domain) or 0
+        # The seasons come from the source, never from the client.
+        seasons = get_season_numbers(body.tv_id, body.slug, version, domain)
         submits, skipped = [], 0
-        for season in range(1, seasons + 1):
+        for season in seasons:
             try:
                 more, less = _episode_submits(body, body.tv_id, body.slug, body.tv_name, season,
                                               domain, version, token, user_id, "series",
@@ -440,6 +440,42 @@ def fire_now(job_id: str):
     if job_manager.fire_now(job_id):
         return {"job_id": job_id, "status": "queued"}
     raise HTTPException(status_code=404, detail="Job non trovato o non in stato programmato")
+
+
+# Pausing holds back what has not started; resuming only lets go what was
+# already approved and queued, so both are job control, like stopping (#43).
+@router.post("/batch/{batch_id}/pause", status_code=200, dependencies=CAN_CONTROL_JOBS)
+def pause_batch(batch_id: str):
+    count = job_manager.pause_batch(batch_id)
+    if not count:
+        raise HTTPException(status_code=404, detail="Nessun download in attesa in questo gruppo")
+    return {"batch_id": batch_id, "paused": count}
+
+
+@router.post("/batch/{batch_id}/resume", status_code=200, dependencies=CAN_CONTROL_JOBS)
+def resume_batch(batch_id: str):
+    count = job_manager.resume_batch(batch_id)
+    if not count:
+        raise HTTPException(status_code=404, detail="Nessun download in pausa in questo gruppo")
+    return {"batch_id": batch_id, "resumed": count}
+
+
+# Stopping a whole batch is stopping each of its jobs, so it takes what
+# stopping one takes. Deleting what it already put in the library is deleting
+# files, so that part also takes what the file manager's delete takes.
+@router.post("/batch/{batch_id}/cancel", status_code=200, dependencies=CAN_CONTROL_JOBS)
+def cancel_batch(batch_id: str, request: HttpRequest, delete_files: bool = False):
+    if delete_files and not current_user(request).has(Permission.MANAGE_FILES):
+        raise HTTPException(status_code=403, detail="Permesso negato")
+    if delete_files:
+        downloads_notify.silence(batch_id)
+    cancelled, removed = job_manager.cancel_batch(batch_id, delete_files=delete_files)
+    if not cancelled and not removed:
+        raise HTTPException(status_code=404, detail="Nessun download da annullare in questo gruppo")
+    if removed:
+        from app.downloads_hooks import maybe_refresh_jellyfin
+        maybe_refresh_jellyfin()
+    return {"batch_id": batch_id, "cancelled": cancelled, "removed": removed}
 
 
 # Starts a download, so it takes what starting one takes — not the job-control

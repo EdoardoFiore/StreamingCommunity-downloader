@@ -369,6 +369,16 @@ def seed_seen(watch_id: int, episode_keys: list[str]) -> None:
         )
 
 
+def forget_seen(watch_id: int, episode_keys: list[str]) -> None:
+    if not episode_keys:
+        return
+    with db.tx() as conn:
+        conn.executemany(
+            "DELETE FROM jf_watch_seen_episode WHERE watch_id = ? AND episode_key = ?",
+            [(watch_id, key) for key in episode_keys],
+        )
+
+
 def mark_seen(watch_id: int, episode_key: str) -> None:
     db.execute(
         "INSERT OR IGNORE INTO jf_watch_seen_episode(watch_id, episode_key, created_at) "

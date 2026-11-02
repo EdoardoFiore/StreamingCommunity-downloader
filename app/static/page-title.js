@@ -48,6 +48,9 @@ async function loadTitlePage(route) {
     score: seed?.score ? parseFloat(seed.score).toFixed(1) : null,
     age: seed?.age || null,
     seasonsCount: seed?.seasons_count || 0,
+    // The site's own season numbers, from the metadata. A count is not enough:
+    // Bake Off Italia has 1-4 and 10-14, nine seasons (#40).
+    seasonNumbers: [],
     episodesCount: seed?.episodes_count || 0,
     animeType: seed?.media_type || null,
     plot: seed?.plot || null,
@@ -129,7 +132,10 @@ async function loadTitlePage(route) {
     // download built from _epCtx are named after it.
     await metaReady;
     if (token !== _tpToken) return;
-    await tpLoadSeason(1, token);
+    // The address may name a season (#s=3); one the title does not have, or
+    // none, opens the first it does - which is not always 1.
+    const seasons = _tpSeasons();
+    await tpLoadSeason(seasons.includes(route.season) ? route.season : (seasons[0] || 1), token);
   }
   else if (route.type === 'anime') await _tpLoadAnime(token);
 }
@@ -147,6 +153,16 @@ function _tpApplyMeta(meta) {
   // none rather than the card's, which is the wrong one (issue #21).
   if (meta.year || _tp.type === 'tv') _tp.year = meta.year || null;
   if (!_tp.seasonsCount && meta.seasons_count) _tp.seasonsCount = meta.seasons_count;
+  if (meta.season_numbers?.length) {
+    _tp.seasonNumbers = meta.season_numbers;
+    _tp.seasonsCount = meta.season_numbers.length;
+  }
+}
+
+function _tpSeasons() {
+  return _tp.seasonNumbers.length
+    ? _tp.seasonNumbers
+    : Array.from({ length: _tp.seasonsCount }, (_, i) => i + 1);
 }
 
 // ── Episodes ──────────────────────────────────────────────────────────────────
@@ -489,7 +505,7 @@ function _tpRenderEpisodes() {
   if (!el || _tp.type === 'movie') { if (el) el.innerHTML = ''; return; }
 
   const pills = _tp.type === 'tv' && _tp.seasonsCount > 1
-    ? `<div class="th-season-pills">${Array.from({ length: _tp.seasonsCount }, (_, i) => i + 1)
+    ? `<div class="th-season-pills">${_tpSeasons()
         .map(n => `<button class="th-season-pill${n === _tp.season ? ' active' : ''}"
           data-action="tp:season" data-n="${n}">S${String(n).padStart(2, '0')}</button>`).join('')}</div>` : '';
 
@@ -712,8 +728,7 @@ async function startFilmDownload(id, title, year=null, scheduledAt=null, audioLa
     await api.post(endpoint, body);
     showToast(scheduledAt
       ? `Programmato: ${title} — ${new Date(scheduledAt).toLocaleString('it-IT')}`
-      : `Download avviato: ${title}`, 'success');
-    showPage('downloads');
+      : `Download avviato: ${title}`, 'success', DOWNLOADS_LINK);
   } catch(e) { showToast(errText(e), 'danger'); }
 }
 
@@ -754,6 +769,8 @@ async function startEpisodeDownload(epIndex) {
   } catch(e) { showToast(errText(e), 'danger'); }
 }
 
+const DOWNLOADS_LINK = { label: 'Vai ai download', page: 'downloads' };
+
 // Whole seasons and whole series are one call: the server lists the episodes
 // itself and queues them as a batch. That is also what lets it report the season
 // once at the end instead of pinging for every episode.
@@ -772,9 +789,11 @@ async function _startBatch(path, body, modalId) {
     (body.scheduled_at ? `${data.count} episodi programmati` : `${data.count} episodi in coda`)
       + skipped,
     'success',
+    DOWNLOADS_LINK,
   );
   if (modalId) hideModal(modalId);
-  showPage('downloads');
+  // No jump to the downloads page: queueing seasons 4, 5 and 6 meant finding
+  // the series again after each one (#20).
   return true;
 }
 
@@ -899,6 +918,6 @@ registerActions({
 registerPageHash('detail', {
   read: () => (_tp ? {
     extra: [_tp.type, _tp.id, _tp.slug || ''],
-    params: { s: _tp.season > 1 ? _tp.season : null },
+    params: { s: _tp.season !== _tpSeasons()[0] ? _tp.season : null },
   } : {}),
 });

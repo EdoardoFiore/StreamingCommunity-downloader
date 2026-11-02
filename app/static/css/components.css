@@ -16,6 +16,7 @@
     .bg-yellow-lt  { background: var(--yellow-dim) !important; color: var(--yellow) !important; }
     .bg-teal-lt    { background: var(--teal-dim) !important;   color: var(--teal) !important;   }
     .bg-purple-lt  { background: var(--purple-dim) !important; color: var(--purple) !important; }
+    .bg-orange-lt  { background: var(--orange-dim) !important; color: var(--orange) !important; }
     .bg-success-lt { background: var(--green-dim) !important;  color: var(--green) !important;  }
     .bg-danger-lt  { background: var(--danger-dim) !important; color: var(--danger) !important; }
     .bg-secondary-lt { background: rgba(255,255,255,.06) !important; color: var(--text-muted) !important; }

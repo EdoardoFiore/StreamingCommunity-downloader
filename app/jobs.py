@@ -22,6 +22,61 @@ def _get_library_path(type_: str) -> str:
             return lib["path"]
     return str(VIDEOS_DIR)
 
+def _library_roots() -> list[str]:
+    from app.routers.domain import _read_data
+    roots = [lib["path"] for lib in _read_data().get("libraries", []) if lib.get("path")]
+    return [os.path.realpath(p) for p in (*roots, str(VIDEOS_DIR))]
+
+
+def _inside(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # another drive, on Windows
+        return False
+
+
+def remove_download_output(path: str) -> list[str]:
+    """Delete a finished download from the library: the video, the subtitles
+    beside it ({stem}.{lang}.vtt), then every folder it leaves empty.
+
+    Only inside a configured library, and never the library root itself - the
+    path comes from a job, but what it points at is a person's library. A
+    folder that still holds anything (the series' other episodes) stays.
+    Returns what was removed.
+    """
+    roots = _library_roots()
+    video = os.path.realpath(path)
+    if not any(_inside(video, r) and video != r for r in roots):
+        logger.warning("Not removing %s: outside every library", path)
+        return []
+
+    folder, name = os.path.split(video)
+    stem = os.path.splitext(name)[0]
+    try:
+        siblings = [os.path.join(folder, f) for f in os.listdir(folder)
+                    if f.startswith(stem + ".") and f.endswith(".vtt")]
+    except OSError:
+        siblings = []
+    removed = []
+    for target in (video, *siblings):
+        try:
+            os.remove(target)
+            removed.append(target)
+        except OSError:
+            pass
+
+    while folder not in roots and any(_inside(folder, r) for r in roots):
+        try:
+            os.rmdir(folder)  # fails on a folder not empty, which is the point
+        except OSError:
+            break
+        removed.append(folder)
+        folder = os.path.dirname(folder)
+    for target in removed:
+        logger.info("Removed with its cancelled batch: %s", target)
+    return removed
+
+
 def _schedule_external_id(params: dict) -> Optional[str]:
     """The source id a scheduled entry's params carry, whatever its type."""
     value = params.get("id") or params.get("tv_id") or params.get("anime_id")
@@ -45,7 +100,7 @@ class DownloadJob:
     job_id: str
     title: str
     type: str  # "film" | "episode" | "anime"
-    status: str  # "scheduled" | "queued" | "running" | "done" | "error" | "cancelled"
+    status: str  # "scheduled" | "queued" | "paused" | "running" | "done" | "error" | "cancelled"
     created_at: datetime
     scheduled_at: Optional[datetime] = None
     schedule_id: Optional[str] = None
@@ -94,6 +149,15 @@ class DownloadJob:
     # Its ticket while it waits for a download slot (None otherwise): the
     # waiting jobs start in ticket order, so the frontend can number the line.
     queue_seq: Optional[int] = None
+    # Held back with the rest of its batch (#43). A paused job gives up its
+    # place in the line *and its executor thread*: ``parked`` keeps the exact
+    # call, so resuming resubmits it. Only a job that has not started is ever
+    # paused - one mid-download would come back to an expired stream token.
+    paused: bool = False
+    parked: Optional[tuple] = field(default=None, repr=False)
+    # Cancelled with its batch and its files with it: a download that finishes
+    # in the instant after the cancel removes what it just wrote.
+    purge: bool = False
 
 
 # Rebuilt for every attempt: each belongs to one job id.
@@ -140,8 +204,11 @@ class DownloadSlots:
         self._tickets = 0
 
     def acquire(self, job: "DownloadJob", on_queued=None) -> bool:
-        """Wait for a slot. False when the job was cancelled while waiting."""
+        """Wait for a slot. False when the job was cancelled or paused while
+        waiting; the caller tells the two apart."""
         with self._cond:
+            if job.paused:
+                return False
             self._tickets += 1
             job.queue_seq = self._tickets
             self._line.append(job)
@@ -150,10 +217,10 @@ class DownloadSlots:
         with self._cond:
             try:
                 while not (self._line[0] is job and self._busy < self._limit):
-                    if job.cancel_event.is_set():
+                    if job.cancel_event.is_set() or job.paused:
                         return False
                     self._cond.wait()
-                if job.cancel_event.is_set():
+                if job.cancel_event.is_set() or job.paused:
                     return False
                 self._busy += 1
                 return True
@@ -174,7 +241,7 @@ class DownloadSlots:
             self._cond.notify_all()
 
     def wake(self) -> None:
-        """Let waiters re-check: a cancelled one leaves the line."""
+        """Let waiters re-check: a cancelled or paused one leaves the line."""
         with self._cond:
             self._cond.notify_all()
 
@@ -448,20 +515,109 @@ class JobManager:
     def cancel(self, job_id: str) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
-            if not job or job.status not in ("scheduled", "queued", "running"):
+            if not job or job.status not in ("scheduled", "queued", "paused", "running"):
                 return False
-            # A scheduled job was never handed to the executor, so _run_download
-            # will never run for it and nothing else would ever tell listeners it
-            # is over. Queued and running ones go through _run_download, which
-            # notifies on every path.
-            was_scheduled = job.status == "scheduled"
+            # A scheduled job was never handed to the executor, and a parked one
+            # has left it, so _run_download will not run for either and nothing
+            # else would ever tell listeners it is over. Queued and running ones
+            # go through _run_download, which notifies on every path.
+            orphaned = job.status == "scheduled" or job.parked is not None
+            job.parked = None
+            job.paused = False
             job.cancel_event.set()
             job.status = "cancelled"
         self._slots.wake()
         self._emit(job, {"type": "error", "message": "Annullato"})
-        if was_scheduled:
+        if orphaned:
             self._notify_listeners(job)
         return True
+
+    def pause_batch(self, batch_id: str) -> int:
+        """Hold back every job of a batch still waiting to start (#43).
+
+        What is already downloading finishes: its stream token was issued when
+        it started and would not outlive a long pause, while a job that has not
+        started asks for its own when it does. Returns how many were paused.
+        """
+        with self._lock:
+            jobs = [j for j in self._jobs.values()
+                    if j.batch_id == batch_id and j.status == "queued" and not j.paused]
+            for job in jobs:
+                job.paused = True
+                job.status = "paused"
+                job.queue_seq = None
+                # One between automatic retries parks when its wait ends.
+                job.retry_at = None
+                # Under the lock, so it cannot overtake the "running" of a job
+                # that won its slot a moment before (_attempt).
+                self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "paused"})
+        # Waiters re-check and leave the line; each parks on its own thread.
+        self._slots.wake()
+        return len(jobs)
+
+    def resume_batch(self, batch_id: str) -> int:
+        """Put a paused batch back in the line, behind whatever joined it since."""
+        with self._lock:
+            jobs = [j for j in self._jobs.values()
+                    if j.batch_id == batch_id and j.status == "paused"]
+            parked = []
+            for job in jobs:
+                job.paused = False
+                job.status = "queued"
+                if job.parked is not None:
+                    parked.append((job, job.parked))
+                    job.parked = None
+        for job in jobs:
+            self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "queued"})
+        # A job not parked yet is still on its thread and goes back in line by
+        # itself (_attempt); a parked one needs a thread again.
+        for job, (fn, args, kwargs) in parked:
+            self._executor.submit(self._run_download, job, fn, *args, **kwargs)
+        return len(jobs)
+
+    def cancel_batch(self, batch_id: str, delete_files: bool = False) -> tuple[int, int]:
+        """Cancel every job of a batch not over yet, the running one included.
+
+        Through cancel(), one job at a time, so each still reaches its listeners
+        exactly once and the batch closes. The waiting ones go first: cancelling
+        the running one frees its slot, and a sibling still in line would take
+        it and start downloading before its own turn to be cancelled came.
+
+        With ``delete_files`` the episodes the batch already finished leave the
+        library too, and turn "cancelled" on the page; their listeners heard
+        "done" already and are not told again. The running one's partial file
+        is removed by the download itself as it stops. Returns how many jobs
+        were cancelled and how many finished ones were removed.
+        """
+        with self._lock:
+            batch = [j for j in self._jobs.values() if j.batch_id == batch_id]
+            jobs = [j for j in batch if j.status in ("scheduled", "queued", "paused", "running")]
+            finished = [j for j in batch if j.status == "done"] if delete_files else []
+            for job in jobs:
+                job.purge = delete_files
+        jobs.sort(key=lambda j: j.status == "running")
+        cancelled = sum(self.cancel(j.job_id) for j in jobs)
+
+        removed = 0
+        for job in finished:
+            if job.output_path:
+                remove_download_output(job.output_path)
+            with self._lock:
+                job.status = "cancelled"
+                job.output_path = None
+                self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "cancelled"})
+            removed += 1
+        return cancelled, removed
+
+    def _park(self, job: DownloadJob, fn, args, kwargs) -> bool:
+        """Leave the executor for a paused job. False when it was resumed or
+        cancelled in the meantime, which the caller handles."""
+        with self._lock:
+            if not job.paused or job.cancel_event.is_set():
+                return False
+            job.parked = (fn, args, kwargs)
+            job.status = "paused"
+            return True
 
     def dismiss(self, job_id: str) -> bool:
         """Remove a finished/cancelled job and clean it from the schedule store."""
@@ -535,22 +691,43 @@ class JobManager:
                     # failed attempt's must not count toward the new one.
                     kwargs = {**kwargs, "progress_factory": self._make_progress_factory(job)}
         finally:
-            self._notify_listeners(job)
+            # A parked job is not over: it is resubmitted on resume, and
+            # notifies then - or cancel() does, if it never comes back.
+            if job.parked is None:
+                self._notify_listeners(job)
 
     def _attempt(self, job: DownloadJob, fn, args, kwargs) -> bool:
         """Run the download once. True when it failed and should run again."""
-        if not self._slots.acquire(job, on_queued=self._announce_queued):
-            job.status = "cancelled"
-            self._emit(job, {"type": "error", "message": "Annullato"})
-            return False
+        while not self._slots.acquire(job, on_queued=self._announce_queued):
+            if job.cancel_event.is_set():
+                job.status = "cancelled"
+                self._emit(job, {"type": "error", "message": "Annullato"})
+                return False
+            if self._park(job, fn, args, kwargs):
+                return False
+            # Resumed before it could park: straight back in line.
         try:
-            job.status = "running"
-            self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
+            with self._lock:
+                # It won its slot, so a pause arriving now is too late for it:
+                # it runs, and must not be resumed later as if still waiting.
+                job.paused = False
+                job.status = "running"
+                self._broadcast({"type": "job_status", "job_id": job.job_id, "status": "running"})
 
             try:
                 result = fn(*args, **kwargs)
-                job.status = "done"
-                job.output_path = result
+                # Under the lock cancel_batch() reads the batch with: either it
+                # sees this job done and removes its files, or this sees purge.
+                with self._lock:
+                    if not job.purge:
+                        job.status = "done"
+                        job.output_path = result
+                if job.purge:
+                    # Its batch was cancelled with its files while the last
+                    # bytes landed: what it wrote goes the way of the rest.
+                    if result:
+                        remove_download_output(result)
+                    raise DownloadCancelledError("Download annullato dall'utente")
                 self._emit(job, {"type": "done", "output_path": result})
             except DownloadCancelledError:
                 job.status = "cancelled"

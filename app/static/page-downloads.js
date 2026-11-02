@@ -41,7 +41,7 @@ function connectGlobalStream() {
         if (_jobs.has(msg.job_id)) {
           const job = _jobs.get(msg.job_id);
           job.status = msg.status;
-          if (msg.status === 'running') { job.retry_at = null; job.queue_seq = null; }
+          if (msg.status === 'running' || msg.status === 'paused') { job.retry_at = null; job.queue_seq = null; }
           // A job starting moves every waiting one up a place, and moves itself
           // from "In attesa" to "In corso": the whole list, not one card.
           renderAllJobCards();
@@ -108,12 +108,12 @@ function connectGlobalStream() {
 // and back - the running job fell through to the grey fallback and lost its
 // colour, its border and its label. tests/test_assets.py now checks the set.
 const PHASE_LABELS = {
-  scheduled:'Programmato', queued:'In attesa', running:'In corso',
+  scheduled:'Programmato', queued:'In attesa', paused:'In pausa', running:'In corso',
   video:'Video', joining:'Finalizzazione',
   audio:'Audio', merging:'Unione', done:'Completato', error:'Errore', cancelled:'Annullato',
 };
 const PHASE_BADGE = {
-  scheduled:'bg-yellow-lt', queued:'bg-secondary-lt', running:'bg-blue-lt',
+  scheduled:'bg-yellow-lt', queued:'bg-secondary-lt', paused:'bg-orange-lt', running:'bg-blue-lt',
   video:'bg-blue-lt', joining:'bg-yellow-lt',
   audio:'bg-teal-lt', merging:'bg-purple-lt', done:'bg-success-lt',
   error:'bg-danger-lt', cancelled:'bg-secondary-lt',
@@ -124,7 +124,7 @@ const PHASE_BAR = {
   done:'phase-bar-done bg-success', error:'phase-bar-error bg-danger',
 };
 const PHASE_BORDER_MAP = {
-  scheduled:'var(--yellow)', queued:'var(--text-dim)', running:'var(--blue)',
+  scheduled:'var(--yellow)', queued:'var(--text-dim)', paused:'var(--orange)', running:'var(--blue)',
   video:'var(--blue)', joining:'var(--yellow)',
   audio:'var(--teal)', merging:'var(--purple)', done:'var(--green)',
   error:'var(--danger)', cancelled:'var(--text-dim)',
@@ -145,7 +145,7 @@ function _buildStepsHtml(jobId, phases, currentPhase, status) {
   let activeIdx;
   if (status === 'done') {
     activeIdx = phases.length;
-  } else if (status === 'queued' || status === 'scheduled') {
+  } else if (status === 'queued' || status === 'paused' || status === 'scheduled') {
     activeIdx = -1;
   } else {
     const lookup = currentPhase || 'video';
@@ -285,15 +285,16 @@ function _buildJobCard(j) {
   const isAnimeJob = j.type==='anime';
   const pct = j.progress?.pct||0;
   const barClass = _phaseBar(phase);
-  const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
-  const barWidth = j.status==='queued' ? 0 : (j.status==='done' ? 100 : pct);
+  const animated = isActive && j.status==='running' ? ' progress-bar-striped progress-bar-animated' : '';
+  const barWidth = (j.status==='queued' || j.status==='paused') ? 0 : (j.status==='done' ? 100 : pct);
   const badgeClass = _phaseBadge(phase);
   const label = _phaseLabel(phase);
   const borderColor = _phaseBorder(phase);
 
 
   const infoStr = j.retry_at ? _retryText(j)
-    : (j.status === 'queued' ? _waitingText(j) : _jobInfoText(j.progress, j.status));
+    : (j.status === 'queued' ? _waitingText(j)
+      : (j.status === 'paused' ? _PAUSED_TEXT : _jobInfoText(j.progress, j.status)));
   const infoTitle = (j.progress?.bytes_total && j.status !== 'done')
     ? ' title="La playlist non dichiara una dimensione: il totale è stimato sui segmenti già scaricati."'
     : '';
@@ -350,7 +351,7 @@ const DL_BUCKETS = ['running', 'waiting', 'scheduled', 'done', 'error'];
 
 function _jobBucket(j) {
   if (j.status === 'running') return 'running';
-  if (j.status === 'queued') return 'waiting';
+  if (j.status === 'queued' || j.status === 'paused') return 'waiting';
   if (j.status === 'scheduled') return 'scheduled';
   if (j.status === 'done') return 'done';
   if (j.status === 'error') return 'error';
@@ -358,7 +359,8 @@ function _jobBucket(j) {
 }
 
 function _isUnfinished(j) {
-  return j.status === 'running' || j.status === 'queued' || j.status === 'scheduled';
+  return j.status === 'running' || j.status === 'queued' || j.status === 'paused'
+    || j.status === 'scheduled';
 }
 
 // The order a list reads in: what is downloading, then the line in the order
@@ -422,27 +424,95 @@ function renderDlStats() {
 function _buildJobGroup(batchId, label, jobs) {
   const all = [..._jobs.values()].filter(j => j.batch_id === batchId);
   const counts = _bucketCounts(all);
+  const paused = all.filter(j => j.status === 'paused').length;
   const count = jobs.length === all.length
     ? String(all.length) : `${jobs.length} di ${all.length}`;
   const collapsed = _dlCollapsed.has(batchId);
   const summary = [
     counts.running ? `<span class="jg-n jg-live">${counts.running} in corso</span>` : '',
-    counts.waiting ? `<span class="jg-n jg-wait">${counts.waiting} in attesa</span>` : '',
+    counts.waiting > paused ? `<span class="jg-n jg-wait">${counts.waiting - paused} in attesa</span>` : '',
+    paused ? `<span class="jg-n jg-paused">${paused} in pausa</span>` : '',
     counts.scheduled ? `<span class="jg-n jg-sched">${counts.scheduled} programmati</span>` : '',
     counts.done ? `<span class="jg-n jg-ok">${counts.done} completati</span>` : '',
     counts.error ? `<span class="jg-n jg-err">${counts.error} falliti</span>` : '',
   ].filter(Boolean).join('');
   const body = collapsed ? '' : jobs.map(_buildJobCard).join('');
   return `<div class="job-group${collapsed ? ' is-collapsed' : ''}">
-    <button class="job-group-head" data-action="jobs:toggleGroup" data-batch="${escapeHtml(batchId)}"
-            aria-expanded="${collapsed ? 'false' : 'true'}">
-      <i class="ti ti-chevron-down jg-chev"></i>
-      <span class="jg-title">${escapeHtml(label)}</span>
-      <span class="jg-count">${count}</span>
-      <span class="jg-summary">${summary}</span>
-    </button>
+    <div class="job-group-headrow">
+      <button class="job-group-head" data-action="jobs:toggleGroup" data-batch="${escapeHtml(batchId)}"
+              aria-expanded="${collapsed ? 'false' : 'true'}">
+        <i class="ti ti-chevron-down jg-chev"></i>
+        <span class="jg-title">${escapeHtml(label)}</span>
+        <span class="jg-count">${count}</span>
+        <span class="jg-summary">${summary}</span>
+      </button>
+      ${_groupPauseBtnHtml(batchId, all)}${_groupCancelBtnHtml(batchId, all)}
+    </div>
     <div class="job-group-body">${body}</div>
   </div>`;
+}
+
+// Pausing a batch stops what has not started; what is downloading finishes,
+// because its stream token would not survive a long pause (#43). So the button
+// is there while something waits in line, and turns into "Riprendi" once
+// nothing does and something is held back.
+const _PAUSED_TEXT = 'In pausa · riparte quando riprendi il gruppo';
+
+function _groupPauseBtnHtml(batchId, all) {
+  const waiting = all.some(j => j.status === 'queued');
+  const paused = all.some(j => j.status === 'paused');
+  const id = escapeHtml(batchId);
+  if (waiting) return `<button class="btn btn-sm btn-ghost-secondary jg-action" data-action="jobs:pauseGroup"
+      data-batch="${id}" title="Metti in pausa: il download in corso finisce, gli altri aspettano">
+      <i class="ti ti-player-pause"></i><span class="d-none d-sm-inline ms-1">Pausa</span></button>`;
+  if (paused) return `<button class="btn btn-sm btn-ghost-primary jg-action" data-action="jobs:resumeGroup"
+      data-batch="${id}" title="Rimetti in coda gli episodi in pausa">
+      <i class="ti ti-player-play"></i><span class="d-none d-sm-inline ms-1">Riprendi</span></button>`;
+  return '';
+}
+
+// A paused group is one somebody stopped to think about, so that is when
+// dropping the rest of it is offered: everything not over, the download still
+// running included.
+function _groupCancelBtnHtml(batchId, all) {
+  if (!all.some(j => j.status === 'paused')) return '';
+  return `<button class="btn btn-sm btn-ghost-danger jg-action" data-action="jobs:cancelGroup"
+      data-batch="${escapeHtml(batchId)}" title="Annulla tutti i download rimasti del gruppo">
+      <i class="ti ti-x"></i><span class="d-none d-sm-inline ms-1">Annulla</span></button>`;
+}
+
+async function pauseJobGroup(batchId) {
+  try {
+    const r = await api.post(`/api/download/batch/${encodeURIComponent(batchId)}/pause`);
+    showToast(`${r.paused} download in pausa — quello in corso termina`, 'info');
+  } catch (e) { showToast(errText(e), 'danger'); }
+}
+
+async function resumeJobGroup(batchId) {
+  try {
+    const r = await api.post(`/api/download/batch/${encodeURIComponent(batchId)}/resume`);
+    showToast(`${r.resumed} download rimessi in coda`, 'success');
+  } catch (e) { showToast(errText(e), 'danger'); }
+}
+
+// Cancelling a group drops it whole: what is left, and - for whoever may
+// delete files - the episodes it already put in the library.
+async function cancelJobGroup(batchId) {
+  const all = [..._jobs.values()].filter(j => j.batch_id === batchId);
+  const left = all.filter(_isUnfinished).length;
+  const running = all.some(j => j.status === 'running');
+  const done = all.filter(j => j.status === 'done').length;
+  const purge = can('MANAGE_FILES');
+  let msg = `Annullare ${left === 1 ? 'il download rimasto' : `i ${left} download rimasti`} del gruppo?`
+    + (running ? ' Anche quello in corso viene interrotto.' : '');
+  if (done) msg += purge
+    ? ` ${done === 1 ? "L'episodio già scaricato viene eliminato" : `I ${done} episodi già scaricati vengono eliminati`} dalla libreria.`
+    : ` ${done === 1 ? "L'episodio già scaricato resta" : `I ${done} episodi già scaricati restano`} nella libreria.`;
+  if (!await scConfirm(msg)) return;
+  try {
+    const r = await api.post(`/api/download/batch/${encodeURIComponent(batchId)}/cancel${purge ? '?delete_files=true' : ''}`);
+    showToast(`${r.cancelled} download annullati` + (r.removed ? `, ${r.removed} eliminati dalla libreria` : ''), 'info');
+  } catch (e) { showToast(errText(e), 'danger'); }
 }
 
 function toggleJobGroup(batchId) {
@@ -530,9 +600,10 @@ function refreshCardAppearance(jobId) {
   const bar = document.getElementById(`job-bar-${jobId}`);
   if (bar) {
     const barClass = _phaseBar(phase);
-    const animated = isActive && j.status!=='queued' ? ' progress-bar-striped progress-bar-animated' : '';
+    const animated = isActive && j.status==='running' ? ' progress-bar-striped progress-bar-animated' : '';
     bar.className = `progress-bar ${barClass}${animated} job-progress-bar`;
-    bar.style.width = (j.status==='queued' ? 0 : (j.status==='done' ? 100 : (j.progress?.pct||0))) + '%';
+    bar.style.width = ((j.status==='queued' || j.status==='paused') ? 0
+      : (j.status==='done' ? 100 : (j.progress?.pct||0))) + '%';
   }
 
   // Update fire/stop buttons
@@ -549,6 +620,7 @@ function refreshCardAppearance(jobId) {
   if (info) {
     if (j.status==='error') info.textContent = j.error||'Errore';
     else if (j.status==='queued' && !j.retry_at) info.textContent = _waitingText(j);
+    else if (j.status==='paused') info.textContent = _PAUSED_TEXT;
     else if (j.status==='done') info.textContent = 'Completato';
     else if (j.status==='cancelled') info.textContent = 'Annullato';
   }
@@ -756,6 +828,9 @@ registerActions({
   'jobs:retryFailed': () => retryFailed(),
   'jobs:dismiss':     d => dismissJob(d.job),
   'jobs:toggleGroup': d => toggleJobGroup(d.batch),
+  'jobs:pauseGroup':  d => pauseJobGroup(d.batch),
+  'jobs:resumeGroup': d => resumeJobGroup(d.batch),
+  'jobs:cancelGroup': d => cancelJobGroup(d.batch),
 });
 
 

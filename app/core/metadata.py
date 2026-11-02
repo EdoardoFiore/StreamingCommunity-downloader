@@ -60,6 +60,7 @@ EMPTY: dict = {
     "poster": None,
     "type": None,
     "seasons_count": None,
+    "season_numbers": [],
     "cast": [],
     "directors": [],
     "original_name": None,
@@ -170,6 +171,8 @@ def _year(props: dict) -> str | None:
 
 def _from_props(props: dict) -> dict:
     """Everything the title page carries — which is nearly everything."""
+    from app.core.tv import season_numbers
+
     score = props.get("score")
     trailers = props.get("trailers") or []
     youtube_id = trailers[0].get("youtube_id") if trailers else None
@@ -199,6 +202,9 @@ def _from_props(props: dict) -> dict:
         "poster": _source_image(props.get("images"), "poster"),
         "type": props.get("type") or None,
         "seasons_count": props.get("seasons_count"),
+        # The pills are drawn from these, not counted up to seasons_count:
+        # numbering has holes (#40).
+        "season_numbers": season_numbers(props) if props.get("type") == "tv" else [],
         "cast": _people(props.get("main_actors")),
         "directors": _people(props.get("main_directors")),
         "original_name": props.get("original_name") or None,

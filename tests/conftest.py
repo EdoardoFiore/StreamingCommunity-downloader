@@ -399,6 +399,10 @@ def make_user(username: str, jellyfin_user_id: str, perms: int, enabled: bool = 
 def session_for(client, user_id: int):
     """Attach a session cookie for ``user_id`` to ``client`` and return its CSRF token."""
     raw_token, csrf_token = sessions.create_session(user_id)
+    # A login earlier in the test (do_setup) left the server's own cookie, set
+    # for the test host; set() beside it makes a second one of the same name,
+    # and which of the two is sent depends on the httpx version.
+    client.cookies.delete(sessions.SESSION_COOKIE)
     client.cookies.set(sessions.SESSION_COOKIE, raw_token)
     return csrf_token
 

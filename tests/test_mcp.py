@@ -149,7 +149,7 @@ def test_follow_that_cannot_read_the_source_is_rolled_back(client, source, monke
     """The baseline is what stops a follow from fetching the back catalogue."""
     _jellyfin_mode()
     _enable()
-    monkeypatch.setattr(tv, "get_info_tv", lambda *a, **k: 1)
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: [1])
     owner = make_user("cy", "jf-cy", int(Permission.DOWNLOAD))
     token = mcp_auth.generate_token(owner)
     source.dead = True
@@ -163,7 +163,7 @@ def test_follow_that_cannot_read_the_source_is_rolled_back(client, source, monke
 def test_follow_belongs_to_the_owner_and_seeds_what_is_out(client, source, monkeypatch):
     _jellyfin_mode()
     _enable()
-    monkeypatch.setattr(tv, "get_info_tv", lambda *a, **k: 1)
+    monkeypatch.setattr(tv, "get_season_numbers", lambda *a, **k: [1])
     owner = make_user("di", "jf-di", int(Permission.REQUEST))
     token = mcp_auth.generate_token(owner)
 
