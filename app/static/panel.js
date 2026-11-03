@@ -23,6 +23,49 @@ async function refreshQueueBadge() {
   } catch (e) { /* leave the badge as it was */ }
 }
 
+// ── New version badge ───────────────────────────────────────────────────────────
+//
+// Beside the version number in the sidebar, hidden while there is nothing newer.
+
+let _updateInfo = null;
+
+function renderUpdateBadge(info) {
+  _updateInfo = info;
+  const badge = document.getElementById('update-badge');
+  if (!badge) return;
+  badge.hidden = !info.update_available;
+  if (!info.update_available) return;
+  document.getElementById('update-badge-version').textContent = `v${info.latest}`;
+  badge.title = `Disponibile la v${info.latest}: apri le note di rilascio`;
+}
+
+async function refreshUpdateBadge() {
+  if (!can('MANAGE_SETTINGS')) return;
+  try {
+    renderUpdateBadge(await api.get('/api/updates'));
+  } catch (e) { /* leave the badge as it was */ }
+}
+
+function openUpdateModal() {
+  if (!_updateInfo?.update_available) return;
+  // notes_html is rendered and escaped by app/updates.py; everything else on
+  // the release is escaped here.
+  document.getElementById('update-modal-body').innerHTML =
+    `<p class="release-current">Versione installata: v${escapeHtml(_updateInfo.current)}</p>` +
+    _updateInfo.releases.map(r => `
+      <section class="release-entry">
+        <h3 class="release-title">
+          v${escapeHtml(r.version)}
+          ${r.published_at ? `<span class="release-date">${escapeHtml(fmtDate(r.published_at))}</span>` : ''}
+        </h3>
+        <div class="release-notes">
+          ${r.notes_html || '<p class="release-empty">Nessuna nota di rilascio.</p>'}
+        </div>
+      </section>`).join('');
+  document.getElementById('update-modal-link').href = _updateInfo.releases[0].url;
+  showModal('update-modal');
+}
+
 // ── Notifications ──────────────────────────────────────────────────────────────
 
 async function refreshNotifications() {
@@ -105,6 +148,7 @@ document.addEventListener('click', event => {
 // ── Delegated handlers ───────────────────────────────────────────────────────
 
 registerActions({
+  'updates:open':   () => openUpdateModal(),
   'notif:toggle':   () => toggleNotifications(),
   'notif:readAll':  () => markAllNotificationsRead(),
   'notif:clearAll': () => clearAllNotifications(),

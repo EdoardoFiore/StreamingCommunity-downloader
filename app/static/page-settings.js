@@ -13,7 +13,7 @@ const _SETTINGS_FEEDBACK_IDS = [
   'jf-connect-feedback', 'jf-reconnect-feedback', 'notif-channels-feedback',
   'domain-recovery-feedback', 'hosts-feedback',
   'jf-refresh-feedback', 'hooks-feedback', 'naming-feedback',
-  'output-feedback', 'mcp-feedback',
+  'output-feedback', 'mcp-feedback', 'updates-feedback',
 ];
 
 function _feedback(id, message = '', kind = 'muted') {
@@ -41,6 +41,7 @@ const _SETTINGS_TAB_LOADERS = {
   notifiche: () => loadNotificationChannels(),
   hook: () => Promise.all([loadJellyfinRefresh(), loadHooks()]),
   mcp: () => loadMcpSettings(),
+  aggiornamenti: () => loadUpdateSettings(),
 };
 
 // Two panes read the same endpoint. Shared per modal-open so switching between
@@ -56,7 +57,7 @@ function _loadAppSettings() {
 
 // Tabs whose panes only talk to MANAGE_SETTINGS endpoints: without it they would
 // render as empty panes fed by 403s.
-const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'associazioni', 'nomi', 'download', 'notifiche', 'hook', 'mcp'];
+const _SETTINGS_TABS_NEED_MANAGE = ['sorgente', 'librerie', 'associazioni', 'nomi', 'download', 'notifiche', 'hook', 'mcp', 'aggiornamenti'];
 
 let _settingsTab = 'sorgente';
 const _settingsLoaded = new Set();
@@ -1014,10 +1015,67 @@ async function _copyWithToast(text, what) {
 }
 
 
+// ── New versions ─────────────────────────────────────────────────────────────
+
+function _renderUpdateStatus(info) {
+  const installed = `Versione installata: v${info.current}.`;
+  let text;
+  if (info.update_available) text = `${installed} Disponibile: v${info.latest}.`;
+  else if (info.checked_at) text = `${installed} È la più recente.`;
+  else text = `${installed} Nessun controllo ancora riuscito.`;
+  if (info.checked_at) {
+    text += ` Ultimo controllo: ${new Date(info.checked_at * 1000).toLocaleString('it-IT')}.`;
+  }
+  document.getElementById('update-status').textContent = text;
+}
+
+async function loadUpdateSettings() {
+  const [settings, info] = await Promise.all([
+    _loadAppSettings(), api.get('/api/updates').catch(() => null),
+  ]);
+  if (settings) {
+    document.getElementById('update-check-enabled').checked =
+      settings.update_check_enabled !== false;
+  }
+  if (info) _renderUpdateStatus(info);
+}
+
+async function saveUpdateSettings() {
+  const btn = document.getElementById('save-updates-btn');
+  btn.disabled = true;
+  _feedback('updates-feedback', 'Salvataggio...');
+  try {
+    await api.put('/api/domain/settings', {
+      update_check_enabled: document.getElementById('update-check-enabled').checked,
+    });
+    _feedback('updates-feedback', 'Salvato.', 'success');
+    showToast('Impostazioni salvate', 'success');
+  } catch (e) { _feedback('updates-feedback', errText(e, 'Errore salvataggio.'), 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+async function checkUpdatesNow() {
+  const btn = document.getElementById('update-check-btn');
+  btn.disabled = true;
+  _feedback('updates-feedback', 'Controllo in corso...');
+  try {
+    const info = await api.post('/api/updates/check');
+    _renderUpdateStatus(info);
+    renderUpdateBadge(info);
+    if (info.failed) _feedback('updates-feedback', 'GitHub non ha risposto. Riprova più tardi.', 'danger');
+    else if (info.update_available) _feedback('updates-feedback', `Disponibile la v${info.latest}.`, 'success');
+    else _feedback('updates-feedback', 'Il pannello è aggiornato.', 'success');
+  } catch (e) { _feedback('updates-feedback', errText(e, 'Controllo fallito.'), 'danger'); }
+  finally { btn.disabled = false; }
+}
+
+
 // ── Delegated handlers ───────────────────────────────────────────────────────
 
 registerActions({
   'settings:open':        () => openSettings(),
+  'cfg:saveUpdates':      () => saveUpdateSettings(),
+  'cfg:checkUpdates':     () => checkUpdatesNow(),
   'cfg:saveDomain':       () => saveDomain(),
   'cfg:saveHosts':        () => saveHosts(),
   'cfg:saveRecovery':     () => saveDomainRecovery(),

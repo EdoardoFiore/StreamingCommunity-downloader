@@ -609,3 +609,38 @@
     .player-video {
       width: 100%; max-height: 70vh; background: var(--video-bg); display: block;
     }
+
+    /* Release notes, in the new version modal */
+    .release-current { color: var(--text-muted); font-size: 12px; margin-bottom: 16px; }
+    .release-entry + .release-entry {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+    .release-title { font-size: 16px; color: var(--text); margin-bottom: 12px; }
+    .release-date { color: var(--text-muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
+    .release-empty { color: var(--text-muted); }
+    .release-notes { font-size: 13px; line-height: 1.55; color: var(--text-sub); overflow-wrap: anywhere; }
+    .release-notes h4 { font-size: 14px; color: var(--text); margin: 16px 0 6px; }
+    .release-notes h5 { font-size: 13px; color: var(--text); margin: 12px 0 4px; }
+    .release-notes p, .release-notes ul, .release-notes ol { margin-bottom: 8px; }
+    .release-notes ul, .release-notes ol { padding-left: 20px; }
+    .release-notes pre { overflow-x: auto; }
+    .release-notes blockquote {
+      margin: 10px 0;
+      padding: 8px 12px;
+      border-left: 3px solid var(--border-strong);
+      background: var(--bg-raised);
+    }
+    .release-notes blockquote > :last-child { margin-bottom: 0; }
+    .release-alert-title { font-weight: 600; margin-bottom: 4px !important; }
+    .release-notes .release-alert-note { border-left-color: var(--blue); }
+    .release-alert-note .release-alert-title { color: var(--blue); }
+    .release-notes .release-alert-tip { border-left-color: var(--green); }
+    .release-alert-tip .release-alert-title { color: var(--green); }
+    .release-notes .release-alert-important { border-left-color: var(--purple); }
+    .release-alert-important .release-alert-title { color: var(--purple); }
+    .release-notes .release-alert-warning { border-left-color: var(--yellow); }
+    .release-alert-warning .release-alert-title { color: var(--yellow); }
+    .release-notes .release-alert-caution { border-left-color: var(--danger); }
+    .release-alert-caution .release-alert-title { color: var(--danger); }

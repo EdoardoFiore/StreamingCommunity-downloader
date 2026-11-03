@@ -227,6 +227,7 @@ class SettingsUpdate(BaseModel):
     domain_auto_check_enabled: bool | None = None
     domain_auto_apply: bool | None = None
     domain_check_interval_minutes: int | None = None
+    update_check_enabled: bool | None = None
     # Literal rather than str + a validator: pydantic answers 422 for anything
     # off the list on its own. tests/test_output_container.py pins these two
     # against app.core.container, so the table and the API cannot drift.

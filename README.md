@@ -464,6 +464,19 @@ came back.
 
 ---
 
+## New versions
+
+The panel asks GitHub for newer releases shortly after it starts and every 6 hours after that. When
+there is one, a badge appears beside the version number in the sidebar, for users who can manage
+settings, and opens the release notes of every version you are behind. Nothing is installed: updating
+is still your `docker compose pull`.
+
+**Impostazioni → Aggiornamenti** shows the last check, checks on demand and turns the periodic check
+off. It is the one call the panel makes that downloading does not need. It sends GitHub your address
+and the panel's version, as any request to it would, and needs no token.
+
+---
+
 ## Naming
 
 **Impostazioni → Nomi** sets how files and folders are named, per type. Each field is left blank

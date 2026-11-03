@@ -100,7 +100,9 @@ for downloads that skipped the queue, one summary per season/series), `downloads
 (post-download webhooks and the Jellyfin library refresh), `library.py` (the registry of which
 folder holds which title; endpoints in `routers/library.py`, UI in `static/library.js`), `schedule.py`, `db.py`,
 `config.py`, `progress.py`, `writable.py` (the boot check that temp, config and libraries can be
-written), `routers/`, `templates/`, `static/`
+written), `updates.py` (the new-version check against GitHub releases, and the only renderer of
+their notes: everything is escaped there, so `notes_html` is the one server-made HTML the frontend
+inserts as is; badge in `static/panel.js`), `routers/`, `templates/`, `static/`
 
 ### Persistence
 
