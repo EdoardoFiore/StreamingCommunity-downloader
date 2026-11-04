@@ -102,7 +102,8 @@ folder holds which title; endpoints in `routers/library.py`, UI in `static/libra
 `config.py`, `progress.py`, `writable.py` (the boot check that temp, config and libraries can be
 written), `updates.py` (the new-version check against GitHub releases, and the only renderer of
 their notes: everything is escaped there, so `notes_html` is the one server-made HTML the frontend
-inserts as is; badge in `static/panel.js`), `routers/`, `templates/`, `static/`
+inserts as is; badge in `static/panel.js`), `updater_client.py` (the panel's side of `updater/`, the
+optional service that replaces the panel's container), `routers/`, `templates/`, `static/`
 
 ### Persistence
 
@@ -372,6 +373,20 @@ anything under a mounted static directory is readable by unauthenticated visitor
   admin). The token itself fails closed — no stored hash means no access — travels only in the
   `Authorization` header (a query string lands in proxy logs), and is not a second server:
   `/mcp` is a route of the panel, in `PUBLIC_PATHS` only because it authenticates itself.
+- **Only a `v*` tag publishes the release image.** `latest` used to move on every push to `main`,
+  so the update button could install commits no release announced. `main` now runs the tests and
+  builds nothing; other branches publish to the `-dev` packages. Merging is not shipping: tag it.
+  `.gitlab-ci.yml` is a separate pipeline and still also builds its default branch.
+- **The panel never holds the Docker socket, and the updater takes no parameters.** `updater/`
+  is a separate, optional image: stdlib only, `network_mode: none`, reached over a Unix socket in a
+  shared volume, with one verb (`docker compose pull` and `up -d --no-deps` on the panel's service,
+  found from compose labels). Mounting the socket in the panel would be root on the host for
+  anything that compromises it, and open mode gives `MANAGE_SETTINGS` to every visitor, so
+  `POST /api/updates/install` refuses with no new release or with a job that a restart would lose.
+  The service owns the state because the panel is what gets replaced. It does not recreate itself:
+  that would kill the process running the command. Its Compose and the host's can disagree on the
+  `com.docker.compose.image` label (measured: v5.6.1 against v2.39), so the other one recreates
+  `web` once on the same image; that is why it compares image ids and skips `up` when they match.
 - Blocking work goes through `asyncio.to_thread` (routers) or the job pool. Notification channels
   are the exception by design: every caller of `notify()` is already off the loop.
 

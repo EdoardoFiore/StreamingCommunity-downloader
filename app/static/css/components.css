@@ -644,3 +644,6 @@
     .release-alert-warning .release-alert-title { color: var(--yellow); }
     .release-notes .release-alert-caution { border-left-color: var(--danger); }
     .release-alert-caution .release-alert-title { color: var(--danger); }
+    .release-how { margin-bottom: 16px; font-size: 13px; color: var(--text-sub); }
+    .release-how p { margin-bottom: 6px; }
+    .release-how[hidden] { display: none; }

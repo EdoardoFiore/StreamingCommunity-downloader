@@ -31,6 +31,8 @@ services:
       # schedule all live here. Without this volume they are lost on every
       # re-pull: the setup wizard comes back and the request history is gone.
       - panel_config:/app/config
+      # Optional, together with the updater service below.
+      # - updater_socket:/run/scpanel-updater:ro
     environment:
       - VIDEOS_DIR=/app/videos
       - DB_FILE=/app/config/panel.db
@@ -63,7 +65,32 @@ services:
     deploy:
       replicas: 1
 
+  # Optional: an "Aggiorna ora" button in the new-version dialog. Without it the
+  # dialog shows the commands to run instead.
+  #
+  # WARNING: this service mounts the Docker socket, which is root on this host.
+  # It has no network and does one thing, pull this file's image for `web` and
+  # recreate it, and the panel itself never touches the socket. On a panel
+  # running without login, every visitor can press the button, though only when
+  # a new release is out and no download is running.
+  #
+  # ${PWD} must be the folder holding this file, so start it from there. The
+  # mount has to be the same path as on the host, or compose could not read this
+  # file nor resolve relative paths in it. Stacks kept where no host folder
+  # exists (Portainer, for one) cannot use this service.
+  #
+  # updater:
+  #   image: ghcr.io/edoardofiore/streamingcommunity-downloader-updater:latest
+  #   network_mode: none
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - ${PWD}:${PWD}:ro
+  #     - updater_socket:/run/scpanel-updater
+  #   restart: unless-stopped
+
 volumes:
+  # Optional, together with the updater service above.
+  # updater_socket:
   nfs_storage:
     driver: local
     driver_opts:

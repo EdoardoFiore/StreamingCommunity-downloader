@@ -1027,6 +1027,12 @@ function _renderUpdateStatus(info) {
     text += ` Ultimo controllo: ${new Date(info.checked_at * 1000).toLocaleString('it-IT')}.`;
   }
   document.getElementById('update-status').textContent = text;
+  const updater = info.updater;
+  document.getElementById('updater-status').textContent = updater?.ready
+    ? 'Aggiornamento dal pannello: disponibile.'
+    : updater
+      ? `Aggiornamento dal pannello: non disponibile. ${updater.problem}`
+      : 'Aggiornamento dal pannello: servizio updater non configurato (vedi il README).';
 }
 
 async function loadUpdateSettings() {

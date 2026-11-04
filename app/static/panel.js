@@ -63,7 +63,87 @@ function openUpdateModal() {
         </div>
       </section>`).join('');
   document.getElementById('update-modal-link').href = _updateInfo.releases[0].url;
+  _renderUpdateAction();
   showModal('update-modal');
+}
+
+// The button when the updater service is there, otherwise the commands: the
+// panel cannot replace its own container, and most installs run without it.
+function _renderUpdateAction() {
+  const hint = document.getElementById('update-modal-how');
+  const btn = document.getElementById('update-install-btn');
+  const updater = _updateInfo.updater;
+  const canInstall = !!updater?.ready;
+  btn.hidden = !canInstall;
+  btn.disabled = _updateWatch !== null;
+  document.getElementById('update-modal-progress').textContent = '';
+  if (canInstall) { hint.hidden = true; return; }
+  const commands = _updateInfo.install === 'docker'
+    ? 'docker compose pull\ndocker compose up -d'
+    : 'git pull\npip install -r requirements.txt\n# poi riavvia il pannello';
+  const problem = updater?.problem
+    ? `<p class="settings-warn">L'aggiornamento dal pannello non è disponibile: ${escapeHtml(updater.problem)}</p>`
+    : '';
+  hint.innerHTML = `${problem}<p>Per aggiornare:</p><pre class="settings-snippet"><code>${escapeHtml(commands)}</code></pre>`;
+  hint.hidden = false;
+}
+
+const _UPDATE_WATCH_INTERVAL = 3000;
+const _UPDATE_WATCH_LIMIT = 10 * 60 * 1000;
+let _updateWatch = null;
+
+function _updateProgress(text, kind = 'muted') {
+  const el = document.getElementById('update-modal-progress');
+  el.textContent = text;
+  el.className = `form-text text-${kind}`;
+}
+
+function _stopUpdateWatch(text, kind) {
+  clearInterval(_updateWatch);
+  _updateWatch = null;
+  document.getElementById('update-install-btn').disabled = false;
+  _updateProgress(text, kind);
+}
+
+// The panel goes away halfway through this, so a failed poll is expected and
+// says nothing: only the version it comes back with means the update landed.
+function _watchUpdate(from) {
+  const since = Date.now();
+  _updateWatch = setInterval(async () => {
+    if (Date.now() - since > _UPDATE_WATCH_LIMIT) {
+      _stopUpdateWatch('Il pannello non è tornato con la nuova versione: controlla `docker compose logs web`.', 'danger');
+      return;
+    }
+    let info;
+    try { info = await api.get('/api/updates'); } catch (e) { _updateProgress('Riavvio del pannello...'); return; }
+    if (info.current !== from) {
+      clearInterval(_updateWatch);
+      window.location.reload();
+      return;
+    }
+    const state = info.updater?.state;
+    if (state === 'failed') _stopUpdateWatch(`Aggiornamento non riuscito: ${info.updater.message}`, 'danger');
+    else if (state === 'unchanged') {
+      _stopUpdateWatch('L\'immagine è già l\'ultima pubblicata per questo tag. La nuova versione può essere ancora in pubblicazione, oppure il compose fissa una versione precisa.', 'warning');
+    }
+    else if (state === 'pulling') _updateProgress('Scaricamento della nuova immagine...');
+    else _updateProgress('Riavvio del pannello...');
+  }, _UPDATE_WATCH_INTERVAL);
+}
+
+async function installUpdate() {
+  const target = _updateInfo.latest;
+  if (!await scConfirm(`Aggiornare il pannello alla v${target}? Verrà riavviato: qualche istante senza interfaccia.`)) return;
+  const btn = document.getElementById('update-install-btn');
+  btn.disabled = true;
+  _updateProgress('Avvio dell\'aggiornamento...');
+  try {
+    await api.post('/api/updates/install');
+    _watchUpdate(_updateInfo.current);
+  } catch (e) {
+    btn.disabled = false;
+    _updateProgress(errText(e, 'Aggiornamento non riuscito.'), 'danger');
+  }
 }
 
 // ── Notifications ──────────────────────────────────────────────────────────────
@@ -149,6 +229,7 @@ document.addEventListener('click', event => {
 
 registerActions({
   'updates:open':   () => openUpdateModal(),
+  'updates:install': () => installUpdate(),
   'notif:toggle':   () => toggleNotifications(),
   'notif:readAll':  () => markAllNotificationsRead(),
   'notif:clearAll': () => clearAllNotifications(),
