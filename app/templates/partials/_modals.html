@@ -110,6 +110,32 @@
   </div>
 </div>
 
+<!-- ── New version Modal ─────────────────────────────────────────────── -->
+<div class="modal modal-blur fade" id="update-modal" tabindex="-1" style="display:none" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nuova versione disponibile</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="update-modal-how" class="release-how" hidden></div>
+        <div id="update-modal-body"></div>
+      </div>
+      <div class="modal-footer">
+        <div id="update-modal-progress" class="form-text me-auto"></div>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Chiudi</button>
+        <a class="btn btn-outline-secondary" id="update-modal-link" target="_blank" rel="noopener noreferrer">
+          <i class="ti ti-external-link me-1"></i>Apri su GitHub
+        </a>
+        <button type="button" class="btn btn-primary" id="update-install-btn" data-action="updates:install" hidden>
+          <i class="ti ti-download me-1"></i>Aggiorna ora
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Confirm Modal ──────────────────────────────────────────────────── -->
 <div class="modal modal-blur fade" id="sc-confirm-modal" tabindex="-1" style="display:none" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered" style="max-width:400px">

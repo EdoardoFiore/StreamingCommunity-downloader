@@ -125,6 +125,32 @@
       text-align: center;
     }
 
+    .sidebar-version-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .update-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 1px 7px;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.5;
+      letter-spacing: .3px;
+      color: var(--accent-text);
+      background: var(--accent-dim);
+      border: 1px solid var(--accent-ring);
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .update-badge:hover { background: var(--accent-ring); }
+    .update-badge[hidden] { display: none; }
+
     /* SSE status */
     #stream-status {
       font-size: 11px;

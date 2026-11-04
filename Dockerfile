@@ -20,4 +20,7 @@ RUN mkdir -p /app/tmp /app/config && chmod 1777 /app/tmp /app/config
 
 EXPOSE 8000
 
+# How this panel gets updated, which the new-version dialog has to explain.
+ENV SCPANEL_INSTALL=docker
+
 CMD ["python", "main.py"]

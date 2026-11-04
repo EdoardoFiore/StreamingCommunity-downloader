@@ -1,3 +1,6 @@
+# A separate image: see updater/Dockerfile.
+updater/
+
 __pycache__
 *.pyc
 *.pyo

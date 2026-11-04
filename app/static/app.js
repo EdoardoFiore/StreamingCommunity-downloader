@@ -46,6 +46,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderSearchFilters();
   refreshNotifications();
   refreshQueueBadge();
+  // Repeated because the server's first check lands a minute after boot, and a
+  // panel can stay open for days. Only reads what the server already knows.
+  refreshUpdateBadge();
+  setInterval(refreshUpdateBadge, 3600000);
 });
 
 function defaultPage() {

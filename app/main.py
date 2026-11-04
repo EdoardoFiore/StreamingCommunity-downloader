@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app import __version__, config, db, downloads_hooks, downloads_notify, library, writable
+from app import __version__, config, db, downloads_hooks, downloads_notify, library, updates, writable
 from app.auth import models as auth_models
 from app.auth import router as auth_router
 from app.auth import session as auth_session
@@ -27,6 +27,7 @@ from app.mcp import server as mcp_http
 from app.routers import (
     domain, search, home, tv, downloads, progress, files, images, anime, notification_channels,
     metadata as metadata_router, download_hooks, library as library_router, mcp as mcp_router,
+    updates as updates_router,
 )
 
 logging.basicConfig(
@@ -137,6 +138,7 @@ async def lifespan(app: FastAPI):
     # anything in it, and both sleep before their first pass so the lifespan
     # never does network I/O.
     domain_task = asyncio.create_task(domain_recovery.domain_watch_loop())
+    update_task = asyncio.create_task(updates.update_check_loop())
     try:
         # Always running, whatever the switch says: the endpoint reads the
         # switch per request, so turning MCP on or off needs no restart.
@@ -145,6 +147,7 @@ async def lifespan(app: FastAPI):
     finally:
         poller_task.cancel()
         domain_task.cancel()
+        update_task.cancel()
 
 
 app = FastAPI(title="StreamingCommunity Web Panel", version=__version__, lifespan=lifespan)
@@ -167,6 +170,7 @@ app.include_router(notification_channels.router)
 app.include_router(download_hooks.router)
 app.include_router(library_router.router)
 app.include_router(mcp_router.router)
+app.include_router(updates_router.router)
 # Raw ASGI, outside FastAPI's routing: the MCP transport speaks JSON-RPC itself.
 app.add_route(mcp_http.PATH, mcp_http.endpoint, include_in_schema=False)
 app.include_router(watches_router.router)

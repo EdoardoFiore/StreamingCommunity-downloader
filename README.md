@@ -176,6 +176,9 @@ network mount that comes up later — but downloads into it will fail.
 
 ### Trying a branch before it is released
 
+The release image, `latest` included, is published only by a `v*` tag, so following it means getting
+releases and nothing else. A push to `main` runs the tests and publishes nothing.
+
 Every push to a branch other than `main` publishes to a **separate** package, so a work-in-progress
 build can never be pulled by a deployment pointing at the release image:
 
@@ -461,6 +464,67 @@ There is no "run a command" hook, deliberately: on a panel running without login
 to every visitor, and a command would hand them a shell. A webhook can point at your own network —
 that is how it reaches Jellyfin — so the panel reports only whether the call succeeded, never what
 came back.
+
+---
+
+## New versions
+
+The panel asks GitHub for newer releases shortly after it starts and every 6 hours after that. When
+there is one, a badge appears beside the version number in the sidebar, for users who can manage
+settings, and opens the release notes of every version you are behind. The check installs nothing.
+
+**Impostazioni → Aggiornamenti** shows the last check, checks on demand and turns the periodic check
+off. It is the one call the panel makes that downloading does not need. It sends GitHub your address
+and the panel's version, as any request to it would, and needs no token.
+
+### Updating from the panel (optional)
+
+By default the dialog shows the commands to run, `docker compose pull` and `docker compose up -d`.
+For an **Aggiorna ora** button instead, add the `updater` service to your compose file: an existing
+deployment has to edit it, because a running container cannot give itself a new service. The three
+commented blocks are in [`docker-compose.template.yml`](docker-compose.template.yml):
+
+```yaml
+services:
+  web:
+    volumes:
+      - updater_socket:/run/scpanel-updater:ro
+  updater:
+    image: ghcr.io/edoardofiore/streamingcommunity-downloader-updater:latest
+    network_mode: none
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PWD}:${PWD}:ro
+      - updater_socket:/run/scpanel-updater
+    restart: unless-stopped
+volumes:
+  updater_socket:
+```
+
+Run `docker compose up -d` once, **from the folder holding the file**.
+
+> **This service mounts the Docker socket, which is root on the host.** It has no network and does
+> one thing: pull the image your file names for `web`, and recreate that service. The panel never
+> touches the socket; it talks to the service over a Unix socket in the shared volume, with no port
+> and no parameters. On a panel running without login, every visitor can press the button, though
+> only when a new release is out and no download is running.
+
+What to expect:
+
+- **Downloads first.** The update is refused while a download is running, queued or paused, because
+  restarting would lose them. Scheduled downloads survive.
+- **A copy of the database** is saved beside it as `panel.db.pre-update`, overwritten each time.
+  Migrations only go forward: going back to an older image needs this file.
+- **No automatic rollback.** If the new version does not start, the dialog says so after a while and
+  `docker compose logs web` has the reason.
+- **A pinned tag stays pinned.** With `:2.6.0` in the file the pull changes nothing and the dialog
+  says so. The same happens for a few minutes after a release, while its image is being built.
+- **It updates the panel, not itself.** Update the `updater` service with the usual commands.
+- **One extra restart is possible.** When the host's Compose is a different version from the
+  service's, the first manual `docker compose up -d` after an update can recreate `web` once, on the
+  same image. Run it when no download is active.
+- **Not for every setup.** Stacks with no folder on the host (Portainer, for one) cannot use this
+  service, and neither can a file relying on variables exported in your shell instead of `.env`.
 
 ---
 

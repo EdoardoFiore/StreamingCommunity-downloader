@@ -193,6 +193,10 @@ def _cancellable_batch(jm, n, fn, batch_id="b1"):
     jobs = [jm._make_job(f"t{i}", "episode", batch_id=batch_id) for i in range(n)]
     for i, job in enumerate(jobs):
         jm._submit_job(job, fn, f"t{i}", cancel_event=job.cancel_event)
+        # One at a time into the line: a job takes its ticket on its own worker
+        # thread, so two submitted back to back can swap, and these tests name
+        # which job holds the slot.
+        assert _wait_for(lambda: job.status != "queued" or job.queue_seq is not None)
     return jobs
 
 

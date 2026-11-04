@@ -32,6 +32,9 @@ jobs:
 
   build-and-push:
     needs: test
+    # A push to main is not a release: it runs the tests and publishes nothing,
+    # so `latest` and the version the panel announces can only move together.
+    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,14 +44,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Release builds (main, v* tags) and work-in-progress builds go to two
-      # different GHCR packages. A branch build can then never be pulled by a
-      # deployment pointing at the release image, and the whole -dev package can
-      # be cleared out without touching release history.
+      # Release builds (v* tags) and work-in-progress builds go to two different
+      # GHCR packages. A branch build can then never be pulled by a deployment
+      # pointing at the release image, and the whole -dev package can be cleared
+      # out without touching release history.
       - name: Choose the package for this ref
         id: target
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
             echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
           else
             echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-dev" >> "$GITHUB_OUTPUT"
@@ -67,11 +70,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.target.outputs.image }}
+          # Spelled out below instead of left to the action's automatic rule. A
+          # pre-release tag is never `latest`, as the panel's check never offers it.
+          flavor: latest=false
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
             type=raw,value=dev,enable=${{ github.ref_type == 'branch' && github.ref != 'refs/heads/main' }}
             type=sha,format=short
 
@@ -88,6 +94,32 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The optional service that updates the panel's container. Same refs and
+      # tags as the panel, in a package of its own.
+      - name: Extract metadata (updater)
+        id: meta_updater
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.target.outputs.image }}-updater
+          flavor: latest=false
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=raw,value=dev,enable=${{ github.ref_type == 'branch' && github.ref != 'refs/heads/main' }}
+            type=sha,format=short
+
+      - name: Build and push (updater)
+        uses: docker/build-push-action@v5
+        with:
+          context: updater
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta_updater.outputs.tags }}
+          labels: ${{ steps.meta_updater.outputs.labels }}
+          cache-from: type=gha,scope=updater
+          cache-to: type=gha,mode=max,scope=updater
+
       - name: Summarise what was published
         if: github.event_name != 'pull_request'
         run: |
@@ -96,5 +128,6 @@ jobs:
             echo
             echo '```'
             echo "${{ steps.meta.outputs.tags }}"
+            echo "${{ steps.meta_updater.outputs.tags }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
