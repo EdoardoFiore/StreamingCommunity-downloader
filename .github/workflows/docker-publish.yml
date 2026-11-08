@@ -81,6 +81,13 @@ jobs:
             type=raw,value=dev,enable=${{ github.ref_type == 'branch' && github.ref != 'refs/heads/main' }}
             type=sha,format=short
 
+      # Both images are published for amd64 and arm64, so the template runs as
+      # is on Apple Silicon, a Raspberry Pi or an ARM server: with amd64 only,
+      # `docker compose up` there stops at "no matching manifest for
+      # linux/arm64/v8". The runner is amd64, so arm64 is built under QEMU.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -88,6 +95,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -114,6 +122,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: updater
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta_updater.outputs.tags }}
           labels: ${{ steps.meta_updater.outputs.labels }}
