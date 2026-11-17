@@ -191,14 +191,39 @@ def test_every_page_of_episodes_is_read(site):
 
 def test_an_episode_carries_one_video_per_language(site):
     site.routes["/api/anime/12/episodes"] = lambda p: _Response(payload={
-        "episodes": [_raw_episode(1, ("ita", "jpn", "eng"), hidden=("eng",))],
+        "episodes": [_raw_episode(1, ("ita", "jpn"))],
         "start": 1, "tab_size": 120, "total": 1})
 
     episode = animeunity.get_episodes("12")[0]
 
-    assert episode["languages"] == ["ita", "jpn"], "a hidden video is not on offer"
     assert [v["language"] for v in episode["videos"]] == ["ita", "jpn"]
     assert animeunity.get_episode_languages(episode) == {"audio": ["ita", "jpn"], "subtitles": []}
+
+
+def test_a_hidden_video_is_still_on_offer(site):
+    """Measured on Vinland Saga: the Italian dub of episodes 1-23 is
+    ``is_hidden``, the site plays it anyway, and the stream is complete."""
+    site.routes["/api/anime/12/episodes"] = lambda p: _Response(payload={
+        "episodes": [_raw_episode(1, ("ita", "jpn"), hidden=("ita",))],
+        "start": 1, "tab_size": 120, "total": 1})
+
+    episode = animeunity.get_episodes("12")[0]
+
+    assert episode["languages"] == ["ita", "jpn"]
+    assert animeunity.offers(episode, ["ita"])
+    assert animeunity.pick_video(episode, ["ita"], strict=True)["id"] == 50010
+
+
+def test_a_visible_video_wins_over_a_hidden_one_in_the_same_language(site):
+    raw = _raw_episode(1, ("ita", "jpn", "ita"))
+    raw["videos"][0]["is_hidden"] = True
+    site.routes["/api/anime/12/episodes"] = lambda p: _Response(payload={
+        "episodes": [raw], "start": 1, "tab_size": 120, "total": 1})
+
+    episode = animeunity.get_episodes("12")[0]
+
+    assert episode["languages"] == ["ita", "jpn"], "the source's order is kept"
+    assert [v["id"] for v in episode["videos"]] == [50012, 50011]
 
 
 def test_a_short_page_stops_the_walk(site):

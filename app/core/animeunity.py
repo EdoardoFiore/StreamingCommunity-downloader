@@ -288,13 +288,22 @@ def _episode(raw: dict) -> dict | None:
     """One episode with the videos it can be downloaded as, one per language."""
     if not isinstance(raw, dict) or raw.get("id") is None:
         return None
-    videos = []
+    # `is_hidden` is not "unavailable". The site's own player never reads it
+    # and plays these videos, and they resolve to full 1080p playlists: it is
+    # set on whole back catalogues — Vinland Saga's Italian dub on episodes
+    # 1-23 of 24, Bleach's on 118 of 120, a Japanese original here and there —
+    # the shape of the dub records folded into their originals. Skipping them
+    # made a show the site offers dubbed look subtitled-only. It only breaks a
+    # tie: a visible video wins over a hidden one in the same language.
+    by_lang: dict[str, tuple[bool, dict]] = {}
     for v in raw.get("videos") or []:
-        if not isinstance(v, dict) or v.get("id") is None or v.get("is_hidden"):
+        if not isinstance(v, dict) or v.get("id") is None:
             continue
         lang = str(v.get("language") or "").strip().lower()
-        if lang and all(x["language"] != lang for x in videos):
-            videos.append({"id": v["id"], "language": lang, "runtime": v.get("runtime")})
+        hidden = bool(v.get("is_hidden"))
+        if lang and (lang not in by_lang or (by_lang[lang][0] and not hidden)):
+            by_lang[lang] = (hidden, {"id": v["id"], "language": lang, "runtime": v.get("runtime")})
+    videos = [video for _, video in by_lang.values()]
     return {
         "id": raw["id"],
         "number": str(raw.get("number") if raw.get("number") is not None else ""),
