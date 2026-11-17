@@ -41,7 +41,7 @@ def test_anything_but_a_hostname_is_refused(value):
 # ── Resolution order ──────────────────────────────────────────────────────────
 
 def test_animeunity_defaults_then_env_then_saved(monkeypatch):
-    assert animeunity.host() == config.ANIMEUNITY_DEFAULT_HOST == "www.animeunity.co"
+    assert animeunity.host() == config.ANIMEUNITY_DEFAULT_HOST == "animeunity.cx"
 
     monkeypatch.setenv("ANIMEUNITY_HOST", "www.animeunity.env")
     assert animeunity.host() == "www.animeunity.env"

@@ -23,8 +23,8 @@ _HOSTNAME = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.
 def normalize_host(value: str) -> str:
     """A bare lowercase hostname, or ValueError.
 
-    Lenient about what people paste — ``https://www.animeunity.co/`` becomes
-    ``www.animeunity.co`` — and strict about what is left: a path, a port or an
+    Lenient about what people paste — ``https://animeunity.cx/`` becomes
+    ``animeunity.cx`` — and strict about what is left: a path, a port or an
     IP address is refused rather than quietly dropped.
     """
     raw = (value or "").strip().lower()
@@ -32,7 +32,7 @@ def normalize_host(value: str) -> str:
         parsed = urlparse(raw)
         if parsed.scheme not in ("http", "https") or parsed.path not in ("", "/") \
                 or parsed.query or parsed.port:
-            raise ValueError("Inserisci solo il nome host, ad esempio www.animeunity.co")
+            raise ValueError("Inserisci solo il nome host, ad esempio animeunity.cx")
         raw = parsed.hostname or ""
     raw = raw.rstrip("/")
     if not _HOSTNAME.match(raw):
@@ -52,6 +52,15 @@ def verify_animeunity(host: str) -> None:
         raise RuntimeError(f"{host} non raggiungibile: {e}")
     if "animeunity" not in r.text.lower():
         raise RuntimeError(f"{host} risponde, ma non sembra AnimeUnity")
+    # The panel reads the site's Inertia payload (#50). A host still serving
+    # the old site — a mirror, a stale clone — would pass the check above and
+    # then fail every search, so it is refused here, where it is a form error.
+    from app.core.page import _data_page
+    try:
+        _data_page(r.text)
+    except (LookupError, ValueError):
+        raise RuntimeError(f"{host} risponde, ma non con la versione di AnimeUnity "
+                           "che il pannello sa leggere")
 
 
 def verify_video_host(host: str) -> None:

@@ -112,7 +112,7 @@ def _domain() -> str:
 async def search_content(
     query: str,
     source: Literal["streamingcommunity", "animeunity", "all"] = "all",
-    media_type: Literal["movie", "tv", "ova", "ona", "special"] | None = None,
+    media_type: Literal["movie", "tv", "ova", "ona", "special", "tv_short"] | None = None,
     page_num: int = 1,
 ) -> dict:
     """Search films and TV series (StreamingCommunity) and anime (AnimeUnity).
@@ -121,7 +121,7 @@ async def search_content(
         query: Title to look for.
         source: Which catalogue to search; 'all' searches both.
         media_type: Optional kind filter. 'movie'/'tv' apply to both sources,
-            'ova'/'ona'/'special' only to AnimeUnity.
+            'ova'/'ona'/'special'/'tv_short' only to AnimeUnity.
         page_num: 1-based page. On StreamingCommunity the kind filter is applied
             per page, so an empty filtered page does not mean the end.
     """
@@ -201,13 +201,18 @@ async def get_anime_episodes(anime_id: str) -> dict:
 
     Args:
         anime_id: The anime id exactly as search returns it (e.g. '12-one-piece').
+
+    Each episode lists the languages it is published in ('ita' is the Italian
+    dub, 'jpn' the original with Italian subtitles in the picture); one of
+    them is what download_anime_episode's audio_languages chooses.
     """
     _user(*CAN_BROWSE, mode="or")
     episodes = await _call(anime_router.get_episodes, anime_id)
     # Only what download_anime_episode takes: the raw records carry a dozen more
     # fields each, and a long series runs to a thousand episodes.
     return {"anime_id": anime_id,
-            "episodes": [{"id": e["id"], "number": e.get("number")} for e in episodes]}
+            "episodes": [{"id": e["id"], "number": e.get("number"),
+                          "languages": e.get("languages") or []} for e in episodes]}
 
 
 @mcp_server.tool(annotations=READ_ONLY)
@@ -336,10 +341,12 @@ async def download_anime_episode(
         anime_name: The anime title, from search.
         episode_id: The episode's 'id', from get_anime_episodes.
         episode_number: The episode's 'number', from get_anime_episodes.
-        anime_type: The source's kind (TV, ONA, OVA, …); only 'movie' (or 'film') is a film.
+        anime_type: The source's kind (tv, ona, ova, …); only 'movie' (or 'film') is a film.
         year: Year, used in the folder name.
-        audio_languages: Audio tracks to keep.
-        subtitle_languages: Subtitle tracks to keep.
+        audio_languages: Which version to download, from the episode's
+            'languages': each is a separate stream, so one file holds one of
+            them, Italian first when it is listed and offered.
+        subtitle_languages: Unused by AnimeUnity, whose subtitles are in the picture.
     """
     user = _user(Permission.DOWNLOAD)
     body = _model(downloads_router.AnimeDownloadRequest, anime_id=anime_id, anime_name=anime_name,

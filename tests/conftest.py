@@ -289,12 +289,25 @@ def stub_jobs(monkeypatch):
 class FakeSource:
     """Stands in for StreamingCommunity / AnimeUnity during request tests."""
 
+    @staticmethod
+    def anime_episode(n, languages=("ita", "jpn")) -> dict:
+        """An AnimeUnity episode as get_episodes returns it: one video per language."""
+        videos = [{"id": 8000 + 10 * n + i, "language": lang, "runtime": 1400}
+                  for i, lang in enumerate(languages)]
+        return {"id": 800 + n, "number": str(n), "seq": n, "is_filler": False,
+                "videos": videos, "languages": list(languages)}
+
+    def add_anime_episode(self, n, languages=("ita", "jpn")) -> dict:
+        episode = self.anime_episode(n, languages)
+        self.anime_episodes.append(episode)
+        return episode
+
     def __init__(self):
         self.audio = ["ita", "eng"]
         self.subtitles = ["ita", "eng"]
         self.dead = False
         self.episodes = [{"id": 900 + n, "n": str(n), "name": f"Episodio {n}"} for n in (1, 2, 3)]
-        self.anime_episodes = [{"id": 800 + n, "number": str(n)} for n in (1, 2, 3)]
+        self.anime_episodes = [self.anime_episode(n) for n in (1, 2, 3)]
         # The title page's props, read for tmdb_id at approval and for a
         # followed series' year. Empty unless a test says otherwise.
         self.props = {}
@@ -354,6 +367,14 @@ def source(monkeypatch, tmp_path):
         lambda *a, **k: ([] if fake.dead else list(fake.anime_episodes)),
     )
     monkeypatch.setattr(animeunity, "get_episode_languages", lambda *a, **k: fake.languages)
+
+    def find_episode(anime_id, number, hint=None):
+        for episode in ([] if fake.dead else fake.anime_episodes):
+            if episode["number"] == str(number):
+                return episode
+        raise LookupError(f"episodio {number} non più presente su AnimeUnity")
+
+    monkeypatch.setattr(animeunity, "find_episode", find_episode)
 
     # Approval resolution runs inline instead of on its worker pool.
     monkeypatch.setattr(service, "_resolution_pool", InlineExecutor())

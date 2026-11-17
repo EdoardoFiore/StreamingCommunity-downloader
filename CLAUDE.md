@@ -60,8 +60,10 @@ request before any route runs.
 - `film.py` — movie resolve + download; also owns `_collect_audio_tracks` / `_collect_subtitle_tracks`, which `tv.py` and `animeunity.py` import
 - `tv.py` — seasons, episodes, per-episode languages, episode download
 - `hosts.py` — validation and verification of the AnimeUnity host and the video host override
-- `animeunity.py` — AnimeUnity search (`/archivio/get-animes`, paged 30 at a time,
-  with the source's own `type` and `dubbed` filters), episodes, download
+- `animeunity.py` — AnimeUnity, an Inertia site since its rebuild (#50): search
+  (`/archive`, 30 a page, the source's own `type` and `language=ita` filters), title
+  record and related titles (`/anime/{id}-{slug}`), episodes (`/api/anime/{id}/episodes`,
+  JSON, 120 a page by sequence number), player page (`props.embedUrl`), download
 - `m3u8.py` — `M3U8_Parser`, `M3U8_Segments`, `M3U8_Downloader`, `Decryption`, `download_m3u8()`
 - `paths.py` — destination paths (`film_path`, `episode_path`, `anime_path`). The request system's library check goes through these, so a change here changes both. Names come from `naming.py`; the optional `templates=` argument is what lets the library check ask for the *legacy* layout.
 - `headers.py` — user-agent rotation, `sanitize_filename`
@@ -167,8 +169,8 @@ anything under a mounted static directory is readable by unauthenticated visitor
   catalogue, so there an empty page really is the end.
 - **`type` is not `media_type`.** Every AnimeUnity record has `type == "anime"` and the
   whole anime flow keys off that, from the detail modal to the episodes endpoint to
-  the job kind. The source's own word (Movie/TV/OVA/ONA/Special, and a long tail like
-  "TV Short") rides beside it in `media_type`. Folding one into the other is what made
+  the job kind. The source's own word (movie/tv/ova/ona/special/tv_short — lower case
+  since #50, capitalised in rows stored before it) rides beside it in `media_type`. Folding one into the other is what made
   every anime, films included, render as a TV series. The reverse holds for the
   layout: `paths.is_anime_series()` names the film (`_ANIME_FILM_KINDS`: `movie`,
   `film`) and treats every other value as a series — listing the series kinds instead sent an ONA down the
@@ -181,11 +183,25 @@ anything under a mounted static directory is readable by unauthenticated visitor
   the fix hold those phantom seasons; `poller._rebaseline_phantom_seasons()` drops them and
   re-seeds instead of queueing the real seasons as new.
 - **A page payload is unescaped exactly once.** BeautifulSoup decodes HTML entities in
-  attribute values itself — the `data-page` on StreamingCommunity, `items-json` and
-  `animes` on AnimeUnity — so there is no `html.unescape()` on top, and adding one
+  attribute values itself — the `data-page` on both sources — so there is no
+  `html.unescape()` on top, and adding one
   would turn a plot's `&amp;amp;` into `&`.
 - **Never substitute an audio track.** `strict_audio=True` on the request path turns a missing
   language into an error and parks the request for a human.
+- **An anime's language is a video, not a track (#50).** AnimeUnity used to keep an Italian
+  dub as a title of its own; now one title has a `videos` entry per language on every
+  episode, each a separate stream with its soundtrack muxed in and no renditions in the
+  playlist. So `animeunity.pick_video()` *is* the audio choice — one per file, Italian
+  first, `MissingAudioTrackError` under `strict` — and nothing widens an anime request to
+  other requesters' languages: a union could only hand someone the other version. Episodes
+  are published per language on separate schedules (the dub trails by months), so a watch
+  counts an episode only once it exists in the watch's languages (`poller.current_episodes`),
+  a batch queues only those, and changing an anime watch's languages re-seeds
+  (`poller.reseed_after_language_change`) or the gap would arrive as new episodes.
+  Watches from before #50 always carried `["ita"]` whatever they followed; migration v11
+  rewrites them from the slug (`-ita` was the dub, anything else the original, `jpn`).
+  Old dub ids either survived or answer 301 to the title they were folded into;
+  `animeunity.resolve_id()` follows that, since the episodes API only 404s.
 - **`max_segment_workers` is a process-wide ceiling, not a per-download target.**
   `m3u8.segment_budget()` returns one `AdaptiveLimiter` for the whole panel, held around each
   segment request. Sizing a pool per download instead multiplies it by `max_concurrent_downloads`
@@ -411,7 +427,7 @@ subtitle languages are chosen per download or per request.
 
 The video host is never hardcoded. It moved from `vixcloud.co` to `vixcloud.cc` and every download
 broke, so `_shared.embed_host()` reads it off the embed URL the source itself hands over (SC iframe,
-AnimeUnity `/embed-url/`), `_parse_content()` stores it as `json_win_video["host"]`, and playlist,
+AnimeUnity's player page `props.embedUrl`), `_parse_content()` stores it as `json_win_video["host"]`, and playlist,
 `enc.key` and referers are built from that. The playlist key allowlist (`_KEY_HOSTS`) matches the
 second-level label only, any TLD.
 
@@ -421,7 +437,7 @@ AnimeUnity resolves saved → `ANIMEUNITY_HOST` env → `config.ANIMEUNITY_DEFAU
 through `animeunity.host()`. `video_host` is empty normally; when set, `_shared.apply_video_host()`
 moves the embed URL onto it *before* anything is fetched, so embed page, playlist, key and referers
 all follow. Every value goes through `hosts.normalize_host()` (bare hostname, no IP/port/path) and is
-verified against the service it claims to be — AnimeUnity's page, a 16-byte `/storage/enc.key` —
+verified against the service it claims to be — AnimeUnity's page with an Inertia payload, a 16-byte `/storage/enc.key` —
 before it is stored.
 
 TV episode M3U8 URLs sometimes return 403; appending `?b=1` (or `&b=1`) resolves it. Handled in

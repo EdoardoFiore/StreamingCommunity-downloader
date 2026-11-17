@@ -13,6 +13,7 @@ the rare migration whose decision cannot be expressed in SQL because it depends
 on whether the database already existed.
 """
 
+import json
 import logging
 import os
 import sqlite3
@@ -507,6 +508,38 @@ _V10_LIBRARY_FOLDERS = [
 ]
 
 
+def _v11_anime_versions(conn: sqlite3.Connection, fresh: bool):
+    """Say which version of an anime each existing watch has been following.
+
+    Until AnimeUnity's rebuild (#50) an Italian dub was a title of its own,
+    "-ita" at the end of its slug, so the version followed was decided by the
+    id and the watch's audio languages meant nothing: the title page had no
+    track picker for anime and always sent ``["ita"]``. Now one title carries
+    every language and the audio language *is* the choice of version — so
+    left alone, every watch on an original would silently turn into a watch on
+    the dub, and see nothing new until the dub caught up.
+
+    The slug is the only record of which one was meant, and it is enough: a
+    dub's ended in "-ita", anything else was the original, which on this
+    source is Japanese for all but a handful of titles. Followers' own wishes
+    get the same rewrite, or every one would show up as a language gap.
+    """
+    if fresh:
+        return
+    rows = conn.execute(
+        "SELECT id, external_id, slug FROM jf_series_watch WHERE media_type = 'anime'"
+    ).fetchall()
+    for row in rows:
+        dub = any(str(v or "").lower().endswith("-ita") for v in (row["external_id"], row["slug"]))
+        wanted = json.dumps(["ita" if dub else "jpn"])
+        conn.execute("UPDATE jf_series_watch SET audio_languages = ? WHERE id = ?",
+                     (wanted, row["id"]))
+        conn.execute("UPDATE jf_series_watch_subscriber SET audio_languages = ? "
+                     "WHERE watch_id = ? AND audio_languages IS NOT NULL", (wanted, row["id"]))
+    if rows:
+        logger.info("Set the followed version on %d anime watch(es)", len(rows))
+
+
 Migration = list[str] | Callable[[sqlite3.Connection, bool], None]
 
 MIGRATIONS: list[Migration] = [
@@ -520,6 +553,7 @@ MIGRATIONS: list[Migration] = [
     _v8_carry_over_open_mode,
     _V9_FOLLOWER_LANGUAGES,
     _V10_LIBRARY_FOLDERS,
+    _v11_anime_versions,
 ]
 
 

@@ -79,6 +79,10 @@ class EpisodeDownloadRequest(BaseModel):
 class EpisodeInfo(BaseModel):
     id: int
     number: str | int
+    # AnimeUnity's sequence number, which tells the download which page of
+    # episodes to read the live record from. The videos themselves are not
+    # taken from the client: they are what the download is about to fetch.
+    seq: int | None = None
 
 
 class AnimeDownloadRequest(BaseModel):
@@ -315,10 +319,22 @@ async def download_anime_all(body: AnimeAllDownloadRequest, http_request: HttpRe
     user_id = _acting_user_id(http_request)
 
     def work():
-        from app.core.animeunity import get_episodes
+        from app.core.animeunity import get_episodes, offers
         from app.requests import resolver
 
         listed = get_episodes(body.anime_id) or []
+        # Each language is its own stream, published on its own schedule: a
+        # dub often trails the original by months. Only the episodes that
+        # exist in the version asked for are queued — the rest would either
+        # fail or come down in the other language (#50).
+        offered = [ep for ep in listed if offers(ep, body.audio_languages)]
+        if listed and not offered:
+            available = sorted({lang for ep in listed for lang in ep.get("languages") or []})
+            raise HTTPException(
+                status_code=409,
+                detail=(f"Nessun episodio disponibile in {', '.join(body.audio_languages)} "
+                        f"(disponibili: {', '.join(available) or 'nessuna lingua'})"))
+        listed = offered
         indices, skipped = _missing_only(body, list(range(len(listed))), lambda i: (
             resolver.episode_on_disk(resolver.ANIME, "animeunity", body.anime_id,
                                      body.anime_name, body.year, None,

@@ -127,7 +127,7 @@ def test_an_anime_is_followed_the_same_way(client, open_panel, stub_jobs):
     watch_id = client.post("/api/watches", json=body).json()["id"]
     assert watch_models.seen_keys(watch_id) == {"E1", "E2", "E3"}
 
-    open_panel.anime_episodes.append({"id": 804, "number": "4"})
+    open_panel.add_anime_episode(4)
     poller.run_poll_cycle()
 
     assert [name for name, _, _ in stub_jobs] == ["submit_anime_episode"]

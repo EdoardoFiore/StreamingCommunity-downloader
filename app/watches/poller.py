@@ -52,10 +52,27 @@ def current_episodes(watch: models.Watch) -> list[tuple[str, dict]]:
     if watch.media_type == models.ANIME:
         from app.core import animeunity
 
-        return [
+        # An anime episode is published once per language, each on its own
+        # schedule — the dub often months after the original. For a watch it
+        # exists when it exists in the version being followed, which is what
+        # the separate dub record used to give for free before #50: counting
+        # the original's episodes would see each one "new" weeks before there
+        # was anything in Italian to download.
+        listed = animeunity.get_episodes(watch.external_id)
+        found = [
             (episode_key(models.ANIME, None, ep["number"]), {"number": ep["number"], **ep})
-            for ep in animeunity.get_episodes(watch.external_id)
+            for ep in listed
+            if not watch.audio_languages or animeunity.offers(ep, watch.audio_languages)
         ]
+        if listed and not found:
+            # Not an error — a dub may simply not have started — but a watch
+            # carried over from before #50 guessed "jpn" for the original, and
+            # a Chinese or Korean title would wait here forever unexplained.
+            logger.warning(
+                "Watch %s (%s): no episode in %s yet (published in: %s)",
+                watch.id, watch.title, ", ".join(watch.audio_languages),
+                ", ".join(sorted({l for ep in listed for l in ep.get("languages") or []})))
+        return found
 
     from app.core.page import get_domain_version
     from app.core.tv import get_info_season, get_season_numbers, get_token
@@ -75,6 +92,20 @@ def current_episodes(watch: models.Watch) -> list[tuple[str, dict]]:
     return found
 
 
+def reseed_after_language_change(watch: models.Watch) -> None:
+    """Mark what is published in the watch's new languages as already handled.
+
+    Changing languages applies from the next episode. For an anime that needs
+    saying out loud, because which episodes count as published depends on the
+    languages (current_episodes): adding the original to a watch following the
+    dub would otherwise make every episode the dub has not reached yet look
+    new on the next cycle, and queue the lot.
+    """
+    if watch.media_type != models.ANIME:
+        return
+    models.seed_seen(watch.id, [key for key, _ in current_episodes(watch)])
+
+
 def available_tracks(watch: models.Watch) -> dict:
     """Audio and subtitle languages on the latest published episode.
 
@@ -88,7 +119,10 @@ def available_tracks(watch: models.Watch) -> dict:
         episodes = animeunity.get_episodes(watch.external_id)
         if not episodes:
             raise RuntimeError("nessun episodio letto dalla fonte")
-        langs = animeunity.get_episode_languages(episodes[-1]["id"])
+        # Every language any episode has, not the latest one's: there the
+        # newest episode is the one whose dub has not landed yet.
+        langs = {"audio": [lang for ep in episodes for lang in ep.get("languages") or []],
+                 "subtitles": []}
     else:
         from app.core.page import get_domain_version
         from app.core.tv import get_episode_languages, get_info_season, get_season_numbers, get_token
@@ -184,14 +218,14 @@ def _submit_direct(watch: models.Watch, season, number) -> str:
     if watch.media_type == models.ANIME:
         from app.core import animeunity
 
-        wanted = str(number)
-        for episode in animeunity.get_episodes(watch.external_id):
-            if str(episode.get("number")) == wanted:
-                return job_manager.submit_anime_episode(
-                    watch.external_id, episode, watch.title,
-                    anime_type=watch.anime_type or "tv", **common,
-                )
-        raise RuntimeError(f"episodio {wanted} non più presente su AnimeUnity")
+        try:
+            episode = animeunity.find_episode(watch.external_id, number)
+        except LookupError as e:
+            raise RuntimeError(str(e))
+        return job_manager.submit_anime_episode(
+            watch.external_id, episode, watch.title,
+            anime_type=watch.anime_type or "tv", **common,
+        )
 
     from app.core.page import get_domain_version
     from app.core.tv import get_info_season, get_token

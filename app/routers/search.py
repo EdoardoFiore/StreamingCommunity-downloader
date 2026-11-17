@@ -43,9 +43,10 @@ async def search(
     # source works out what that means. Bounded so nobody asks the source for a
     # preposterous row offset.
     page: int = Query(default=1, ge=1, le=50),
-    # One canonical vocabulary on the wire, lower case; the mapping to
-    # AnimeUnity's own capitalisation lives in animeunity.TYPES.
-    media_type: str | None = Query(default=None, pattern="^(movie|tv|ova|ona|special)$"),
+    # One canonical vocabulary on the wire, lower case — AnimeUnity's own,
+    # since #50 (animeunity.TYPES).
+    media_type: str | None = Query(default=None,
+                                   pattern="^(movie|tv|ova|ona|special|tv_short)$"),
     dubbed: bool = Query(default=False),
 ):
     # One pattern cannot express two vocabularies, so the rest is checked here.

@@ -536,8 +536,7 @@ def _check_audio(request: models.Request, available: dict):
 def available_tracks(request: models.Request) -> dict:
     """Audio and subtitle languages currently on offer for this request."""
     if request.source == "animeunity":
-        episode = _find_anime_episode(request)
-        return animeunity.get_episode_languages(episode["id"])
+        return animeunity.get_episode_languages(_find_anime_episode(request))
 
     from app.core.film import get_film_languages
     from app.core.tv import get_episode_languages, get_info_season, get_token
@@ -552,12 +551,10 @@ def available_tracks(request: models.Request) -> dict:
 
 
 def _find_anime_episode(request: models.Request) -> dict:
-    episodes = animeunity.get_episodes(request.external_id)
-    wanted = str(request.episode_number)
-    for episode in episodes:
-        if str(episode.get("number")) == wanted:
-            return episode
-    raise LinkDead(f"episodio {wanted} non più presente su AnimeUnity")
+    try:
+        return animeunity.find_episode(request.external_id, request.episode_number)
+    except LookupError as e:
+        raise LinkDead(str(e))
 
 
 def _season_episodes(request: models.Request, domain: str, token: str) -> list[dict]:
@@ -609,9 +606,11 @@ def resolve(request: models.Request) -> Resolution:
     try:
         if request.source == "animeunity":
             episode = _find_anime_episode(request)
-            available = animeunity.get_episode_languages(episode["id"])
+            available = animeunity.get_episode_languages(episode)
             _check_audio(request, available)
-            _widen_to_everyone(common, request, available)
+            # No widening here: each language is a separate stream and a file
+            # holds exactly one, so a union of everyone's languages could only
+            # hand this requester somebody else's version (#50).
 
             def submit():
                 return job_manager.submit_anime_episode(

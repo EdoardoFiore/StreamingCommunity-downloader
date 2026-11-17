@@ -363,7 +363,7 @@ def test_anime_are_followed_the_same_way(client, panel, stub_jobs):
     watch_id = _follow(client, csrf, ANIME_BODY).json()["id"]
     assert watch_models.seen_keys(watch_id) == {"E1", "E2", "E3"}
 
-    panel.anime_episodes.append({"id": 804, "number": "4"})
+    panel.add_anime_episode(4)
     poller.run_poll_cycle()
 
     created = request_models.list_all()[0]
@@ -377,7 +377,7 @@ def test_one_broken_series_does_not_stop_the_others(client, panel, monkeypatch):
     csrf = _login(client, bob)
     _follow(client, csrf)
     _follow(client, csrf, ANIME_BODY)
-    panel.anime_episodes.append({"id": 804, "number": "4"})
+    panel.add_anime_episode(4)
 
     real = poller.current_episodes
 

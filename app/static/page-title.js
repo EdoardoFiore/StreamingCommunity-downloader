@@ -73,6 +73,8 @@ async function loadTitlePage(route) {
     // From the address when a link named one, so a reload of S03 is S03.
     season: route.season || 1,
     episodes: [],
+    // AnimeUnity's related titles - sequels, films, OVAs - from its own page.
+    related: [],
     audio: [], subs: [], tracksLoaded: false, tracksError: null,
     // Raw value of the datetime input, kept so a re-render does not clear
     // what the user typed; scheduledAt is its ISO form, or null for "now".
@@ -84,8 +86,8 @@ async function loadTitlePage(route) {
     tab: null,
   };
 
-  // Reached by pasted link: there is no card to borrow from, and AnimeUnity
-  // has nothing to ask. The slug carried in the id is the only name available.
+  // Reached by pasted link: until the title's own record arrives, the slug
+  // carried in the id is the only name available.
   if (!_tp.name && route.type === 'anime') {
     const slug = String(route.id).split('-').slice(1).join('-') || route.slug;
     _tp.name = slug ? slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Anime';
@@ -97,7 +99,15 @@ async function loadTitlePage(route) {
   libRenderTitleCard(route, _tp.name);
 
   let metaReady = Promise.resolve();
-  if (route.type !== 'anime') {
+  if (route.type === 'anime') {
+    // A search card already carries the record; a pasted link or a related
+    // title does not. Asked either way, because only the title's own page
+    // lists what is related to it. The languages are the versions on offer.
+    if (seed?.languages?.length) _tpSetAnimeLanguages(seed.languages);
+    metaReady = api.get(`/api/anime/${encodeURIComponent(route.id)}`)
+      .then(info => { if (token === _tpToken) { _tpApplyAnime(info); _tpRender(); } })
+      .catch(() => {});
+  } else {
     const q = { slug: route.slug, version: currentVersion || '' };
     // Metadata and the track list are independent: one reads the title page,
     // the other reaches the stream host. Neither waits on the other.
@@ -137,7 +147,57 @@ async function loadTitlePage(route) {
     const seasons = _tpSeasons();
     await tpLoadSeason(seasons.includes(route.season) ? route.season : (seasons[0] || 1), token);
   }
-  else if (route.type === 'anime') await _tpLoadAnime(token);
+  else if (route.type === 'anime') await _tpLoadAnime(token, metaReady);
+}
+
+// The anime's own record. Name, kind and year decide where the files go, so
+// the episode list waits for this (see _tpLoadAnime) - a pasted link to a film
+// otherwise had no kind and was filed as a series.
+function _tpApplyAnime(info) {
+  if (!info) return;
+  _tp.name = info.name || _tp.name;
+  _tp.year = _tp.year || itemYear(info);
+  _tp.poster = _tp.poster || info.poster || null;
+  _tp.plot = info.plot || _tp.plot;
+  _tp.genres = info.genres?.length ? info.genres : _tp.genres;
+  _tp.score = _tp.score || (info.score ? parseFloat(info.score).toFixed(1) : null);
+  _tp.animeType = _tp.animeType || info.media_type || null;
+  _tp.episodesCount = info.episodes_count || _tp.episodesCount;
+  _tp.meta = {
+    ...(_tp.meta || {}),
+    backdrop: info.backdrop || _tp.meta?.backdrop || null,
+    plot: info.plot || _tp.meta?.plot || null,
+    genres: info.genres || [],
+    rating: info.score ? parseFloat(info.score).toFixed(1) : null,
+    status: info.status || null,
+    original_name: info.original_name || null,
+    studio: info.studio || null,
+    season: info.season || null,
+    cast: [], directors: [],
+  };
+  _tp.related = info.related || [];
+  _tpSetAnimeLanguages([...(info.languages || []), ..._tp.audio.map(t => t.code)]);
+}
+
+// On AnimeUnity each language is a version of its own - a separate stream with
+// its soundtrack inside - so exactly one is chosen, Italian when there is one.
+// A choice already made survives the list growing.
+function _tpSetAnimeLanguages(langs) {
+  const list = dedupeLangs(langs);
+  const current = (_tp.audio || []).find(t => t.on)?.code;
+  const pick = list.includes(current) ? current : (list.includes('ita') ? 'ita' : list[0]);
+  _tp.audio = list.map(c => ({ code: c, on: c === pick }));
+  _tp.subs = [];
+  _tp.tracksLoaded = list.length > 0;
+  if (_animeCtx && _tp.type === 'anime') _animeCtx.audioLangs = _tpPicked('audio');
+}
+
+// The version chosen, and whether an episode exists in it. A dub trails the
+// original, so the newest episodes are often out in one language only.
+function _tpAnimeLang() { return (_tp.audio || []).find(t => t.on)?.code || null; }
+function _tpEpisodeOffered(ep) {
+  const lang = _tpAnimeLang();
+  return !lang || !Array.isArray(ep?.languages) || ep.languages.includes(lang);
 }
 
 function _tpApplyMeta(meta) {
@@ -191,12 +251,16 @@ async function tpLoadSeason(n, token = _tpToken) {
   _tpRenderHero();       // and so is the chip
 }
 
-async function _tpLoadAnime(token) {
+async function _tpLoadAnime(token, metaReady = Promise.resolve()) {
   _tp.episodes = null;
   _tpRenderEpisodes();
   try {
-    const eps = await api.get(`/api/anime/${_tp.id}/episodes`);
+    const [eps] = await Promise.all([
+      api.get(`/api/anime/${encodeURIComponent(_tp.id)}/episodes`), metaReady,
+    ]);
     if (token !== _tpToken) return;
+    // Whatever the record said, these are the versions really published.
+    _tpSetAnimeLanguages([..._tp.audio.map(t => t.code), ...eps.flatMap(e => e.languages || [])]);
     // Spread, not a projection: startAnimeDownload reads episode.number and
     // posts the whole record back. Narrowing it to {id, n} here sent the API
     // a stripped object and labelled every job "E undefined". `n` is added
@@ -248,10 +312,13 @@ function tpSetSchedule(value) {
 function tpToggleTrack(which, code) {
   const t = (_tp[which] || []).find(x => x.code === code);
   if (!t) return;
-  t.on = !t.on;
+  // One version per anime file: picking a language unpicks the other.
+  if (_tp.type === 'anime' && which === 'audio') _tp.audio.forEach(x => { x.on = x === t; });
+  else t.on = !t.on;
   if (_tp.type === 'anime') { if (_animeCtx) { _animeCtx.audioLangs = _tpPicked('audio'); _animeCtx.subLangs = _tpPicked('subs'); } }
   else if (_epCtx) { _epCtx.audioLangs = _tpPicked('audio'); _epCtx.subLangs = _tpPicked('subs'); }
   _tpRenderTracks();
+  if (_tp.type === 'anime') _tpRenderEpisodes();   // which episodes exist in it
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -261,14 +328,14 @@ function _tpTabs() {
   if (_tp.type !== 'movie') tabs.push(['episodes', 'Episodi']);
   tabs.push(['about', 'Descrizione']);
   if (_tp.meta?.cast?.length || _tp.meta?.directors?.length) tabs.push(['cast', 'Cast']);
-  // Anime tracks are chosen by the source, not here.
-  if (_tp.type !== 'anime') tabs.push(['tracks', 'Tracce']);
+  tabs.push(['tracks', _tp.type === 'anime' ? 'Lingua' : 'Tracce']);
+  if (_tp.related?.length) tabs.push(['related', 'Correlati']);
   return tabs;
 }
 
 function tpSetTab(name) {
   _tp.tab = name;
-  for (const [key] of [['episodes'], ['about'], ['cast'], ['tracks']]) {
+  for (const [key] of [['episodes'], ['about'], ['cast'], ['tracks'], ['related']]) {
     const pane = document.getElementById(`th-pane-${key}`);
     if (pane) pane.hidden = key !== name;
   }
@@ -285,6 +352,7 @@ function _tpRender() {
   _tpRenderAbout();
   _tpRenderCast();
   _tpRenderTracks();
+  _tpRenderRelated();
   _tpRenderFacts();
   _tpRenderTrailer();
   _tpRenderEpisodes();
@@ -420,7 +488,7 @@ function _tpRenderCast() {
 
 function _tpRenderTracks() {
   const el = document.getElementById('th-pane-tracks');
-  if (_tp.type === 'anime') { el.innerHTML = ''; return; }
+  if (_tp.type === 'anime') { _tpRenderAnimeLanguage(el); return; }
   if (!_tp.tracksLoaded) {
     el.innerHTML = `<div class="th-empty"><span class="spinner-border spinner-border-sm me-2"></span>Lettura delle tracce…</div>`;
     return;
@@ -448,6 +516,54 @@ function _tpRenderTracks() {
        presente nel file non viene sostituita con un'altra: la richiesta si
        ferma e la guarda una persona.
      </p>`;
+}
+
+function _tpRenderAnimeLanguage(el) {
+  if (!_tp.tracksLoaded) {
+    el.innerHTML = `<div class="th-empty"><span class="spinner-border spinner-border-sm me-2"></span>Lettura delle lingue…</div>`;
+    return;
+  }
+  const chips = _tp.audio.map(t => `<button class="th-track${t.on ? ' on' : ''}"
+      data-action="tp:track" data-which="audio" data-code="${escapeHtml(t.code)}">${escapeHtml(langName(t.code))}</button>`).join('');
+  el.innerHTML = `<div class="th-track-group">
+      <div class="th-track-h"><i class="ti ti-volume"></i>Versione</div>
+      <div class="th-track-chips">${chips}</div>
+    </div>
+    <p style="color:var(--text-muted);font-size:12px;margin:0">
+      Su AnimeUnity ogni lingua è una versione a sé, con l'audio nel video: un
+      file ne contiene una sola, e i sottotitoli della fonte sono già
+      nell'immagine. Gli episodi non ancora usciti nella versione scelta non si
+      possono scaricare.
+    </p>`;
+}
+
+function _tpRenderRelated() {
+  const el = document.getElementById('th-pane-related');
+  if (!el) return;
+  const items = _tp.related || [];
+  if (!items.length) { el.innerHTML = ''; return; }
+  const kinds = { movie: 'Film', tv: 'Serie TV', ova: 'OVA', ona: 'ONA', special: 'Speciale', tv_short: 'TV Short' };
+  el.innerHTML = `<div class="th-eps">${items.map((it, i) => {
+    const kind = kinds[String(it.media_type || '').toLowerCase()] || it.media_type || 'Anime';
+    const bits = [kind, itemYear(it), it.languages?.includes('ita') ? 'ITA' : null].filter(Boolean);
+    return `<div class="th-ep">
+        ${thumbHtml(posterUrl(it), 'th-ep-still', it.name)}
+        <div class="th-ep-body">
+          <div class="th-ep-name">${escapeHtml(it.name)}</div>
+          <div class="th-ep-plot">${escapeHtml(bits.join(' · '))}</div>
+        </div>
+        <button class="btn btn-sm btn-outline-primary" data-action="tp:related" data-index="${i}">
+          <i class="ti ti-arrow-right me-1"></i>Apri
+        </button>
+      </div>`;
+  }).join('')}</div>`;
+}
+
+function tpOpenRelated(index) {
+  const item = _tp.related?.[index];
+  if (!item) return;
+  _tpSeed = item;
+  location.hash = titleHash(item);
 }
 
 function _tpRenderFacts() {
@@ -566,6 +682,12 @@ function _tpRenderEpisodes() {
     const dur = ep.duration ? `<span class="th-ep-dur">${escapeHtml(String(ep.duration))}m</span>` : '';
     const owned = ep.in_library
       ? `<i class="ti ti-circle-check-filled th-ep-owned" title="Già in libreria"></i>` : '';
+    // The versions an anime episode is out in, and whether the chosen one is.
+    const langs = _tp.type === 'anime' && Array.isArray(ep.languages)
+      ? ep.languages.map(l => `<span class="badge bg-secondary-lt">${escapeHtml(l.toUpperCase())}</span>`).join(' ')
+      : '';
+    const offered = _tp.type !== 'anime' || _tpEpisodeOffered(ep);
+    const lock = offered ? '' : ` disabled title="Non ancora uscito in ${escapeHtml(langName(_tpAnimeLang() || ''))}"`;
     return `<div class="th-ep">
         <span class="th-ep-n">${escapeHtml(String(ep.n))}</span>
         ${still}
@@ -573,9 +695,9 @@ function _tpRenderEpisodes() {
           <div class="th-ep-name">${escapeHtml(ep.name || `Episodio ${ep.n}`)}</div>
           ${plot}
         </div>
-        ${dur}${owned}
+        ${langs}${dur}${owned}
         <button class="btn btn-sm ${wants ? 'btn-outline-primary' : 'btn-primary'}"
-                data-action="tp:episode" data-index="${i}">
+                data-action="tp:episode" data-index="${i}"${lock}>
           <i class="ti ${wants ? 'ti-send' : 'ti-download'} me-1"></i>${wants ? 'Richiedi' : 'Scarica'}
         </button>
       </div>`;
@@ -842,6 +964,10 @@ async function startAnimeDownload(epIndex) {
   const { animeId, animeName, animeType, animeYear, scheduledAt, episodes, audioLangs, subLangs } = _animeCtx;
   const episode = episodes[epIndex];
   const label = `${animeName} E${episode.number}`;
+  if (!_tpEpisodeOffered(episode)) {
+    showToast(`${label}: non ancora uscito in ${langName(_tpAnimeLang() || '')}`, 'warning');
+    return;
+  }
 
   if (!can('DOWNLOAD')) {
     await submitRequest({
@@ -872,7 +998,15 @@ async function downloadAllAnime() {
   const { animeId, animeName, animeType, animeYear, episodes, scheduledAt,
           audioLangs, subLangs } = _animeCtx;
   const label = scheduledAt ? 'Programmare' : 'Aggiungere alla coda';
-  if (!await scConfirm(`${label} tutti i ${episodes.length} episodi${_skipNote()}?`)) return;
+  // The server queues only the episodes out in the chosen version; the
+  // question counts the same ones.
+  const offered = episodes.filter(_tpEpisodeOffered).length;
+  if (!offered) {
+    showToast(`Nessun episodio disponibile in ${langName(_tpAnimeLang() || '')}`, 'warning');
+    return;
+  }
+  const lang = _tpAnimeLang() ? ` in ${langName(_tpAnimeLang())}` : '';
+  if (!await scConfirm(`${label} tutti i ${offered} episodi${lang}${_skipNote()}?`)) return;
   await _startBatch('/api/download/anime-all', {
     anime_id: String(animeId), anime_name: animeName, anime_type: animeType,
     year: animeYear,
@@ -897,6 +1031,7 @@ registerActions({
   'tp:tab':           d => tpSetTab(d.tab),
   'tp:track':         d => tpToggleTrack(d.which, d.code),
   'tp:trailer':       () => tpPlayTrailer(),
+  'tp:related':       d => tpOpenRelated(Number(d.index)),
   'tp:season':        d => tpLoadSeason(Number(d.n)),
   'tp:schedule':      (d, el) => tpSetSchedule(el.value),
   'tp:onlyMissing':   (d, el) => { _tp.onlyMissing = el.checked; },

@@ -10,7 +10,7 @@ from app import config
 from app.auth.deps import require
 from app.auth.permissions import Permission
 from app.config import get_settings, save_settings
-from app.core import animeunity, domain_recovery, home, hosts, metadata, naming
+from app.core import domain_recovery, home, hosts, metadata, naming
 from app.core.paths import validate_library_path
 from app.core.page import get_domain_version
 
@@ -166,7 +166,6 @@ async def set_hosts(body: HostsUpdate):
     if changes:
         _update_data(changes)
     if "animeunity_domain" in changes:
-        animeunity.forget_csrf()
         home.clear_cache("animeunity")
     return _hosts_state()
 

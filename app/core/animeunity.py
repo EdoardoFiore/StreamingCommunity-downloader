@@ -1,14 +1,45 @@
-import json
+"""AnimeUnity: search, title details, episodes and downloads.
+
+In November 2026 the site was rebuilt (#50) and every path the panel used went
+with it: ``/archivio/get-animes``, ``/info_api/{id}`` and ``/embed-url/{id}`` all
+answer 404. The new site is an Inertia app, like StreamingCommunity, so most of
+what the panel needs is read out of the ``data-page`` attribute of a page any
+visitor is served — no CSRF token, no XHR headers, no session:
+
+- search: ``GET /archive?query=…&page=N``, thirty titles in ``props.animes``;
+- title: ``GET /anime/{id}-{slug}``, the record in ``props.anime`` plus the
+  source's own ``relatedAnimes``;
+- player: ``GET /anime/{id}-{slug}/{video}``, the signed vixcloud URL in
+  ``props.embedUrl``;
+- episodes: ``GET /api/anime/{id}/episodes?start=N``, plain JSON, 120 a time.
+
+**The data model changed with it.** An Italian dub used to be a title of its
+own ("One Piece (ITA)", separate id, separate episodes). Now there is one title
+with a ``variants`` entry per language, and every episode carries a ``videos``
+list — one stream per language, each with its own id on the player page. So
+the language of an anime download is *which video is fetched*, not a track
+picked out of a playlist: the streams carry a single muxed soundtrack and
+advertise no renditions at all. ``pick_video()`` is that choice, and it obeys
+the same rule as every other download — with ``strict`` set a language that is
+not on offer is an error, never a substitution.
+
+Old dub ids did not all survive the merge. Some kept their number (the slug
+lost its ``-ita``), others answer 301 to the title they were folded into, and
+the episodes API answers 404 for those. ``resolve_id()`` follows that redirect
+once and remembers it, so a watch or request filed under an old id keeps
+working.
+"""
+
 import logging
 import re
-import time
+import threading
 
 import requests
-from bs4 import BeautifulSoup
 
-from app.core.headers import sanitize_filename
+from app.core.headers import get_headers
 
 logger = logging.getLogger(__name__)
+
 
 def host() -> str:
     """AnimeUnity's current host. Read per call: Settings can change it live."""
@@ -16,33 +47,37 @@ def host() -> str:
     return configured_animeunity_host()
 
 
-BATCH_SIZE = 120
-
-# What /archivio/get-animes answers per call. Not ours to choose — it is the
-# source's page size, and what one "Carica altri" is worth.
+# What /archive answers per page. Not ours to choose — it is the source's page
+# size, and what one "Carica altri" is worth.
 ARCHIVE_PAGE = 30
 
 # A ceiling on what one call may normalise, for the day the source answers with
 # more than a page.
 MAX_RESULTS = 60
 
-# The panel's word for a kind, and the source's own. The wire vocabulary is
-# lower case so there is one canonical form; AnimeUnity capitalises its own.
-TYPES = {
-    "movie": "Movie", "tv": "TV", "ova": "OVA", "ona": "ONA", "special": "Special",
+# The source's own kinds, which are also the panel's wire vocabulary: the new
+# site speaks lower case, so there is nothing left to map. Kept as a set so the
+# router and the MCP tool can refuse anything else before a request is made.
+TYPES = frozenset({"movie", "tv", "ova", "ona", "special", "tv_short"})
+
+# A long series runs to well over a thousand episodes, 120 a page. The bound is
+# for a source that keeps answering with something: it is never reached by a
+# real title (One Piece is ten pages).
+_MAX_EPISODE_PAGES = 60
+
+_STATUS_LABELS = {
+    "ongoing": "In corso", "completed": "Terminato",
+    "upcoming": "In arrivo", "dropped": "Interrotto",
+}
+_SEASON_LABELS = {
+    "winter": "Inverno", "spring": "Primavera", "summer": "Estate", "fall": "Autunno",
 }
 
-# The CSRF token stays good for a while and costs a page load to get, so it is
-# not refetched per search.
-_CSRF_TTL = 10 * 60
-
 _scraper = None
-_csrf: tuple[float, str] | None = None
 
-
-def _now() -> float:
-    """Indirected so a test can move the clock without sleeping."""
-    return time.time()
+# Old id → the id the source answers to now. See resolve_id().
+_moved: dict[int, int] = {}
+_moved_lock = threading.Lock()
 
 
 def _get_scraper():
@@ -59,132 +94,152 @@ def _get_scraper():
     return _scraper
 
 
-def fetch_home_html() -> str:
-    """The AnimeUnity home page, refreshing the cached CSRF token on the way.
+def _get(path: str, *, params: dict | None = None, allow_redirects: bool = True,
+         headers: dict | None = None, timeout: int = 20):
+    return _get_scraper().get(
+        f"https://{host()}{path}", params=params, allow_redirects=allow_redirects,
+        headers={"user-agent": get_headers(), **(headers or {})}, timeout=timeout,
+    )
 
-    Shared with the start page, which reads its shelves out of this same HTML.
-    """
-    global _csrf
-    r = _get_scraper().get(f"https://{host()}/", timeout=15)
-    r.raise_for_status()
+
+def _props(path: str, *, params: dict | None = None) -> dict:
+    """The Inertia ``props`` of one page of the site."""
+    from app.core.page import _data_page
+
+    r = _get(path, params=params)
+    if r.status_code == 404:
+        raise LookupError(f"AnimeUnity: {path} non trovato (HTTP 404)")
+    if not r.ok:
+        raise RuntimeError(f"AnimeUnity: HTTP {r.status_code} su {path}")
     try:
-        meta = BeautifulSoup(r.text, "lxml").find("meta", {"name": "csrf-token"})
-        if meta and meta.get("content"):
-            _csrf = (_now() + _CSRF_TTL, meta["content"])
-    except Exception as e:
-        logger.debug("Error extracting CSRF token: %s", e)
-    return r.text
+        return _data_page(r.text).get("props") or {}
+    except LookupError:
+        raise RuntimeError(f"AnimeUnity: {path} non contiene i dati attesi")
 
 
-def forget_csrf() -> None:
-    """Drop the cached token: it belongs to the host that issued it."""
-    global _csrf
-    _csrf = None
+def fetch_home_props() -> dict:
+    """The front page's props, for the start page's shelves."""
+    return _props("/")
 
 
-def _csrf_token() -> str | None:
-    """The cached token, fetching the home page when there is none or it is old."""
-    global _csrf
-    if _csrf and _csrf[0] > _now():
-        return _csrf[1]
-    _csrf = None
-    fetch_home_html()
-    return _csrf[1] if _csrf else None
+# ── Ids ───────────────────────────────────────────────────────────────────────
+
+_ID = re.compile(r"^\s*(\d+)")
+_LOCATION_ID = re.compile(r"/anime/(\d+)(?:-|/|$)")
 
 
-def _ajax_headers(token: str | None) -> dict:
-    headers = {
-        "Accept": "application/json, text/plain, */*",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": f"https://{host()}/archivio",
-        "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-    }
-    if token:
-        headers["X-CSRF-TOKEN"] = token
-    return headers
+def parse_id(anime_id) -> int:
+    """The numeric id inside a panel id (``"12-one-piece"`` → 12)."""
+    m = _ID.match(str(anime_id))
+    if not m:
+        raise ValueError(f"id AnimeUnity non valido: {anime_id!r}")
+    return int(m.group(1))
 
 
-def _genres(value) -> list[str]:
-    """Genre names, whichever shape Laravel cast them into this time.
+def _title_path(anime_id) -> str:
+    """``/anime/{id}-{slug}``. The site answers a bare id with 405, and corrects
+    a wrong slug with a redirect, so any slug will do when there is none."""
+    raw = str(anime_id).strip()
+    return f"/anime/{raw}" if "-" in raw else f"/anime/{parse_id(raw)}-x"
 
-    Rows arrive as dicts with pivot tables, sometimes as plain strings, and
-    occasionally as a JSON string. The panel wants names, and the alternative to
-    tolerating all three is a TypeError raised in the middle of a search.
+
+def resolve_id(anime_id) -> int:
+    """The id the source answers to now for ``anime_id``.
+
+    Usually the number it already carries. A dub that was folded into its
+    original's record answers its old title page with a 301 to the new one,
+    and that is followed once and remembered for the life of the process.
     """
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except Exception:
-            return []
+    num = parse_id(anime_id)
+    with _moved_lock:
+        if num in _moved:
+            return _moved[num]
+    r = _get(_title_path(anime_id), allow_redirects=False)
+    target = num
+    if r.status_code in (301, 302, 307, 308):
+        m = _LOCATION_ID.search(r.headers.get("location", ""))
+        if m:
+            target = int(m.group(1))
+    elif r.status_code == 404:
+        raise LookupError(f"anime {anime_id} non più presente su AnimeUnity")
+    if target != num:
+        logger.info("AnimeUnity id %s now answers as %s", num, target)
+    with _moved_lock:
+        _moved[num] = target
+    return target
+
+
+# ── Titles ────────────────────────────────────────────────────────────────────
+
+def _names(value) -> list[str]:
+    """Names out of a list of ``{id, name}`` rows, or of plain strings."""
     names = []
-    for g in (value or []):
+    for g in (value if isinstance(value, list) else []):
         name = g.get("name") if isinstance(g, dict) else g
         if isinstance(name, str) and name.strip():
             names.append(name.strip())
     return names
 
 
+def title_languages(t: dict) -> list[str]:
+    """The languages a title is published in, from its ``variants``."""
+    langs = []
+    for v in t.get("variants") or []:
+        lang = str((v or {}).get("language") or "").strip().lower() if isinstance(v, dict) else ""
+        if lang and lang not in langs:
+            langs.append(lang)
+    return langs
+
+
 def normalize_title(t: dict) -> dict | None:
     """One raw record into the shape the panel renders, or None if unusable."""
-    title_str = (t.get("title_eng") or t.get("title") or t.get("name") or "").strip()
-    id_num = t.get("id")
-    if not title_str or id_num is None:
+    if not isinstance(t, dict):
         return None
-    slug = t.get("slug", "") or ""
+    name = str(t.get("title") or t.get("title_it") or t.get("title_ja") or "").strip()
+    id_num = t.get("id")
+    if not name or id_num is None:
+        return None
+    slug = t.get("slug") or ""
+    images = t.get("images") if isinstance(t.get("images"), dict) else {}
+    languages = title_languages(t)
+    counts = [int(v.get("episodes_count") or 0) for v in t.get("variants") or []
+              if isinstance(v, dict) and str(v.get("episodes_count") or "0").isdigit()]
+    year = str(t.get("year") or "")
+    original = str(t.get("title_ja") or "").strip()
     return {
         "id": f"{id_num}-{slug}" if slug else str(id_num),
-        "name": title_str,
+        "name": name,
         "type": "anime",
-        # The source's own classification — Movie, TV, OVA, ONA, Special. Kept
-        # beside `type` rather than in it: `type` is "anime" for every record and
-        # the whole anime flow keys off that, from the detail modal to the
-        # episodes endpoint to the job kind. Without this the card had nothing to
-        # go on, so it labelled every film a TV series.
-        "media_type": t.get("type") or "",
+        # The source's own classification — tv, movie, ova, ona, special,
+        # tv_short. Kept beside `type` rather than in it: `type` is "anime" for
+        # every record and the whole anime flow keys off that, from the detail
+        # page to the episodes endpoint to the job kind.
+        "media_type": str(t.get("type") or "").lower(),
         "slug": slug,
-        # An absolute URL, unlike StreamingCommunity's bare filename: the
+        # Absolute URLs, unlike StreamingCommunity's bare filenames: the
         # frontend branches on that and sends only the latter through /api/image.
-        "poster": (t.get("imageurl") or t.get("cover") or
-                   t.get("poster") or t.get("image") or ""),
-        "episodes_count": t.get("episodes_count", 0),
-        # The archive endpoint sends these with the search, so the detail panel
-        # costs no request of its own.
+        "poster": images.get("poster") or images.get("cover") or "",
+        "backdrop": images.get("banner") or images.get("cover") or "",
+        "logo": images.get("logo") or "",
+        "episodes_count": max(counts) if counts else int(t.get("total_episodes") or 0),
         "plot": t.get("plot") or "",
-        "genres": _genres(t.get("genres")),
-        # AnimeUnity keeps an Italian dub as a record of its own: same show,
-        # separate id and slug, "(ITA)" in the title.
-        "dubbed": bool(t.get("dub")),
-        "score": t.get("score") or t.get("vote"),
-        "release_date": t.get("date") or t.get("release_date") or "",
-        # The archive record carries thirty-four fields and the panel was
-        # keeping eleven. These cost nothing - the search already paid for
-        # them - and they are what let an anime's page look like a film's
-        # instead of a bare list of episodes.
-        #
-        # imageurl is the poster; imageurl_cover is the wide banner, which is
-        # what the detail hero wants behind the title. Both are absolute
-        # AniList URLs, so neither goes through /api/image.
-        "backdrop": t.get("imageurl_cover") or "",
-        "studio": t.get("studio") or "",
-        "status": t.get("status") or "",
-        "season": t.get("season") or "",
-        # The romaji or Japanese title, when it differs from the one shown.
-        "original_name": (t.get("title") or "") if (t.get("title") or "") != title_str else "",
+        "genres": _names(t.get("genres")),
+        # One title per show now, with a variant per language. `dubbed` keeps
+        # its meaning for the search filter and the card: an Italian dub exists.
+        "languages": languages,
+        "dubbed": "ita" in languages,
+        "score": t.get("score"),
+        "release_date": year,
+        "studio": ", ".join(_names(t.get("studios"))),
+        "status": _STATUS_LABELS.get(str(t.get("default_status") or ""), t.get("default_status") or ""),
+        "season": _SEASON_LABELS.get(str(t.get("season") or ""), t.get("season") or ""),
+        "original_name": original if original and original != name else "",
     }
 
 
-def _normalize_titles(titles: list) -> list[dict]:
-    """Convert raw AnimeUnity records to the normalized format the frontend renders."""
+def _normalize_titles(titles) -> list[dict]:
     results, seen = [], set()
-    for t in titles:
+    for t in titles if isinstance(titles, list) else []:
         item = normalize_title(t)
         if item is None or item["id"] in seen:
             continue
@@ -195,146 +250,229 @@ def _normalize_titles(titles: list) -> list[dict]:
     return results
 
 
-def _post_archive(body: dict):
-    """POST the archive query, renewing the CSRF token once if it has gone stale.
-
-    A 419 is Laravel saying the token expired. Fetching a new one and sending the
-    request again is **re-authentication, not a retry** — a different request
-    carrying a new credential — which is why it does not go through
-    ``_shared.with_retry`` and must not be folded into it.
-    """
-    global _csrf
-    scraper = _get_scraper()
-    url = f"https://{host()}/archivio/get-animes"
-
-    r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()), timeout=20)
-    if r.status_code in (403, 419):
-        logger.info("AnimeUnity refused the CSRF token (HTTP %d), renewing it",
-                    r.status_code)
-        _csrf = None
-        r = scraper.post(url, json=body, headers=_ajax_headers(_csrf_token()), timeout=20)
-    return r
-
-
 def search(query: str, *, page: int = 1, media_type: str | None = None,
            dubbed: bool = False) -> list[dict]:
-    """Search AnimeUnity through ``/archivio/get-animes``.
+    """Search AnimeUnity's archive.
 
-    Not ``/livesearch``, which this used to call: the source caps that at
-    **eight records** for every query, with no way to ask for more and no
-    filters — measured, not guessed. The archive endpoint answers thirty at a
-    time, takes a row offset, and applies both filters itself.
-
-    Both filters go to the source rather than to what comes back: filtering here
-    could only ever narrow one page, and would answer "no Italian dub" for a show
-    whose dub sat on page two. ``page`` is 1-based and becomes the row offset.
+    Both filters go to the source rather than to what comes back: filtering
+    here could only ever narrow one page, and would answer "no Italian dub" for
+    a show whose dub sat on page two. So an empty page really is the end.
     """
-    body = {"title": query, "offset": (max(page, 1) - 1) * ARCHIVE_PAGE}
-    if dubbed:
-        body["dubbed"] = 1
+    params = {"query": query, "page": max(page, 1)}
     if media_type:
-        body["type"] = TYPES.get(media_type.lower(), media_type)
-
-    r = _post_archive(body)
-    if not r.ok:
-        logger.error("Archive search failed with status %d", r.status_code)
-        raise RuntimeError(f"AnimeUnity search failed: HTTP {r.status_code}")
-
-    try:
-        payload = r.json()
-    except Exception as e:
-        logger.error("Error parsing archive response: %s", e)
-        raise
-    records = payload if isinstance(payload, list) else payload.get("records", [])
-
-    # No rows is an answer, not a failure — the same one StreamingCommunity
-    # gives. This used to raise, which reached the panel as a red error box
-    # saying the search had broken when the query simply matched nothing.
-    return _normalize_titles(records)
+        kind = media_type.lower()
+        if kind not in TYPES:
+            raise ValueError(f"tipo AnimeUnity non valido: {media_type!r}")
+        params["type"] = kind
+    if dubbed:
+        params["language"] = "ita"
+    props = _props("/archive", params=params)
+    animes = props.get("animes") or {}
+    # No rows is an answer, not a failure — the same one StreamingCommunity gives.
+    return _normalize_titles(animes.get("data") if isinstance(animes, dict) else animes)
 
 
-def get_episodes(anime_id: str) -> list[dict]:
-    """
-    Fetch all episodes for an anime using the AnimeUnity info_api.
-    Uses BATCH_SIZE-chunked requests to handle long series.
-    Returns list of {id, number} dicts.
-    """
-    scraper = _get_scraper()
-    au_host = host()
+def get_title(anime_id) -> dict:
+    """One title's record and the source's related titles (sequels, films, OVAs)."""
+    props = _props(_title_path(anime_id))
+    item = normalize_title(props.get("anime") or {})
+    if item is None:
+        raise RuntimeError(f"AnimeUnity: scheda di {anime_id} illeggibile")
+    item["related"] = _normalize_titles(props.get("relatedAnimes"))
+    return item
 
-    r = scraper.get(f"https://{au_host}/info_api/{anime_id}", timeout=15)
+
+# ── Episodes ──────────────────────────────────────────────────────────────────
+
+def _episode(raw: dict) -> dict | None:
+    """One episode with the videos it can be downloaded as, one per language."""
+    if not isinstance(raw, dict) or raw.get("id") is None:
+        return None
+    videos = []
+    for v in raw.get("videos") or []:
+        if not isinstance(v, dict) or v.get("id") is None or v.get("is_hidden"):
+            continue
+        lang = str(v.get("language") or "").strip().lower()
+        if lang and all(x["language"] != lang for x in videos):
+            videos.append({"id": v["id"], "language": lang, "runtime": v.get("runtime")})
+    return {
+        "id": raw["id"],
+        "number": str(raw.get("number") if raw.get("number") is not None else ""),
+        "seq": raw.get("seq_number_start"),
+        "is_filler": bool(raw.get("is_filler")),
+        "videos": videos,
+        "languages": [v["language"] for v in videos],
+    }
+
+
+def _episodes_page(num: int, start: int | None) -> dict:
+    params = {"start": start} if start is not None else None
+    r = _get(f"/api/anime/{num}/episodes", params=params,
+             headers={"accept": "application/json"})
+    if r.status_code == 404:
+        raise LookupError(f"anime {num} non trovato")
     r.raise_for_status()
-    episodes_count = r.json().get("episodes_count", 0)
+    return r.json()
 
-    if not episodes_count:
-        return []
 
-    episodes = []
-    for start in range(0, episodes_count + 1, BATCH_SIZE):
-        end = min(start + BATCH_SIZE - 1, episodes_count)
-        batch_r = scraper.get(
-            f"https://{au_host}/info_api/{anime_id}/0",
-            params={"start_range": start, "end_range": end},
-            timeout=15,
-        )
-        if batch_r.ok:
-            episodes.extend(batch_r.json().get("episodes", []))
+def _fetch_episodes(anime_id, start: int | None = None) -> tuple[int, dict]:
+    """The canonical id and one page of episodes, following a merged id."""
+    num = parse_id(anime_id)
+    with _moved_lock:
+        num = _moved.get(num, num)
+    try:
+        return num, _episodes_page(num, start)
+    except LookupError:
+        moved = resolve_id(anime_id)
+        if moved == num:
+            raise
+        return moved, _episodes_page(moved, start)
 
+
+def get_episodes(anime_id) -> list[dict]:
+    """Every episode of an anime, in the source's order.
+
+    ``start`` is a sequence number, not a row offset, and a page covers
+    ``tab_size`` of them; the next page starts after the last sequence number
+    seen, which stays right if the numbering has holes.
+    """
+    num, first = _fetch_episodes(anime_id)
+    total = int(first.get("total") or 0)
+    tab = int(first.get("tab_size") or 120)
+    episodes, seen = [], set()
+
+    def take(batch) -> int:
+        added = 0
+        for raw in batch or []:
+            ep = _episode(raw)
+            if ep and ep["id"] not in seen:
+                seen.add(ep["id"])
+                episodes.append(ep)
+                added += 1
+        return added
+
+    take(first.get("episodes"))
+    start = int(first.get("start") or first.get("offset") or 1)
+    for _ in range(_MAX_EPISODE_PAGES):
+        if len(episodes) >= total:
+            break
+        last = max((int(e["seq"]) for e in episodes if isinstance(e.get("seq"), int)), default=None)
+        start = (last + 1) if last is not None and last >= start else start + tab
+        if not take(_episodes_page(num, start).get("episodes")):
+            break
     return episodes
 
 
-def _get_embed_content(episode_id) -> tuple[str, str]:
-    """
-    Fetch the vixcloud embed page for an episode.
-    Returns (script_text, embed_url) — same shape as film._get_iframe().
-    """
-    scraper = _get_scraper()
-    au_host = host()
+def find_episode(anime_id, number, hint=None) -> dict:
+    """One episode by number, reading the page it sits on rather than the lot.
 
-    # AnimeUnity returns the vixcloud embed URL as plain text
-    r = scraper.get(f"https://{au_host}/embed-url/{episode_id}", timeout=15)
-    r.raise_for_status()
-    embed_url = r.text.strip()
+    ``hint`` is the episode's sequence number when the caller has it; a number
+    that is a plain integer is the next best guess. Either way the full list is
+    the fallback, so a wrong guess costs a request, never a wrong episode.
+    """
+    wanted = str(number)
+    guess = hint
+    if guess is None:
+        try:
+            guess = int(float(wanted))
+        except ValueError:
+            guess = None
+    if guess is not None:
+        _, page = _fetch_episodes(anime_id, max(int(guess), 1))
+        for raw in page.get("episodes") or []:
+            ep = _episode(raw)
+            if ep and ep["number"] == wanted:
+                return ep
+    for ep in get_episodes(anime_id):
+        if ep["number"] == wanted:
+            return ep
+    raise LookupError(f"episodio {wanted} non più presente su AnimeUnity")
 
+
+def get_episode_languages(episode: dict) -> dict:
+    """The languages an episode is published in.
+
+    Each one is a separate stream with its soundtrack muxed in, so they are
+    reported as audio. There are no subtitle tracks to pick: a version
+    subtitled by the source carries them in the picture.
+    """
+    return {"audio": list((episode or {}).get("languages") or
+                          [v["language"] for v in (episode or {}).get("videos") or []]),
+            "subtitles": []}
+
+
+def offers(episode: dict, audio_languages) -> bool:
+    """Whether ``episode`` has a video in any of ``audio_languages``."""
+    wanted = {str(l).lower() for l in audio_languages or []}
+    return any(v["language"] in wanted for v in episode.get("videos") or [])
+
+
+def pick_video(episode: dict, audio_languages, strict: bool = False) -> dict:
+    """The video to download for ``audio_languages``.
+
+    One file holds one stream, so only one language can win: Italian when it
+    was asked for, otherwise the first asked for that is on offer. With
+    ``strict`` a language that is not on offer raises — the request flow must
+    not hand a user who asked for the dub the original, or the reverse.
+    Without it, the Italian video (or the only one) stands in, as a direct
+    download always has when the source could not do what was asked.
+    """
+    from app.core._shared import MissingAudioTrackError
+
+    videos = episode.get("videos") or []
+    by_lang = {v["language"]: v for v in videos}
+    wanted = [str(l).lower() for l in audio_languages or []]
+    for lang in sorted(dict.fromkeys(wanted), key=lambda l: l != "ita"):
+        if lang in by_lang:
+            return by_lang[lang]
+    if strict or not videos:
+        raise MissingAudioTrackError(wanted[0] if wanted else "?", list(by_lang))
+    fallback = by_lang.get("ita") or videos[0]
+    logger.warning("Episode %s: %s not offered, downloading %s",
+                   episode.get("number"), wanted or "-", fallback["language"])
+    return fallback
+
+
+# ── Download ──────────────────────────────────────────────────────────────────
+
+def _embed_url(anime_id, video_id) -> str:
+    """The signed vixcloud URL the player page hands its iframe."""
+    props = _props(f"{_title_path(anime_id)}/{video_id}")
+    served = (props.get("video") or {}).get("id")
+    # The page answers a video that is not this title's with 404, but a
+    # payload naming another video would download the wrong episode in silence.
+    if str(served) != str(video_id):
+        raise RuntimeError(f"AnimeUnity ha servito il video {served} invece di {video_id}")
+    embed_url = str(props.get("embedUrl") or "").strip()
     if not embed_url.startswith("http"):
-        raise RuntimeError(f"Unexpected embed-url response: {embed_url[:100]!r}")
+        raise RuntimeError(f"embedUrl inatteso: {embed_url[:100]!r}")
+    return embed_url
+
+
+def _get_embed_content(anime_id, video_id) -> tuple[str, str]:
+    """The vixcloud embed page's script and URL — same shape as film._get_iframe()."""
+    from bs4 import BeautifulSoup
 
     from app.core._shared import apply_video_host
-    embed_url = apply_video_host(embed_url)
-    logger.info("Episode %s embed URL: %s", episode_id, embed_url[:80])
 
-    # Fetch the vixcloud embed page. vixcloud now serves this /embed/ HTML
-    # page behind Cloudflare, so plain requests.get returns a 403 challenge page.
-    # Use the cloudscraper session to clear the challenge. (The downstream
-    # /playlist, /storage/enc.key and CDN segment URLs are NOT Cloudflare-gated
-    # and still work with plain requests.)
-    req_embed = scraper.get(
-        embed_url,
-        headers={"Referer": f"https://{au_host}/"},
-        timeout=15,
+    embed_url = apply_video_host(_embed_url(anime_id, video_id))
+    logger.info("Anime %s video %s embed URL: %s", anime_id, video_id, embed_url[:80])
+
+    # vixcloud serves the /embed/ page behind Cloudflare, so plain requests.get
+    # gets a challenge page; the cloudscraper session clears it. (Playlist,
+    # enc.key and the segments are not gated.)
+    req_embed = _get_scraper().get(
+        embed_url, headers={"Referer": f"https://{host()}/"}, timeout=15,
     )
     req_embed.raise_for_status()
 
-    soup = BeautifulSoup(req_embed.text, "lxml")
-    body = soup.find("body")
+    body = BeautifulSoup(req_embed.text, "lxml").find("body")
     if not body:
         raise RuntimeError("Empty embed page body")
     script = body.find("script")
     if not script:
         raise RuntimeError("No script tag found in vixcloud embed page")
-
-    logger.info("Embed script (first 400 chars): %s", script.text[:400])
     return script.text, embed_url
-
-
-def get_episode_languages(episode_id) -> dict:
-    """Audio and subtitle languages available on one anime episode."""
-    from app.core._shared import _parse_content, _get_m3u8_url
-    from app.core.m3u8 import fetch_master_languages
-
-    embed_content, embed_url = _get_embed_content(episode_id)
-    json_win_video, json_win_param = _parse_content(embed_content, embed_url)
-    return fetch_master_languages(_get_m3u8_url(json_win_video, json_win_param), embed_url)
 
 
 def download_anime_episode(
@@ -366,23 +504,30 @@ def download_anime_episode(
     from app.core.m3u8 import download_m3u8
     from app.core.paths import anime_path
 
-    episode_id = episode["id"]
     episode_number = str(episode.get("number", "0"))
+    # A record that came through the browser, a schedule written before #50 or
+    # an API caller carries no videos: the episode is read again from the
+    # source, which also means the choice below is made on what is live now.
+    if not episode.get("videos"):
+        episode = find_episode(anime_id, episode_number, hint=episode.get("seq"))
+    video = pick_video(episode, audio_languages, strict=strict_audio)
+    # The stream holds one soundtrack, in the video's language. Asking the
+    # playlist for any other would only find nothing.
+    stream_audio = [video["language"]]
 
-    embed_content, embed_url = _get_embed_content(episode_id)
+    embed_content, embed_url = _get_embed_content(anime_id, video["id"])
     json_win_video, json_win_param = _parse_content(embed_content, embed_url)
 
     logger.info(
-        "Anime episode %s — video_id=%s token=%.8s...",
-        episode_number, json_win_video.get("id"), json_win_param.get("token", ""),
+        "Anime episode %s (%s) — video_id=%s token=%.8s...",
+        episode_number, video["language"], json_win_video.get("id"),
+        json_win_param.get("token", ""),
     )
 
     m3u8_url = _get_m3u8_url(json_win_video, json_win_param)
     m3u8_key = _get_m3u8_key(json_win_video, json_win_param, embed_url)
 
-    audio_track_urls = _collect_audio_tracks(
-        m3u8_url, embed_url, audio_languages, strict=strict_audio
-    )
+    audio_track_urls = _collect_audio_tracks(m3u8_url, embed_url, stream_audio, strict=strict_audio)
     subtitle_track_urls = _collect_subtitle_tracks(m3u8_url, embed_url, subtitle_languages)
 
     # A folder a person associated with this anime wins — which is how the
@@ -409,7 +554,7 @@ def download_anime_episode(
         progress_factory=progress_factory,
         referer=embed_url,
         cancel_event=cancel_event,
-        audio_languages=audio_languages,
+        audio_languages=stream_audio,
         subtitle_languages=subtitle_languages,
         audio_track_urls=audio_track_urls,
         subtitle_track_urls=subtitle_track_urls,
