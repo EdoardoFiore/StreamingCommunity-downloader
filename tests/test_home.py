@@ -32,6 +32,10 @@ class _Response:
         self.text = text
         self.status_code = status_code
 
+    @property
+    def ok(self):
+        return self.status_code < 400
+
     def raise_for_status(self):
         if self.status_code >= 400:
             raise requests.HTTPError(f"HTTP {self.status_code}")
@@ -65,21 +69,30 @@ def sc(monkeypatch):
     return state
 
 
-def _au_record(n, kind="TV"):
-    return {"id": n, "slug": f"anime-{n}", "title_eng": f"Anime {n}", "type": kind,
-            "imageurl": f"https://cdn.animeunity.test/{n}.jpg", "episodes_count": 12}
+def _au_record(n, kind="tv", languages=("jpn",)):
+    """A title as the rebuilt site sends it (#50)."""
+    return {"id": n, "slug": f"anime-{n}", "title": f"Anime {n}", "type": kind,
+            "images": {"poster": f"https://img.animeunity.test/{n}.jpg", "banner": None},
+            "variants": [{"language": lang, "episodes_count": 12} for lang in languages]}
 
 
-def _au_home(latest_rows, featured):
-    items = html.escape(json.dumps({"data": latest_rows}), quote=True)
-    animes = html.escape(json.dumps(featured), quote=True)
-    return (f'<html><body><layout-items items-json="{items}"></layout-items>'
-            f'<the-carousel animes="{animes}"></the-carousel></body></html>')
+def _au_home(**props):
+    """The front page: everything is in its Inertia payload now."""
+    return ('<html><body><div id="app" data-page="'
+            + html.escape(json.dumps({"component": "Home", "props": props}), quote=True)
+            + '"></div></body></html>')
+
+
+def _latest(*records, language="ita"):
+    """latestEpisodes rows: a video, its episode, and that episode's anime."""
+    return {"data": [{"id": 9000 + i, "language": language,
+                      "episode": {"id": 7000 + i, "number": "1", "anime": r}}
+                     for i, r in enumerate(records)]}
 
 
 @pytest.fixture
 def au(monkeypatch):
-    state = {"html": _au_home([], []), "calls": []}
+    state = {"html": _au_home(), "calls": []}
 
     class _Scraper:
         def get(self, url, **kwargs):
@@ -87,7 +100,6 @@ def au(monkeypatch):
             return _Response(state["html"])
 
     monkeypatch.setattr(animeunity, "_get_scraper", lambda: _Scraper())
-    monkeypatch.setattr(animeunity, "_csrf", None)
     return state
 
 
@@ -143,40 +155,56 @@ def test_an_empty_slider_is_not_a_shelf(sc):
 
 # ── AnimeUnity shelves ────────────────────────────────────────────────────────
 
-def test_the_anime_front_page_gives_both_lists(au):
-    au["html"] = _au_home([{"anime": _au_record(1)}], [_au_record(2), _au_record(3)])
+def test_the_anime_front_page_gives_its_lists_in_order(au):
+    au["html"] = _au_home(
+        latestEpisodes=_latest(_au_record(1)),
+        carouselAnimes=[_au_record(2), _au_record(3)],
+        topAnimes={"day": [_au_record(9)], "week": [_au_record(4)], "month": []},
+        latestAnimes=[_au_record(5)],
+        upcomingAnimes=[_au_record(6)],
+    )
 
-    result = home.shelves("animeunity", "www.animeunity.test")
+    result = home.shelves("animeunity", "animeunity.test")
 
-    assert [s["key"] for s in result] == ["latest_episodes", "featured"]
-    assert [s["title"] for s in result] == ["Ultimi episodi", "In evidenza"]
+    assert [s["key"] for s in result] == [
+        "latest_episodes", "featured", "top_week", "latest_added", "upcoming"]
+    assert [s["title"] for s in result] == [
+        "Ultimi episodi", "In evidenza", "Più visti della settimana",
+        "Aggiunti di recente", "In arrivo"]
     assert len(result[1]["items"]) == 2
+    assert result[2]["items"][0]["id"] == "4-anime-4", "the week, not the day"
 
 
 def test_the_latest_episode_list_is_deduplicated_by_anime(au):
-    """Two new episodes of the same series are two rows and one card."""
-    au["html"] = _au_home(
-        [{"anime": _au_record(1)}, {"anime": _au_record(1)}, {"anime": _au_record(2)}], [])
+    """Two new episodes of the same series — or one in two languages — are one card."""
+    au["html"] = _au_home(latestEpisodes=_latest(_au_record(1), _au_record(1), _au_record(2)))
 
-    items = home.shelves("animeunity", "www.animeunity.test")[0]["items"]
+    items = home.shelves("animeunity", "animeunity.test")[0]["items"]
 
     assert [i["id"] for i in items] == ["1-anime-1", "2-anime-2"]
 
 
 def test_an_anime_poster_is_an_absolute_url(au):
     """The other half of the dual poster shape, pinned on this path too."""
-    au["html"] = _au_home([], [_au_record(1)])
+    au["html"] = _au_home(carouselAnimes=[_au_record(1)])
 
-    item = home.shelves("animeunity", "www.animeunity.test")[0]["items"][0]
+    item = home.shelves("animeunity", "animeunity.test")[0]["items"][0]
 
-    assert item["poster"] == "https://cdn.animeunity.test/1.jpg"
-    assert item["type"] == "anime" and item["media_type"] == "TV"
+    assert item["poster"] == "https://img.animeunity.test/1.jpg"
+    assert item["type"] == "anime" and item["media_type"] == "tv"
 
 
-def test_a_front_page_with_neither_list_is_no_shelves(au):
+def test_a_front_page_with_no_lists_is_no_shelves(au):
+    au["html"] = _au_home()
+
+    assert home.shelves("animeunity", "animeunity.test") == []
+
+
+def test_a_front_page_without_a_payload_is_no_shelves_not_an_error(au):
+    """The old site, or a challenge page: the start page stays up, empty."""
     au["html"] = "<html><body>nothing here</body></html>"
 
-    assert home.shelves("animeunity", "www.animeunity.test") == []
+    assert home.shelves("animeunity", "animeunity.test") == []
 
 
 # ── The cache ─────────────────────────────────────────────────────────────────

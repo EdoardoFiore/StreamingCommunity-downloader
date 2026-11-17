@@ -4,7 +4,7 @@
 // filters, and the shelves the start page shows with the box empty.
 
 // What a title is, in the source's own word. StreamingCommunity says movie/tv;
-// AnimeUnity says Movie/TV/OVA/ONA/Special and keeps it in media_type, beside a
+// AnimeUnity says movie/tv/ova/ona/special/tv_short and keeps it in media_type, beside a
 // type that is always "anime". Looked up lower case so one table serves both.
 // One colour per kind, so a grid can be read at a glance instead of word by word.
 const KIND_BADGES = {
@@ -13,6 +13,7 @@ const KIND_BADGES = {
   ova:     {label: 'OVA',      cls: 'bg-purple-lt'},
   ona:     {label: 'ONA',      cls: 'bg-teal-lt'},
   special: {label: 'Speciale', cls: 'bg-yellow-lt'},
+  tv_short: {label: 'TV Short', cls: 'bg-teal-lt'},
   anime:   {label: 'Anime',    cls: 'bg-purple-lt'},
 };
 function kindBadge(item) {
@@ -97,7 +98,7 @@ let _dubOnly = false;
 const KIND_FILTERS = {
   streamingcommunity: [['', 'Tutti'], ['movie', 'Film'], ['tv', 'Serie TV']],
   animeunity: [['', 'Tutti'], ['movie', 'Film'], ['tv', 'Serie TV'],
-               ['ova', 'OVA'], ['ona', 'ONA'], ['special', 'Speciali']],
+               ['ova', 'OVA'], ['ona', 'ONA'], ['special', 'Speciali'], ['tv_short', 'TV Short']],
 };
 
 function renderSearchFilters() {
@@ -106,8 +107,9 @@ function renderSearchFilters() {
   const chips = (KIND_FILTERS[currentSource] || []).map(([value, label]) =>
     `<button class="source-btn${value === _kindFilter ? ' active' : ''}" ` +
     `data-action="search:kind" data-kind="${value}">${label}</button>`).join('');
-  // AnimeUnity keeps an Italian dub as a record of its own, so this is a real
-  // filter there and meaningless on the other source.
+  // AnimeUnity filters by language at the source (one title, a version per
+  // language since #50), so this is a real filter there and meaningless on
+  // the other source.
   const dub = currentSource === 'animeunity'
     ? `<button class="source-btn${_dubOnly ? ' active' : ''}" data-action="search:dub" data-on="${_dubOnly ? '0' : '1'}">` +
       `<i class="ti ti-microphone"></i>Solo doppiati IT</button>`

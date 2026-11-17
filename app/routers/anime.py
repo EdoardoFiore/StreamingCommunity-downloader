@@ -15,12 +15,29 @@ router = APIRouter(
 )
 
 
+async def _call(fn, anime_id: str, what: str):
+    try:
+        return await asyncio.to_thread(fn, anime_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("AnimeUnity %s error for %s", what, anime_id)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/{anime_id}")
+async def get_title(anime_id: str):
+    """One anime's record — plot, artwork, languages — and its related titles.
+
+    A search card already carries most of this; a pasted link or a related
+    title opened from another page has nothing else to go on.
+    """
+    return await _call(animeunity.get_title, anime_id, "title")
+
+
 @router.get("/{anime_id}/episodes")
 async def get_episodes(anime_id: str):
-    """Fetch all episodes for an anime from AnimeUnity info_api."""
-    try:
-        episodes = await asyncio.to_thread(animeunity.get_episodes, anime_id)
-    except Exception as e:
-        logger.exception("AnimeUnity episodes error for %s", anime_id)
-        raise HTTPException(status_code=502, detail=str(e))
-    return episodes
+    """Every episode of an anime, each with the languages it is published in."""
+    return await _call(animeunity.get_episodes, anime_id, "episodes")

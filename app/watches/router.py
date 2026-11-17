@@ -309,6 +309,7 @@ async def set_languages(watch_id: int, body: LanguagesBody, http_request: HttpRe
     updated = await asyncio.to_thread(
         models.set_languages, watch_id, body.audio_languages, body.subtitle_languages,
     )
+    await _reseed_or_revert(watch, updated)
     return _public(updated, http_request)
 
 
@@ -326,7 +327,29 @@ async def merge_languages(watch_id: int, http_request: HttpRequest):
         raise HTTPException(status_code=403, detail="Solo chi segue la serie per primo può cambiarne le lingue")
 
     updated = await asyncio.to_thread(models.merge_languages, watch_id)
+    await _reseed_or_revert(watch, updated)
     return _public(updated, http_request)
+
+
+async def _reseed_or_revert(previous: models.Watch, updated: models.Watch | None) -> None:
+    """Keep "from the next episode on" true for an anime whose languages changed.
+
+    See poller.reseed_after_language_change. When the source cannot be read
+    the change is undone rather than left armed without a baseline, the same
+    choice following makes.
+    """
+    if updated is None or updated.audio_languages == previous.audio_languages:
+        return
+    try:
+        await asyncio.to_thread(poller.reseed_after_language_change, updated)
+    except Exception:
+        logger.exception("Could not re-seed watch %s after a language change", previous.id)
+        await asyncio.to_thread(models.set_languages, previous.id,
+                                previous.audio_languages, previous.subtitle_languages)
+        raise HTTPException(
+            status_code=502,
+            detail="Impossibile leggere gli episodi dalla fonte: lingue non cambiate",
+        )
 
 
 class AutoApproveBody(BaseModel):
